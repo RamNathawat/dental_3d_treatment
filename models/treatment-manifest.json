@@ -1,0 +1,49 @@
+{
+  "caseId": "soumya-sarath-treatment",
+  "patientName": "Soumya Sarath",
+  "treatmentStages": [
+    {
+      "id": "stage-01",
+      "stageNumber": 1,
+      "label": "Stage 1",
+      "doctorOnly": false,
+      "upper": {
+        "filename": "Soumya Sarath Upper jaw - 01 - Model.stl",
+        "url": "/models/Soumya Sarath Upper jaw - 01 - Model.stl"
+      },
+      "lower": {
+        "filename": "Soumya Sarath Lower jaw - 01 - Model.stl",
+        "url": "/models/Soumya Sarath Lower jaw - 01 - Model.stl"
+      }
+    },
+    {
+      "id": "stage-02",
+      "stageNumber": 2,
+      "label": "Stage 2",
+      "doctorOnly": false,
+      "upper": {
+        "filename": "Soumya Sarath Upper jaw - 02 - Model.stl",
+        "url": "/models/Soumya Sarath Upper jaw - 02 - Model.stl"
+      },
+      "lower": {
+        "filename": "Soumya Sarath Lower jaw - 02 - Model.stl",
+        "url": "/models/Soumya Sarath Lower jaw - 02 - Model.stl"
+      }
+    }
+  ],
+  "templateStages": [
+    {
+      "id": "template-01",
+      "label": "Template (Doctor Reference)",
+      "doctorOnly": true,
+      "upper": {
+        "filename": "Soumya Sarath Upper jaw - 01 - Template.stl",
+        "url": "/models/Soumya Sarath Upper jaw - 01 - Template.stl"
+      },
+      "lower": {
+        "filename": "Soumya Sarath Lower jaw - 01 - Template.stl",
+        "url": "/models/Soumya Sarath Lower jaw - 01 - Template.stl"
+      }
+    }
+  ]
+}

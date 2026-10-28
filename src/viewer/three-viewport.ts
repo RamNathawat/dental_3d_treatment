@@ -1,0 +1,914 @@
+import {
+  ACESFilmicToneMapping,
+  Box3,
+  type BufferGeometry,
+  Color,
+  DirectionalLight,
+  Float32BufferAttribute,
+  FrontSide,
+  GridHelper,
+  Group,
+  HemisphereLight,
+  Mesh,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
+  PerspectiveCamera,
+  PMREMGenerator,
+  Scene,
+  type Texture,
+  Timer,
+  Vector3,
+  WebGLRenderer,
+} from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { STLLoader } from "three/addons/loaders/STLLoader.js";
+import { WELD_FRACTION, type CurvatureKind } from "../domain/curvature";
+import { separationOffsets, type Bounds } from "../domain/explode";
+import type { Matrix4Entries } from "../domain/matrix4";
+import {
+  DEFAULT_SMOOTHING,
+  clampSmoothing,
+  clampUnit,
+  type CameraView,
+  type LayerSurface,
+} from "../domain/view-settings";
+import { errorMessage } from "../support/errors";
+import {
+  DEFAULT_DIRECTION,
+  GRID_EXTENT_MM,
+  extentOf,
+  framingFor,
+  gridPlacementFor,
+  poseFor,
+  resizeFor,
+  visibleBoundsOf,
+  zoomLimitsFor,
+  type ViewSize,
+} from "./camera-framing";
+import { appearanceOf } from "./layer-appearance";
+import { layerPlacement } from "./layer-placement";
+import {
+  applySurfaceReply,
+  showOwnColour,
+  type SurfaceLayer,
+  type SurfaceMaterial,
+} from "./layer-surface";
+import { createOrbitCentreMarker } from "./orbit-centre-marker";
+import { installLongPress } from "./long-press";
+import { installOrbitDrag } from "./orbit-drag";
+import { turnAbout, turnFor } from "./orbit";
+import { pickedPoint } from "./picking";
+import {
+  createSurfacePainter,
+  replyFor,
+  type PaintRequest,
+  type SurfaceEvent,
+  type SurfacePainter,
+} from "./surface-painter";
+import { installTwoFingerScroll } from "./two-finger-scroll";
+import {
+  STATS_INTERVAL_SECONDS,
+  createStatsWindow,
+  visibleTrianglesOf,
+  type DrawnContent,
+} from "./viewport-stats";
+import type {
+  AddLayerOutcome,
+  LayerSpec,
+  ScreenPoint,
+  StandardView,
+  SurfaceProgress,
+  Viewport,
+  ViewportOptions,
+} from "./viewport";
+
+// Warm luxury alabaster — elegant clinical backdrop.
+const BACKGROUND_COLOUR = 0xf5f2eb;
+
+const GRID_DIVISIONS = 40;
+const GRID_COLOUR_LINES = 0xe2ddd2;  // subtle warm grid lines
+const GRID_COLOUR_AXIS  = 0xcbc4b6;  // slightly stronger axis
+
+
+
+/**
+ * A layer as this viewport keeps it: what it is drawn with, and where it sits.
+ *
+ * How a surface is shown on it is `layer-surface`'s business, which is what the rest of these
+ * fields are declared for.
+ */
+interface RenderedLayer extends SurfaceLayer {
+  /** The layer's own colour, kept while a curvature ramp is the thing on screen. */
+  colour: string;
+  readonly triangles: number;
+  readonly bounds: Bounds;
+  /** Distance along the occlusal axis at full separation, taken from the scan geometry. */
+  separationOffset: number;
+  /** The user's visibility setting; `isolate` overlays on top of it. */
+  visible: boolean;
+  opacity: number;
+  transform: Matrix4Entries | null;
+}
+
+/**
+ * Renders the bundle with three.js: one mesh per scan, orbit/pan/zoom input, and an
+ * environment map so the surfaces read clearly without a studio setup.
+ */
+class ThreeViewport implements Viewport {
+  private readonly renderer: WebGLRenderer;
+  private readonly scene = new Scene();
+  private readonly camera: PerspectiveCamera;
+  private readonly controls: OrbitControls;
+  private readonly grid: GridHelper;
+  private readonly roomEnvironment: RoomEnvironment;
+  private readonly environment: Texture;
+  private readonly content = new Group();
+  private readonly layers = new Map<string, RenderedLayer>();
+  private readonly resizeObserver: ResizeObserver;
+  private readonly loader = new STLLoader();
+  private readonly orbitMarker = createOrbitCentreMarker();
+  private readonly timer = new Timer();
+  private readonly options: ViewportOptions;
+  private readonly painter: SurfacePainter = createSurfacePainter();
+  private readonly stats = createStatsWindow(STATS_INTERVAL_SECONDS);
+
+  private isolatedId: string | null = null;
+  private separationFactor = 0;
+  private lastSize: ViewSize | null = null;
+  /**
+   * The point the camera turns about, which the user sets and `OrbitControls` is never told about.
+   *
+   * Kept apart from what the camera looks at on purpose: setting it must move nothing, and the way
+   * to do that is to leave the camera — and so what it looks at — exactly where it was.
+   */
+  private readonly orbitCentre = new Vector3();
+
+  constructor(canvas: HTMLCanvasElement, options: ViewportOptions = {}) {
+    this.options = options;
+    this.renderer = new WebGLRenderer({ canvas, antialias: true });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.toneMapping = ACESFilmicToneMapping;
+
+    this.camera = new PerspectiveCamera(45, 1, 0.1, 10_000);
+    this.camera.up.set(0, 0, 1);
+    this.camera.position.copy(DEFAULT_DIRECTION).multiplyScalar(200);
+
+    this.scene.background = new Color(BACKGROUND_COLOUR);
+    this.scene.add(this.content);
+    // In the scene rather than in the content: it marks the camera's pivot, so framing the model and
+    // pressing on it must both leave it out of the picture.
+    this.scene.add(this.orbitMarker.object);
+    this.addLights();
+
+    this.roomEnvironment = new RoomEnvironment();
+    this.environment = new PMREMGenerator(this.renderer).fromScene(
+      this.roomEnvironment,
+      0.04,
+    ).texture;
+    this.scene.environment = this.environment;
+
+    this.grid = new GridHelper(
+      GRID_EXTENT_MM,
+      GRID_DIVISIONS,
+      GRID_COLOUR_AXIS,
+      GRID_COLOUR_LINES,
+    );
+    this.grid.rotation.x = Math.PI / 2; // the helper is built in XZ; scans are XY
+    this.scene.add(this.grid);
+
+    this.controls = new OrbitControls(this.camera, canvas);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.08;
+    this.controls.screenSpacePanning = true;
+    this.controls.zoomToCursor = true;
+    // Turning is left to `orbit.ts`: `OrbitControls` turns about the point it looks at, and this
+    // viewer turns about the point the user set, wherever that is. Panning and zooming stay here.
+    this.controls.enableRotate = false;
+    // Mouse: drag orbits, wheel zooms, right-drag pans.
+    // Touch: one finger orbits and nothing else, so a drag never scrolls as well; two fingers
+    // scroll the page. OrbitControls would otherwise set `touch-action: none` and claim both.
+    this.controls.addEventListener("end", this.handleCameraSettled);
+    canvas.style.touchAction = "none";
+    installTwoFingerScroll(canvas, {
+      setPanning: (enabled) => {
+        this.controls.enablePan = enabled;
+      },
+    });
+    installOrbitDrag(canvas, {
+      onTurn: (drag) => {
+        this.turnCamera(drag);
+      },
+      onEnd: () => {
+        this.handleCameraSettled();
+      },
+    });
+    // A held finger asks for a new orbit centre, which is what a touch screen has instead of the
+    // right-drag that moves one around with a mouse.
+    installLongPress(canvas, {
+      onLongPress: (point) => {
+        this.setOrbitCentreAt(point);
+      },
+    });
+
+    // The timer is deliberately not connected to the Page Visibility API: nothing here is
+    // animated against wall-clock time, and that API reports a zero delta whenever the tab
+    // is in the background, which would stall the readout instead of just slowing it.
+    this.resizeObserver = new ResizeObserver(this.handleResize);
+    this.resizeObserver.observe(canvas);
+    this.handleResize();
+
+    // Curvature is measured off the main thread; what comes back is turned into colours here.
+    this.painter.onEvent(this.handleSurface);
+
+    this.renderer.setAnimationLoop(this.render);
+  }
+
+  addLayer(spec: LayerSpec): AddLayerOutcome {
+    let layer: RenderedLayer;
+    try {
+      layer = this.createLayer(spec);
+    } catch (error) {
+      return { ok: false, reason: errorMessage(error) };
+    }
+
+    this.layers.set(layer.id, layer);
+    this.content.add(layer.mesh);
+    this.refreshSeparation();
+    return { ok: true };
+  }
+
+  private readonly geometryCache = new Map<ArrayBuffer, BufferGeometry>();
+
+  private createLayer(spec: LayerSpec): RenderedLayer {
+    let geometry = this.geometryCache.get(spec.stl);
+    if (!geometry) {
+      geometry = this.loader.parse(spec.stl);
+      // Scanner exports often carry unusable facet normals, so shading is derived from
+      // the triangles themselves.
+      geometry.computeVertexNormals();
+      geometry.computeBoundingBox();
+      this.geometryCache.set(spec.stl, geometry);
+    }
+
+    // Always (re)compute anatomical colours so a change in the colour algorithm
+    // is picked up without having to clear the geometry cache.
+    if (spec.colour === "anatomical") {
+      geometry.deleteAttribute("color");
+      computeAnatomicalColors(geometry, spec.label);
+    }
+
+    const isAnatomical = spec.colour === "anatomical";
+    const baseColor = isAnatomical ? "#ffffff" : spec.colour;
+
+    const material = new MeshStandardMaterial({
+      color: new Color(baseColor),
+      roughness: 0.22,   // lower = more sheen, closer to Veer's glossy gum
+      metalness: 0.04,
+      vertexColors: isAnatomical && Boolean(geometry.getAttribute("color")),
+      side: FrontSide,
+    });
+
+    // White on its own, because the ramp that arrives in the vertex colours is the reading.
+    const measuredMaterial = new MeshBasicMaterial({
+      vertexColors: true,
+      // The ramp was chosen by what it looks like on a screen, and a tone curve would print it as
+      // something else again.
+      toneMapped: false,
+      side: FrontSide,
+    });
+
+    const mesh: Mesh<BufferGeometry, SurfaceMaterial> = new Mesh(
+      geometry,
+      material,
+    );
+    mesh.name = spec.label;
+    // Placement is composed by hand, so three must not overwrite it each frame.
+    mesh.matrixAutoUpdate = false;
+
+    return {
+      id: spec.id,
+      label: spec.label,
+      colour: spec.colour,
+      mesh,
+      geometry,
+      material,
+      measuredMaterial,
+      triangles: triangleCountOf(geometry),
+      bounds: boundsOf(geometry),
+      separationOffset: 0,
+      visible: true,
+      opacity: 1,
+      transform: null,
+      surface: "colour",
+      smoothing: DEFAULT_SMOOTHING,
+      measured: false,
+    };
+  }
+
+  clearLayers(): void {
+    for (const layer of this.layers.values()) {
+      this.content.remove(layer.mesh);
+      let isCached = false;
+      for (const cached of this.geometryCache.values()) {
+        if (cached === layer.geometry) {
+          isCached = true;
+          break;
+        }
+      }
+      if (!isCached) {
+        layer.geometry.dispose();
+      }
+      layer.material.dispose();
+      layer.measuredMaterial.dispose();
+    }
+    this.layers.clear();
+    this.isolatedId = null;
+
+    // Whatever the thread was measuring was measured from meshes that no longer exist, and a new
+    // bundle's layers can reuse the same ids, so its work is stopped rather than inherited.
+    this.painter.discard();
+  }
+
+  removeLayer(id: string): void {
+    const layer = this.layers.get(id);
+    if (!layer) return;
+    this.content.remove(layer.mesh);
+    let isCached = false;
+    for (const cached of this.geometryCache.values()) {
+      if (cached === layer.geometry) {
+        isCached = true;
+        break;
+      }
+    }
+    if (!isCached) {
+      layer.geometry.dispose();
+    }
+    layer.material.dispose();
+    layer.measuredMaterial.dispose();
+    this.layers.delete(id);
+    if (this.isolatedId === id) this.isolatedId = null;
+  }
+
+  setLayerVisible(id: string, visible: boolean): void {
+    const layer = this.layerFor(id);
+    layer.visible = visible;
+    this.applyLayerState(layer);
+  }
+
+  setLayerOpacity(id: string, opacity: number): void {
+    const layer = this.layerFor(id);
+    layer.opacity = clampUnit(opacity);
+    this.applyLayerState(layer);
+  }
+
+  setLayerColour(id: string, colour: string): void {
+    const layer = this.layerFor(id);
+    layer.colour = colour;
+    if (colour === "anatomical") {
+      layer.material.vertexColors = Boolean(layer.geometry.getAttribute("color"));
+      layer.material.color.set("#ffffff");
+    } else {
+      layer.material.vertexColors = false;
+      layer.material.color.set(colour);
+    }
+    layer.material.needsUpdate = true;
+  }
+
+  setLayerTransform(id: string, transform: Matrix4Entries | null): void {
+    const layer = this.layerFor(id);
+    layer.transform = transform;
+    this.applyPlacement(layer);
+  }
+
+  setLayerSurface(id: string, surface: LayerSurface): void {
+    const layer = this.layerFor(id);
+    if (layer.surface === surface) return;
+
+    layer.surface = surface;
+    this.refreshSurface(layer);
+  }
+
+  setLayerSmoothing(id: string, smoothing: number): void {
+    const layer = this.layerFor(id);
+    const passes = clampSmoothing(smoothing);
+    if (layer.smoothing === passes) return;
+
+    layer.smoothing = passes;
+    this.refreshSurface(layer);
+  }
+
+  /**
+   * Spreads the layers apart, and pulls the camera back with them when they open.
+   *
+   * Being asked for the separation the layers already have is not a request to reframe: every
+   * settings change comes through here, so reframing on each one would throw away a zoom or a pan
+   * as soon as the user touched anything — switching the surface, moving an opacity slider,
+   * soloing a layer.
+   */
+  setSeparation(factor: number): void {
+    const wanted = clampUnit(factor);
+    if (wanted === this.separationFactor) return;
+
+    this.separationFactor = wanted;
+    for (const layer of this.layers.values()) {
+      this.applyPlacement(layer);
+    }
+    this.pullBackToFit();
+  }
+
+  isolate(id: string | null): void {
+    this.isolatedId = id;
+    for (const layer of this.layers.values()) {
+      this.applyLayerState(layer);
+    }
+  }
+
+  fitAll(): void {
+    const box = this.contentBounds();
+    if (box === null) return;
+
+    this.frame(box, this.currentDirection());
+    this.syncGrid(box);
+  }
+
+  fitLayer(id: string): void {
+    this.frame(
+      new Box3().setFromObject(this.layerFor(id).mesh),
+      this.currentDirection(),
+    );
+  }
+
+  setView(view: StandardView): void {
+    const pose = poseFor(view);
+    this.camera.up.copy(pose.up);
+
+    const box = this.contentBounds();
+    if (box !== null) this.frame(box, pose.direction);
+  }
+
+  setGridVisible(visible: boolean): void {
+    this.grid.visible = visible;
+  }
+
+  setOrbitCentreAt(point: ScreenPoint): boolean {
+    const canvas = this.renderer.domElement;
+    const { left, top, width, height } = canvas.getBoundingClientRect();
+
+    const picked = pickedPoint({
+      camera: this.camera,
+      surfaces: [...this.layers.values()].map((layer) => layer.mesh),
+      point: { x: point.x - left, y: point.y - top },
+      size: { width, height },
+    });
+    if (picked === null) return false;
+
+    // The whole of it: the centre moves, and nothing else does. It is what every turn from here on
+    // goes round, which is why the camera — and so the picture — is left exactly as it is.
+    this.orbitCentre.copy(picked);
+    this.markOrbitCentre(picked);
+    this.handleCameraSettled();
+    this.options.onOrbitCentre?.();
+    return true;
+  }
+
+  getCamera(): CameraView {
+    const { x, y, z } = this.camera.position;
+    const { x: tx, y: ty, z: tz } = this.controls.target;
+    const { x: cx, y: cy, z: cz } = this.orbitCentre;
+
+    return {
+      position: [x, y, z],
+      target: [tx, ty, tz],
+      orbitCentre: [cx, cy, cz],
+    };
+  }
+
+  setCamera(view: CameraView): void {
+    this.camera.position.set(...view.position);
+    this.controls.target.set(...view.target);
+    // A view stored before the centre was the user's to move has none to come back to, and what the
+    // camera looks at is the best the middle of the model can be recovered from.
+    this.orbitCentre.set(...(view.orbitCentre ?? view.target));
+
+    const box = this.contentBounds();
+    if (box !== null) this.limitZoom(box);
+    this.controls.update();
+  }
+
+  dispose(): void {
+    this.renderer.setAnimationLoop(null);
+    this.timer.dispose();
+    this.resizeObserver.disconnect();
+    this.controls.removeEventListener("end", this.handleCameraSettled);
+    this.clearLayers();
+    this.painter.dispose();
+    this.orbitMarker.dispose();
+    this.grid.geometry.dispose();
+    this.grid.material.dispose();
+    this.roomEnvironment.dispose();
+    this.environment.dispose();
+    this.controls.dispose();
+    this.renderer.dispose();
+    for (const geom of this.geometryCache.values()) {
+      geom.dispose();
+    }
+    this.geometryCache.clear();
+  }
+
+  private addLights(): void {
+    // Subtle ambient hemisphere light so crevices and occlusal anatomy maintain depth.
+    this.scene.add(new HemisphereLight(0xfff8f0, 0xd0c9be, 0.95));
+
+    // Primary key: strong frontal studio light creating specular highlights and crisp contrast.
+    const key = new DirectionalLight(0xfffdf7, 1.9);
+    key.position.set(50, -90, 100);
+    this.scene.add(key);
+
+    // Soft fill from side-below lifts lower jaw details.
+    const fill = new DirectionalLight(0xf7f0e6, 0.7);
+    fill.position.set(-80, -60, 40);
+    this.scene.add(fill);
+
+    // Rim / contour accent from behind to sharply separate model silhouette from canvas background.
+    const rim = new DirectionalLight(0xffffff, 0.9);
+    rim.position.set(0, 100, 60);
+    this.scene.add(rim);
+  }
+
+  private layerFor(id: string): RenderedLayer {
+    const layer = this.layers.get(id);
+    if (layer === undefined)
+      throw new Error(`No layer with id "${id}" has been added.`);
+    return layer;
+  }
+
+  /**
+   * Recomputes how far each layer travels, because separation depends on the whole set: a
+   * layer added later changes what "the middle" means for the ones already there.
+   */
+  private refreshSeparation(): void {
+    const offsets = separationOffsets(
+      [...this.layers.values()].map((layer) => ({
+        id: layer.id,
+        bounds: layer.bounds,
+      })),
+    );
+
+    for (const layer of this.layers.values()) {
+      layer.separationOffset = offsets.get(layer.id) ?? 0;
+      this.applyPlacement(layer);
+    }
+  }
+
+  private applyPlacement(layer: RenderedLayer): void {
+    layer.mesh.matrix.copy(
+      layerPlacement(
+        layer.transform,
+        layer.separationOffset * this.separationFactor,
+      ),
+    );
+    layer.mesh.matrixWorldNeedsUpdate = true;
+  }
+
+  /** Folds the user's settings and any isolated layer into what the renderer sees. */
+  private applyLayerState(layer: RenderedLayer): void {
+    const look = appearanceOf(layer, this.isolatedId);
+    layer.mesh.visible = look.visible;
+
+    for (const material of [layer.material, layer.measuredMaterial]) {
+      material.opacity = layer.opacity;
+      material.transparent = look.transparent;
+      material.depthWrite = look.depthWrite;
+    }
+  }
+
+  /**
+   * Asks for the layer's corners to be coloured by its surface, or puts its own colour back.
+   *
+   * The geometry goes to the thread the first time and is kept there, so changing the scalar — and
+   * switching back to plain colour — costs no measuring at all. The measurement is deliberately
+   * not thrown away when colour is shown again: a jaw is big enough that letting it go would turn
+   * every toggle into a wait.
+   */
+  private refreshSurface(layer: RenderedLayer): void {
+    if (layer.surface === "colour") return showOwnColour(layer);
+
+    this.paint(layer, layer.surface);
+  }
+
+  private paint(layer: RenderedLayer, surface: CurvatureKind): void {
+    const first = !layer.measured;
+    layer.measured = true;
+    this.painter.paint({
+      id: layer.id,
+      surface,
+      smoothing: layer.smoothing,
+      ...this.geometryFor(layer, first),
+    });
+  }
+
+  /** The geometry, on the one request that hands it over, and nothing on the ones that do not. */
+  private geometryFor(
+    layer: RenderedLayer,
+    first: boolean,
+  ): Pick<PaintRequest, "geometry"> {
+    if (!first) return {};
+
+    return {
+      geometry: {
+        positions: cornersOf(layer.geometry),
+        tolerance: toleranceOf(layer.bounds),
+      },
+    };
+  }
+
+  /** The box around what is on screen, which is what the camera is framed on. */
+  private contentBounds(): Box3 | null {
+    return visibleBoundsOf(this.content.children);
+  }
+
+  /** Flashes the mark that says where the orbit centre went, sized to what is on screen. */
+  private markOrbitCentre(centre: Vector3): void {
+    const bounds = this.contentBounds();
+    if (bounds !== null) this.orbitMarker.flash(centre, extentOf(bounds));
+  }
+
+  /** Turns the camera about the orbit centre, as the pointer drags. */
+  private turnCamera(drag: { readonly x: number; readonly y: number }): void {
+    // How far in front of the camera the point it looks at sits, which is `OrbitControls`' business
+    // and has to survive the turn: the turn is about the orbit centre, not about that point.
+    const reach = this.camera.position.distanceTo(this.controls.target);
+
+    turnAbout(
+      this.camera,
+      this.orbitCentre,
+      turnFor(drag, this.renderer.domElement.clientHeight),
+    );
+    this.controls.target
+      .copy(this.camera.position)
+      .addScaledVector(this.viewDirection(), reach);
+    this.controls.update();
+  }
+
+  /** The way the camera looks, which is the line the point it looks at has to sit on. */
+  private viewDirection(): Vector3 {
+    return this.camera.getWorldDirection(new Vector3());
+  }
+
+  /**
+   * Pulls back to keep all of the assembly in view, without moving the grid.
+   *
+   * Opening it makes the assembly taller, so this is what a separation change ends with.
+   */
+  private pullBackToFit(): void {
+    const box = this.contentBounds();
+    if (box === null) return;
+
+    this.frame(box, this.currentDirection());
+  }
+
+  /**
+   * Frames `box` from `direction`.
+   *
+   * The camera ends up looking at the middle of the box, which is also what puts the orbit centre
+   * back where it started — the whole of what Re-center promises about it.
+   */
+  private frame(box: Box3, direction: Vector3): void {
+    const framing = framingFor({
+      bounds: box,
+      fov: this.camera.fov,
+      aspect: this.camera.aspect,
+      direction,
+    });
+
+    this.camera.position.copy(framing.position);
+    this.camera.near = framing.near;
+    this.camera.far = framing.far;
+    this.camera.updateProjectionMatrix();
+
+    this.controls.target.copy(framing.target);
+    this.controls.minDistance = framing.minDistance;
+    this.controls.maxDistance = framing.maxDistance;
+    // Framing is what puts the orbit centre back in the middle of the model, which is what Re-center
+    // promises: the camera turns about what it was just framed on. That is a change to the view a
+    // session remembers like any other.
+    this.orbitCentre.copy(framing.target);
+    this.controls.update();
+    this.handleCameraSettled();
+  }
+
+  private limitZoom(box: Box3): void {
+    const limits = zoomLimitsFor(box);
+    this.controls.minDistance = limits.minDistance;
+    this.controls.maxDistance = limits.maxDistance;
+  }
+
+  private syncGrid(box: Box3): void {
+    const placement = gridPlacementFor(box);
+    this.grid.scale.setScalar(placement.scale);
+    this.grid.position.copy(placement.position);
+  }
+
+  private currentDirection(): Vector3 {
+    const direction = this.camera.position.clone().sub(this.controls.target);
+    return direction.lengthSq() === 0
+      ? DEFAULT_DIRECTION.clone()
+      : direction.normalize();
+  }
+
+  /** The way the camera looks, which is the line an orbit centre has to sit along. */
+
+  private readonly handleResize = (): void => {
+    const size = resizeFor({
+      width: this.renderer.domElement.clientWidth,
+      height: this.renderer.domElement.clientHeight,
+      previous: this.lastSize,
+    });
+    if (size === null) return;
+
+    this.lastSize = size;
+    this.renderer.setSize(size.width, size.height, false);
+    this.camera.aspect = size.aspect;
+    this.camera.updateProjectionMatrix();
+  };
+
+  private readonly handleCameraSettled = (): void => {
+    this.options.onCameraSettled?.();
+  };
+
+  /**
+   * Takes the colours the thread measured, or gives up on them.
+   *
+   * A reply can arrive for a scalar the user has already moved on from; what to do about that is
+   * `replyFor`'s decision, and all that is left here is telling the renderer about it.
+   */
+  private readonly handleSurface = (event: SurfaceEvent): void => {
+    const layer = this.layers.get(event.id);
+    if (layer === undefined) return;
+
+    applySurfaceReply(layer, replyFor(event, layer), this.tell);
+  };
+
+  /** Says how a layer's surfacing is going, when there is anyone to say it to. */
+  private readonly tell = (progress: SurfaceProgress): void => {
+    this.options.onSurface?.(progress);
+  };
+
+  private readonly render = (timestamp: number): void => {
+    this.timer.update(timestamp);
+    const elapsed = this.timer.getDelta();
+    this.controls.update();
+    this.renderer.render(this.scene, this.camera);
+    this.reportStats(elapsed);
+  };
+
+  private reportStats(elapsed: number): void {
+    const stats = this.stats.add(elapsed, () => this.drawnContent());
+    if (stats !== null) this.options.onStats?.(stats);
+  }
+
+  /** What a reading says about the work, read only on the frames a reading is due. */
+  private drawnContent(): DrawnContent {
+    return {
+      visibleTriangles: visibleTrianglesOf(this.layers.values()),
+      drawCalls: this.renderer.info.render.calls,
+    };
+  }
+}
+
+export function createViewport(
+  canvas: HTMLCanvasElement,
+  options: ViewportOptions = {},
+): Viewport {
+  return new ThreeViewport(canvas, options);
+}
+
+function triangleCountOf(geometry: BufferGeometry): number {
+  const positions = geometry.attributes["position"];
+  return positions === undefined ? 0 : Math.floor(positions.count / 3);
+}
+
+function boundsOf(geometry: BufferGeometry): Bounds {
+  const box = geometry.boundingBox;
+  if (box === null) return { min: [0, 0, 0], max: [0, 0, 0] };
+
+  return {
+    min: [box.min.x, box.min.y, box.min.z],
+    max: [box.max.x, box.max.y, box.max.z],
+  };
+}
+
+/**
+ * The mesh's corners as a flat array, which is what the curvature fit welds into a surface.
+ *
+ * Read through the attribute rather than off its array, so nothing has to be assumed about how
+ * three is holding them — and copied, because the thread takes the buffer away with it.
+ */
+function cornersOf(geometry: BufferGeometry): Float32Array {
+  const attribute = geometry.getAttribute("position");
+  const corners = new Float32Array(attribute.count * 3);
+
+  for (let corner = 0; corner < attribute.count; corner += 1) {
+    corners[corner * 3] = attribute.getX(corner);
+    corners[corner * 3 + 1] = attribute.getY(corner);
+    corners[corner * 3 + 2] = attribute.getZ(corner);
+  }
+  return corners;
+}
+
+/** How far apart two corners can be and still have been the same point to the scanner. */
+function toleranceOf(bounds: Bounds): number {
+  const span = Math.hypot(
+    bounds.max[0] - bounds.min[0],
+    bounds.max[1] - bounds.min[1],
+    bounds.max[2] - bounds.min[2],
+  );
+  return span * WELD_FRACTION;
+}
+
+/**
+ * Computes realistic anatomical vertex colors for dental models:
+ * Enamel tooth ivory on the crowns and healthy gingival mucosa pink on the gums.
+ */
+/**
+ * Paints each vertex with an anatomically correct colour based on its vertical
+ * (occlusal-to-gingival) position in the scan.
+ *
+ * Axis conventions in this viewer (camera.up = Z, grid lies in XY):
+ *   X = left / right across the arch
+ *   Y = labial-to-lingual depth (front-to-back)
+ *   Z = HEIGHT — the axis we must use for crown vs gum detection
+ *
+ * Upper arch in scene space:
+ *   Z high → gingival base (attached to maxilla above the bite plane)
+ *   Z low  → crown tips (pointing downward toward the mandible)
+ *
+ * Lower arch in scene space:
+ *   Z low  → gingival base (attached to mandible below the bite plane)
+ *   Z high → crown tips (pointing upward toward the maxilla)
+ */
+function computeAnatomicalColors(geometry: BufferGeometry, label: string): void {
+  const posAttr = geometry.getAttribute("position");
+  if (!posAttr) return;
+
+  const count = posAttr.count;
+  const colors = new Float32Array(count * 3);
+  const isUpper = !label.toLowerCase().includes("lower");
+
+  // ── Palette (Veer 3d.viewer.dental inspired) ───────────────────────────────
+  // Enamel: crisp warm-white so crowns are clearly distinct from the gum.
+  const cR = 0.975, cG = 0.965, cB = 0.945;
+  // Gingiva: vivid hot-pink / coral-magenta matching the Veer reference (#d0415e).
+  const gR = 0.816, gG = 0.255, gB = 0.369;
+
+  // ── Dynamic Z-range detection ──────────────────────────────────────────────
+  let zMin = Infinity, zMax = -Infinity;
+  for (let i = 0; i < count; i++) {
+    const z = posAttr.getZ(i);
+    if (z < zMin) zMin = z;
+    if (z > zMax) zMax = z;
+  }
+  const zRange = zMax - zMin;
+  if (zRange === 0) return; // degenerate / flat geometry — nothing to paint
+
+  // Crown zone: outermost 45 % in the bite-plane direction.
+  // Gum zone:   innermost 45 % (away from the bite plane).
+  // Blend zone: the 30 % in between.
+  const CROWN_FRACTION = 0.45;
+  const BLEND_FRACTION = 0.30;
+
+  for (let i = 0; i < count; i++) {
+    const z = posAttr.getZ(i);
+    let t: number; // 0 = enamel/crown, 1 = gingiva/gum
+
+    if (isUpper) {
+      // Crown tips are at LOW Z (pointing down toward mandible).
+      // Gingival base is at HIGH Z (toward the maxillary ridge).
+      const crownEdge  = zMin + zRange * CROWN_FRACTION;
+      const gingivaEdge = zMin + zRange * (CROWN_FRACTION + BLEND_FRACTION);
+      // t rises as z climbs from crown edge toward gingiva edge.
+      t = (z - crownEdge) / (gingivaEdge - crownEdge);
+    } else {
+      // Crown tips are at HIGH Z (pointing up toward maxilla).
+      // Gingival base is at LOW Z (toward the mandibular ridge).
+      const crownEdge   = zMax - zRange * CROWN_FRACTION;
+      const gingivaEdge = zMax - zRange * (CROWN_FRACTION + BLEND_FRACTION);
+      // t rises as z falls from crown edge toward gingiva edge.
+      t = (crownEdge - z) / (crownEdge - gingivaEdge);
+    }
+
+    t = Math.max(0, Math.min(1, t));
+
+    // Double smoothstep gives a sharp enamel core that dissolves cleanly
+    // into the vivid gingival pink — closely matching the Veer aesthetic.
+    const s  = t * t * (3 - 2 * t);
+    const s2 = s * s * (3 - 2 * s);
+
+    colors[i * 3 + 0] = cR * (1 - s2) + gR * s2;
+    colors[i * 3 + 1] = cG * (1 - s2) + gG * s2;
+    colors[i * 3 + 2] = cB * (1 - s2) + gB * s2;
+  }
+
+  geometry.setAttribute("color", new Float32BufferAttribute(colors, 3));
+}
