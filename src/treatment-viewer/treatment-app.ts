@@ -29,6 +29,11 @@ import type {
 import { pairTreatmentFiles } from "./stage-manifest";
 import { loadStageModels, prefetchStageModels } from "./model-loader";
 import { applyBiteContacts } from "./bite-contacts";
+import {
+  identifyToothAtPoint,
+  computeToothCentroids,
+  computeToothDisplacements,
+} from "./tooth-data";
 
 // ─── Layer IDs ───────────────────────────────────────────────────────────────
 
@@ -114,7 +119,7 @@ export function createTreatmentApp(
   options: TreatmentAppOptions = {},
 ): TreatmentAppHandle {
   const makeViewport = options.createViewport ?? createViewport;
-  const autoplayInterval = options.autoplayIntervalMs ?? 2000;
+  const autoplayInterval = options.autoplayIntervalMs ?? 1400;
   const transitionDuration = options.transitionDurationMs ?? 350;
 
   const state: AppState = {
@@ -144,14 +149,81 @@ export function createTreatmentApp(
   let transitionAnimId: number | null = null;
   let layerCounter = 0;
 
+  /**
+   * Per-tooth centroids of the initial Stage 1 arch geometries.
+   * Key is FDI tooth number (e.g. 11..18, 21..28, 31..38, 41..48).
+   * Values are [x, y, z] in mm.
+   */
+  let stage1UpperCentroids: Record<number, [number, number, number]> | null = null;
+  let stage1LowerCentroids: Record<number, [number, number, number]> | null = null;
+
+  /**
+   * Displacements (in mm) for each tooth between Stage 1 and the current stage.
+   * On Stage 1, all displacements are 0.00 mm.
+   */
+  let upperToothDisplacements: Record<number, number> | null = null;
+  let lowerToothDisplacements: Record<number, number> | null = null;
+
   // ── DOM ──────────────────────────────────────────────────────────────────
 
   const canvas = document.createElement("canvas");
   canvas.className = "tv-canvas";
 
   const viewport: Viewport = makeViewport(canvas, {
+    transparentBackground: true,
     onStats: (stats) => {
       hudEl.textContent = `${(stats.visibleTriangles / 1_000_000).toFixed(1)}M tri · ${stats.fps} fps`;
+    },
+    onToothHover: (hit) => {
+      if (!hit) {
+        toothTooltipEl.hidden = true;
+        return;
+      }
+      const isUpper = hit.layerId.toLowerCase().includes("upper");
+      const geom = viewport.getLayerGeometry?.(hit.layerId);
+      let bounds: { minX: number; maxX: number; minZ: number; maxZ: number } | undefined;
+      if (geom) {
+        geom.computeBoundingBox();
+        const b = geom.boundingBox;
+        if (b) {
+          bounds = { minX: b.min.x, maxX: b.max.x, minZ: b.min.z, maxZ: b.max.z };
+        }
+      }
+      const info = identifyToothAtPoint(hit.hitPoint, isUpper, bounds);
+
+      // Movement delta: displacement specific to this tooth since Stage 1
+      let deltaText = "0.00 mm";
+      if (state.currentIndex > 0) {
+        const displacements = isUpper ? upperToothDisplacements : lowerToothDisplacements;
+        const d = displacements?.[info.fdi];
+        if (d !== undefined) {
+          deltaText = `${d.toFixed(2)} mm`;
+        }
+      }
+
+      // Populate tooltip content
+      tooltipBadgeEl.textContent = info.badge;
+      tooltipNotationEl.textContent = info.notation;
+      tooltipQuadrantEl.textContent = info.quadrantLabel;
+      tooltipNameEl.textContent = info.fullName;
+      tooltipDeltaEl.textContent = deltaText;
+
+      // Position tooltip centered above the cursor
+      const stageRect = stageEl.getBoundingClientRect();
+      const canvasRect = canvas.getBoundingClientRect();
+      const absX = canvasRect.left - stageRect.left + hit.canvasX;
+      const absY = canvasRect.top  - stageRect.top  + hit.canvasY;
+      const ttW = 240;
+      const ttH = 96;
+      let left = absX - ttW / 2;
+      let top  = absY - ttH - 14; // caret points down directly towards tooth
+      if (left < 10) left = 10;
+      if (left + ttW > stageRect.width - 10) left = stageRect.width - ttW - 10;
+      if (top < 10) top = absY + 18; // if near top edge, position below cursor
+
+      toothTooltipEl.style.left = `${left}px`;
+      toothTooltipEl.style.top  = `${top}px`;
+      toothTooltipEl.hidden = false;
     },
   });
 
@@ -198,13 +270,18 @@ export function createTreatmentApp(
     "tv-btn--toggle tv-btn--active tv-sr-only",
   );
 
+  // Alignment Graph Paper Grid Overlay (Screen-space millimeter reference grid with clinical axes)
+  const graphGridEl = div("tv-graph-grid");
+  graphGridEl.hidden = true;
+
   // Quick tools in top bar
   let isGridVisible = false;
   const gridBtn = makeBtn(
     "# Grid",
     () => {
       isGridVisible = !isGridVisible;
-      viewport.setGridVisible(isGridVisible);
+      graphGridEl.hidden = !isGridVisible;
+      viewport.setGridVisible(false);
       gridBtn.classList.toggle("tv-btn--active", isGridVisible);
     },
     "tv-btn--tool",
@@ -491,9 +568,44 @@ export function createTreatmentApp(
     sidebarListEl,
   ]);
 
+  // Tooth hover tooltip
+  const tooltipBadgeEl    = span("tv-tooth-tooltip__badge", "#25");
+  const tooltipNotationEl = span("tv-tooth-tooltip__notation", "UL5");
+  const tooltipQuadrantEl = span("tv-tooth-tooltip__quadrant", "Upper Left (Q2)");
+  const tooltipNameEl     = div("tv-tooth-tooltip__name", ["Upper Left Second Premolar"]);
+  const tooltipDeltaEl    = span("tv-tooth-tooltip__delta", "0.00 mm");
+
+  const pulseSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  pulseSvg.setAttribute("class", "tv-tooth-tooltip__pulse");
+  pulseSvg.setAttribute("viewBox", "0 0 24 24");
+  pulseSvg.setAttribute("fill", "none");
+  pulseSvg.setAttribute("stroke", "currentColor");
+  pulseSvg.setAttribute("stroke-width", "2.2");
+  pulseSvg.setAttribute("stroke-linecap", "round");
+  pulseSvg.setAttribute("stroke-linejoin", "round");
+  const pulsePath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  pulsePath.setAttribute("d", "M22 12h-4l-3 9L9 3l-3 9H2");
+  pulseSvg.appendChild(pulsePath);
+
+  const toothTooltipEl = div("tv-tooth-tooltip", [
+    div("tv-tooth-tooltip__header", [
+      tooltipBadgeEl,
+      tooltipNotationEl,
+      tooltipQuadrantEl,
+    ]),
+    tooltipNameEl,
+    div("tv-tooth-tooltip__movement", [
+      pulseSvg,
+      span("tv-tooth-tooltip__movement-label", "Moved since stage 1"),
+      tooltipDeltaEl,
+    ]),
+  ]);
+  toothTooltipEl.hidden = true;
+
   // Stage area (canvas + overlays)
   const stageEl = div("tv-stage", [
     canvas,
+    graphGridEl,
     div("tv-stage__top-bar", [
       div("tv-stage__top-left", [toggleSidebarBtn]),
       div("tv-stage__top-center", [archPillEl]),
@@ -508,6 +620,7 @@ export function createTreatmentApp(
     hudEl,
     ambiguityBannerEl,
     statusEl,
+    toothTooltipEl,
   ]);
 
   // App shell with clean unbranded header, sidebar, and stage
@@ -656,6 +769,8 @@ export function createTreatmentApp(
 
     if (state.currentIndex >= count - 1) {
       void navigate(0);
+    } else {
+      void navigate(state.currentIndex + 1);
     }
 
     playTimer = window.setInterval(() => {
@@ -794,6 +909,26 @@ export function createTreatmentApp(
         viewport.setView("top");
         viewport.fitAll();
       }
+
+      // Capture Stage 1 centroids or compute per-tooth displacements for subsequent stages
+      const ug = viewport.getLayerGeometry?.(activeUpperId);
+      const lg = viewport.getLayerGeometry?.(activeLowerId);
+      if (displayProgressionIndex === 0) {
+        if (ug) stage1UpperCentroids = computeToothCentroids(ug, true);
+        if (lg) stage1LowerCentroids = computeToothCentroids(lg, false);
+        upperToothDisplacements = {};
+        lowerToothDisplacements = {};
+      } else {
+        if (ug && stage1UpperCentroids) {
+          const currUpper = computeToothCentroids(ug, true);
+          upperToothDisplacements = computeToothDisplacements(stage1UpperCentroids, currUpper);
+        }
+        if (lg && stage1LowerCentroids) {
+          const currLower = computeToothCentroids(lg, false);
+          lowerToothDisplacements = computeToothDisplacements(stage1LowerCentroids, currLower);
+        }
+      }
+
       if (state.contactsActive) refreshBiteContacts();
       if (state.overlayActive) setOverlayBlend(state.overlayBlend);
     } else {
@@ -845,6 +980,25 @@ export function createTreatmentApp(
       activeUpperId = nextUpperId;
       activeLowerId = nextLowerId;
 
+      // Update centroids and per-tooth displacements for the newly loaded stage
+      const ug = viewport.getLayerGeometry?.(nextUpperId);
+      const lg = viewport.getLayerGeometry?.(nextLowerId);
+      if (displayProgressionIndex === 0) {
+        if (ug) stage1UpperCentroids = computeToothCentroids(ug, true);
+        if (lg) stage1LowerCentroids = computeToothCentroids(lg, false);
+        upperToothDisplacements = {};
+        lowerToothDisplacements = {};
+      } else {
+        if (ug && stage1UpperCentroids) {
+          const currUpper = computeToothCentroids(ug, true);
+          upperToothDisplacements = computeToothDisplacements(stage1UpperCentroids, currUpper);
+        }
+        if (lg && stage1LowerCentroids) {
+          const currLower = computeToothCentroids(lg, false);
+          lowerToothDisplacements = computeToothDisplacements(stage1LowerCentroids, currLower);
+        }
+      }
+
       const startTime = performance.now();
       const pUpper = prevUpperId;
       const pLower = prevLowerId;
@@ -891,7 +1045,7 @@ export function createTreatmentApp(
         setArchMode("both");
       }
       refreshBiteContacts();
-      viewport.setSeparation(0.18);
+      viewport.setSeparation(0);
       contactsLegendEl.hidden = false;
       contactsBtn.classList.add("tv-ba-btn--active");
     } else {
@@ -985,6 +1139,12 @@ export function createTreatmentApp(
     state.manifest = newManifest;
     state.currentIndex = -1;
     state.activeTemplateStage = null;
+    // Reset initial-stage tooth centroids so hover delta recalculates for the new case.
+    stage1UpperCentroids = null;
+    stage1LowerCentroids = null;
+    upperToothDisplacements = null;
+    lowerToothDisplacements = null;
+
 
     // Update slider limits dynamically
     sliderEl.max = String(Math.max(1, newManifest.treatmentStages.length));

@@ -39,3 +39,34 @@ export function pickedPoint(request: SurfacePickRequest): Vector3 | null {
 
   return nearest === undefined ? null : nearest.point;
 }
+
+export interface MeshPickResult {
+  readonly point: Vector3;
+  readonly mesh: Mesh;
+}
+
+/**
+ * Like `pickedPoint` but also returns the specific mesh that was hit.
+ * Used for hover-based identification of which arch layer the cursor is over.
+ */
+export function pickedMesh(request: SurfacePickRequest): MeshPickResult | null {
+  const { camera, surfaces, point, size } = request;
+  if (size.width === 0 || size.height === 0) return null;
+
+  const raycaster = new Raycaster();
+  raycaster.setFromCamera(
+    new Vector2(
+      (point.x / size.width) * 2 - 1,
+      -(point.y / size.height) * 2 + 1,
+    ),
+    camera,
+  );
+
+  const [nearest] = raycaster.intersectObjects(
+    surfaces.filter((surface) => surface.visible),
+    false,
+  );
+
+  if (nearest === undefined) return null;
+  return { point: nearest.point, mesh: nearest.object as Mesh };
+}

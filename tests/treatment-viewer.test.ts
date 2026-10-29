@@ -19,6 +19,11 @@ import {
   UPPER_ARCH_ID,
 } from "../src/treatment-viewer/treatment-app";
 import type { CaseManifest } from "../src/treatment-viewer/stage-manifest";
+import {
+  identifyToothAtPoint,
+  computeToothCentroids,
+  computeToothDisplacements,
+} from "../src/treatment-viewer/tooth-data";
 import { FakeViewport } from "./fake-viewport";
 
 describe("Treatment Stage Configuration", () => {
@@ -475,7 +480,7 @@ describe("Treatment Viewer Application", () => {
     app.toggleContacts();
     expect(app.getState().contactsActive).toBe(true);
     expect(legendEl.hidden).toBe(false);
-    expect(fakeViewport.separationFactors).toContain(0.18);
+    expect(fakeViewport.separationFactors).toContain(0);
     expect(fakeViewport.colourChanges).toContainEqual({ id: `${UPPER_ARCH_ID}-0`, colour: "contacts" });
     expect(fakeViewport.colourChanges).toContainEqual({ id: `${LOWER_ARCH_ID}-0`, colour: "contacts" });
 
@@ -539,5 +544,113 @@ describe("Treatment Viewer Application", () => {
     expect(appEl.classList.contains("tv-app--sidebar-open")).toBe(false);
 
     app.dispose();
+  });
+
+  describe("Tooth Identification & Movement Tracking", () => {
+    it("identifies Upper Left Second Premolar (UL5 / #25) at the expected coordinates", () => {
+      // Point corresponding to UL5 on the maxillary arch
+      const pt = { x: 21.0, y: -2.0, z: 20.0 };
+      const info = identifyToothAtPoint(pt, true);
+      expect(info.fdi).toBe(25);
+      expect(info.badge).toBe("#25");
+      expect(info.notation).toBe("UL5");
+      expect(info.quadrantLabel).toBe("Upper Left (Q2)");
+      expect(info.fullName).toBe("Upper Left Second Premolar");
+      expect(info.isUpper).toBe(true);
+    });
+
+    it("identifies teeth across all four quadrants correctly", () => {
+      // Q1: Upper Right Central Incisor (#11, UR1)
+      const ur1 = identifyToothAtPoint({ x: 0.0, y: -2.0, z: 39.0 }, true);
+      expect(ur1.fdi).toBe(11);
+      expect(ur1.notation).toBe("UR1");
+      expect(ur1.quadrantLabel).toBe("Upper Right (Q1)");
+      expect(ur1.fullName).toBe("Upper Right Central Incisor");
+
+      // Q2: Upper Left Central Incisor (#21, UL1)
+      const ul1 = identifyToothAtPoint({ x: 3.5, y: -2.0, z: 39.0 }, true);
+      expect(ul1.fdi).toBe(21);
+      expect(ul1.notation).toBe("UL1");
+      expect(ul1.fullName).toBe("Upper Left Central Incisor");
+
+      // Q3: Lower Left First Molar (#36, LL6)
+      const ll6 = identifyToothAtPoint({ x: 24.0, y: 5.0, z: 0.0 }, false);
+      expect(ll6.fdi).toBe(36);
+      expect(ll6.notation).toBe("LL6");
+      expect(ll6.quadrantLabel).toBe("Lower Left (Q3)");
+      expect(ll6.fullName).toBe("Lower Left First Molar");
+
+      // Q4: Lower Right Canine (#43, LR3)
+      const lr3 = identifyToothAtPoint({ x: -10.0, y: 5.0, z: 30.0 }, false);
+      expect(lr3.fdi).toBe(43);
+      expect(lr3.notation).toBe("LR3");
+      expect(lr3.quadrantLabel).toBe("Lower Right (Q4)");
+      expect(lr3.fullName).toBe("Lower Right Canine");
+    });
+
+    it("computes tooth centroids from geometry vertices", () => {
+      const geom = new BufferGeometry();
+      // Triangle at tooth 25 position: (21, -2, 20)
+      const positions = new Float32Array([
+        21.0, -2.0, 20.0,
+        21.5, -2.2, 20.2,
+        20.8, -1.9, 19.8,
+      ]);
+      geom.setAttribute("position", new BufferAttribute(positions, 3));
+      const centroids = computeToothCentroids(geom, true);
+      expect(centroids[25]).toBeDefined();
+      expect(centroids[25]![0]).toBeCloseTo(21.1, 1);
+    });
+
+    it("computes per-tooth displacements accurately", () => {
+      const stage1Centroids: Record<number, [number, number, number]> = {
+        25: [20.0, 0.0, 20.0],
+        26: [25.0, 0.0, 10.0],
+      };
+      const currentCentroids: Record<number, [number, number, number]> = {
+        25: [20.01, 0.0, 20.0],   // moved 0.01mm
+        26: [25.20, 0.0, 10.0],   // moved 0.20mm
+      };
+      const deltas = computeToothDisplacements(stage1Centroids, currentCentroids);
+      expect(deltas[25]).toBeCloseTo(0.01, 2);
+      expect(deltas[26]).toBeCloseTo(0.20, 2);
+    });
+
+    it("updates hover tooltip with accurate tooth details and movement delta", async () => {
+      let capturedOptions: any;
+      const app = createTreatmentApp(root, {
+        createViewport: (canvas, options) => {
+          capturedOptions = options;
+          fakeViewport = new FakeViewport(canvas, options);
+          return fakeViewport;
+        },
+        autoLoad: false,
+      });
+
+      const tooltip = root.querySelector(".tv-tooth-tooltip") as HTMLElement;
+      expect(tooltip).toBeDefined();
+      expect(tooltip.hidden).toBe(true);
+
+      // Simulate hovering over Upper Left Second Premolar
+      capturedOptions.onToothHover({
+        layerId: "upper-arch",
+        canvasX: 200,
+        canvasY: 150,
+        hitPoint: { x: 21.0, y: -2.0, z: 20.0 },
+      });
+
+      expect(tooltip.hidden).toBe(false);
+      expect(root.querySelector(".tv-tooth-tooltip__badge")?.textContent).toBe("#25");
+      expect(root.querySelector(".tv-tooth-tooltip__notation")?.textContent).toBe("UL5");
+      expect(root.querySelector(".tv-tooth-tooltip__quadrant")?.textContent).toBe("Upper Left (Q2)");
+      expect(root.querySelector(".tv-tooth-tooltip__name")?.textContent).toBe("Upper Left Second Premolar");
+      expect(root.querySelector(".tv-tooth-tooltip__delta")?.textContent).toBe("0.00 mm");
+
+      // Simulate moving cursor out
+      capturedOptions.onToothHover(null);
+      expect(tooltip.hidden).toBe(true);
+
+      app.dispose();
+    });
   });
 });

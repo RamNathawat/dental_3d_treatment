@@ -14,6 +14,10 @@ import type {
  * without a GPU. It stands in for both the `Viewport` and the `ViewController` the panels use.
  */
 export class FakeViewport implements Viewport, ViewController {
+  constructor(
+    readonly canvas?: HTMLCanvasElement,
+    readonly options?: import("../src/viewer/viewport").ViewportOptions,
+  ) {}
   readonly layers: LayerSpec[] = [];
   readonly visibilityChanges: Array<{ id: string; visible: boolean }> = [];
   readonly opacityChanges: Array<{ id: string; opacity: number }> = [];

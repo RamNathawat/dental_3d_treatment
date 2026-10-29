@@ -58,7 +58,10 @@ import { createOrbitCentreMarker } from "./orbit-centre-marker";
 import { installLongPress } from "./long-press";
 import { installOrbitDrag } from "./orbit-drag";
 import { turnAbout, turnFor } from "./orbit";
-import { pickedPoint } from "./picking";
+import {
+  pickedPoint,
+  pickedMesh,
+} from "./picking";
 import {
   createSurfacePainter,
   replyFor,
@@ -136,6 +139,10 @@ class ThreeViewport implements Viewport {
   private isolatedId: string | null = null;
   private separationFactor = 0;
   private lastSize: ViewSize | null = null;
+  /** Layer id the cursor is currently over, for change-detection in the hover callback. */
+  private hoveredLayerId: string | null = null;
+  /** rAF token used to throttle mousemove raycasts. */
+  private hoverRafPending = false;
   /**
    * The point the camera turns about, which the user sets and `OrbitControls` is never told about.
    *
@@ -146,7 +153,11 @@ class ThreeViewport implements Viewport {
 
   constructor(canvas: HTMLCanvasElement, options: ViewportOptions = {}) {
     this.options = options;
-    this.renderer = new WebGLRenderer({ canvas, antialias: true });
+    this.renderer = new WebGLRenderer({
+      canvas,
+      antialias: true,
+      alpha: options.transparentBackground ?? false,
+    });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = ACESFilmicToneMapping;
 
@@ -154,7 +165,9 @@ class ThreeViewport implements Viewport {
     this.camera.up.set(0, 0, 1);
     this.camera.position.copy(DEFAULT_DIRECTION).multiplyScalar(200);
 
-    this.scene.background = new Color(BACKGROUND_COLOUR);
+    if (!options.transparentBackground) {
+      this.scene.background = new Color(BACKGROUND_COLOUR);
+    }
     this.scene.add(this.content);
     // In the scene rather than in the content: it marks the camera's pivot, so framing the model and
     // pressing on it must both leave it out of the picture.
@@ -220,6 +233,24 @@ class ThreeViewport implements Viewport {
 
     // Curvature is measured off the main thread; what comes back is turned into colours here.
     this.painter.onEvent(this.handleSurface);
+
+    // Hover raycasting — throttled with rAF so we never fire more than once per frame.
+    if (options.onToothHover) {
+      canvas.addEventListener("mousemove", (e: MouseEvent) => {
+        if (this.hoverRafPending) return;
+        this.hoverRafPending = true;
+        requestAnimationFrame(() => {
+          this.hoverRafPending = false;
+          this.handleHoverMove(e);
+        });
+      });
+      canvas.addEventListener("mouseleave", () => {
+        if (this.hoveredLayerId !== null) {
+          this.hoveredLayerId = null;
+          this.options.onToothHover?.(null);
+        }
+      });
+    }
 
     this.renderer.setAnimationLoop(this.render);
   }
@@ -324,6 +355,7 @@ class ThreeViewport implements Viewport {
     }
     this.layers.clear();
     this.isolatedId = null;
+    this.hoveredLayerId = null;
 
     // Whatever the thread was measuring was measured from meshes that no longer exist, and a new
     // bundle's layers can reuse the same ids, so its work is stopped rather than inherited.
@@ -348,6 +380,7 @@ class ThreeViewport implements Viewport {
     layer.measuredMaterial.dispose();
     this.layers.delete(id);
     if (this.isolatedId === id) this.isolatedId = null;
+    if (this.hoveredLayerId === id) this.hoveredLayerId = null;
   }
 
   getLayerGeometry(id: string): BufferGeometry | null {
@@ -479,6 +512,50 @@ class ThreeViewport implements Viewport {
     this.handleCameraSettled();
     this.options.onOrbitCentre?.();
     return true;
+  }
+
+  /**
+   * Raycasts the current mouse position and fires `onToothHover` when the hovered layer changes.
+   * Called at most once per animation frame (throttled by the caller).
+   */
+  private handleHoverMove(e: MouseEvent): void {
+    const canvas = this.renderer.domElement;
+    const { left, top, width, height } = canvas.getBoundingClientRect();
+    const x = e.clientX - left;
+    const y = e.clientY - top;
+
+    const hit = pickedMesh({
+      camera: this.camera,
+      surfaces: [...this.layers.values()].map((layer) => layer.mesh),
+      point: { x, y },
+      size: { width, height },
+    });
+
+    if (hit === null) {
+      if (this.hoveredLayerId !== null) {
+        this.hoveredLayerId = null;
+        this.options.onToothHover?.(null);
+      }
+      return;
+    }
+
+    // Identify the layer by matching the mesh's name to layer labels.
+    let hitLayerId: string | null = null;
+    for (const [id, layer] of this.layers) {
+      if (layer.mesh === hit.mesh) {
+        hitLayerId = id;
+        break;
+      }
+    }
+    if (hitLayerId === null) return;
+
+    this.hoveredLayerId = hitLayerId;
+    this.options.onToothHover?.({
+      layerId: hitLayerId,
+      canvasX: x,
+      canvasY: y,
+      hitPoint: { x: hit.point.x, y: hit.point.y, z: hit.point.z },
+    });
   }
 
   getCamera(): CameraView {

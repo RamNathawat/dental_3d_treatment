@@ -417,6 +417,7 @@ body {
   touch-action: none;
   user-select: none;
   -webkit-touch-callout: none;
+  z-index: 2;
 }
 
 /* ── Top Floating Bar & Segmented Arch Pill ───────────────────────────────── */
@@ -1308,3 +1309,170 @@ body {
     font-size: 0.95rem;
   }
 }
+
+/* ── Tooth Hover Tooltip ──────────────────────────────────────────────────── */
+
+.tv-tooth-tooltip {
+  position: absolute;
+  z-index: 80;
+  pointer-events: none;   /* Never blocks clicks or drag */
+  width: 250px;
+
+  background: rgba(16, 21, 32, 0.94);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  padding: 13px 15px 12px;
+  box-shadow:
+    0 12px 36px rgba(0, 0, 0, 0.45),
+    0 2px 10px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+
+  animation: tv-tooltip-in 0.12s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes tv-tooltip-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)   scale(1);    }
+}
+
+/* Bottom diamond caret pointing directly to hovered tooth */
+.tv-tooth-tooltip::after {
+  content: "";
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 12px;
+  height: 12px;
+  background: rgba(16, 21, 32, 0.94);
+  border-right: 1px solid rgba(255, 255, 255, 0.14);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+/* Header row: FDI badge + Shorthand + Quadrant Chip */
+.tv-tooth-tooltip__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tv-tooth-tooltip__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 9px;
+  border-radius: 6px;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.40);
+}
+
+.tv-tooth-tooltip__notation {
+  color: #ffffff;
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.tv-tooth-tooltip__quadrant {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+/* Full anatomical tooth name */
+.tv-tooth-tooltip__name {
+  color: #ffffff;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 9px 0 10px 0;
+  line-height: 1.25;
+}
+
+/* Movement row */
+.tv-tooth-tooltip__movement {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.80rem;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tv-tooth-tooltip__pulse {
+  width: 15px;
+  height: 15px;
+  color: #60a5fa;
+  flex-shrink: 0;
+}
+
+.tv-tooth-tooltip__movement-label {
+  color: rgba(255, 255, 255, 0.75);
+  flex: 1;
+}
+
+.tv-tooth-tooltip__delta {
+  color: #34d399;   /* luminous mint green matching clinical reference */
+  font-weight: 700;
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Clinical Alignment Graph Paper Grid Overlay
+   Screen-space millimeter graph paper across the viewer with clinical axes
+   ───────────────────────────────────────────────────────────────────────────── */
+.tv-graph-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background-image:
+    linear-gradient(to right, rgba(0, 0, 0, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.05) 1px, transparent 1px),
+    linear-gradient(to right, rgba(0, 0, 0, 0.12) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.12) 1px, transparent 1px);
+  background-size: 10px 10px, 10px 10px, 50px 50px, 50px 50px;
+  background-position: center center;
+  transition: opacity 0.2s ease-in-out;
+}
+
+/* Clinical Facial Midline reference (vertical center red line) */
+.tv-graph-grid::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1.5px;
+  background: rgba(220, 38, 38, 0.45);
+  transform: translateX(-50%);
+}
+
+/* Clinical Occlusal Plane reference (horizontal center blue line) */
+.tv-graph-grid::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1.5px;
+  background: rgba(37, 99, 235, 0.35);
+  transform: translateY(-50%);
+}
+

@@ -30,6 +30,8 @@ export interface ViewportStats {
 }
 
 export interface ViewportOptions {
+  /** If true, the WebGL canvas has transparent background so DOM elements can show behind it. */
+  readonly transparentBackground?: boolean;
   readonly onStats?: (stats: ViewportStats) => void;
   /** Called when the camera settles, so where it ended up can be remembered. */
   readonly onCameraSettled?: () => void;
@@ -37,6 +39,19 @@ export interface ViewportOptions {
   readonly onSurface?: (progress: SurfaceProgress) => void;
   /** Called when the orbit centre has been moved onto a layer. */
   readonly onOrbitCentre?: () => void;
+  /**
+   * Called on every mousemove that hits or leaves a layer.
+   * `layerId` is the id of the hovered layer, or null when the cursor leaves all layers.
+   * `canvasX` / `canvasY` are the pixel coords within the canvas element.
+   */
+  readonly onToothHover?: (
+    hit: {
+      layerId: string;
+      canvasX: number;
+      canvasY: number;
+      hitPoint: { x: number; y: number; z: number };
+    } | null,
+  ) => void;
 }
 
 /** What a layer's surfacing is doing, apart from which layer it is doing it to. */
