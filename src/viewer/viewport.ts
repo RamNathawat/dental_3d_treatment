@@ -67,6 +67,7 @@ export interface Viewport {
   addLayer(spec: LayerSpec): AddLayerOutcome;
   clearLayers(): void;
   removeLayer(id: string): void;
+  getLayerGeometry?(id: string): import("three").BufferGeometry | null;
 
   setLayerVisible(id: string, visible: boolean): void;
   /** `opacity` is 0 (invisible) to 1 (solid). */

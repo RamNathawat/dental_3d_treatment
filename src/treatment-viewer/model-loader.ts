@@ -10,6 +10,7 @@
  */
 
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type { ArchAsset } from "./stage-manifest";
 
 export type ModelSource = string | ArchAsset | File | Blob;
@@ -108,7 +109,8 @@ async function resolveStlBuffer(
   if (source instanceof Blob) {
     try {
       const buffer = await source.arrayBuffer();
-      return { ok: true, buffer };
+      const finalBuffer = isGlb(buffer) ? await convertGlbToStlBuffer(buffer) : buffer;
+      return { ok: true, buffer: finalBuffer };
     } catch (err) {
       return {
         ok: false,
@@ -140,6 +142,61 @@ async function resolveStlBuffer(
     ok: false,
     reason: `Invalid source specified for ${archLabel}`,
   };
+}
+
+/** Check if array buffer is GLB format by magic number ('glTF' = 0x46546c67) */
+export function isGlb(buf: ArrayBuffer): boolean {
+  if (buf.byteLength < 4) return false;
+  const view = new DataView(buf);
+  return view.getUint32(0, true) === 0x46546c67;
+}
+
+/** Converts a binary GLB buffer into a standard binary STL ArrayBuffer. */
+export async function convertGlbToStlBuffer(glbBuffer: ArrayBuffer): Promise<ArrayBuffer> {
+  const gltfLoader = new GLTFLoader();
+  const gltf = await gltfLoader.parseAsync(glbBuffer, "");
+  let mesh: import("three").Mesh | null = null;
+  gltf.scene.traverse((child) => {
+    if ((child as import("three").Mesh).isMesh && !mesh) {
+      mesh = child as import("three").Mesh;
+    }
+  });
+
+  if (!mesh) throw new Error("No mesh found inside GLB container");
+
+  const nonIndexed = (mesh as import("three").Mesh).geometry.toNonIndexed();
+  const posAttr = nonIndexed.attributes["position"];
+  if (!posAttr) throw new Error("No position attribute in GLB mesh");
+
+  const posArray = posAttr.array as Float32Array;
+  const triangleCount = posArray.length / 9;
+  const stlBuffer = new ArrayBuffer(84 + triangleCount * 50);
+  const view = new DataView(stlBuffer);
+  view.setUint32(80, triangleCount, true);
+
+  let offset = 84;
+  let posOffset = 0;
+  for (let i = 0; i < triangleCount; i++) {
+    // 12 bytes normal (can be 0)
+    offset += 12;
+    // v1
+    view.setFloat32(offset, posArray[posOffset++]!, true);
+    view.setFloat32(offset + 4, posArray[posOffset++]!, true);
+    view.setFloat32(offset + 8, posArray[posOffset++]!, true);
+    offset += 12;
+    // v2
+    view.setFloat32(offset, posArray[posOffset++]!, true);
+    view.setFloat32(offset + 4, posArray[posOffset++]!, true);
+    view.setFloat32(offset + 8, posArray[posOffset++]!, true);
+    offset += 12;
+    // v3
+    view.setFloat32(offset, posArray[posOffset++]!, true);
+    view.setFloat32(offset + 4, posArray[posOffset++]!, true);
+    view.setFloat32(offset + 8, posArray[posOffset++]!, true);
+    offset += 14;
+  }
+
+  return stlBuffer;
 }
 
 const bufferCache = new Map<string, ArrayBuffer>();
@@ -183,8 +240,9 @@ async function fetchStl(
 
   try {
     const buffer = await response.arrayBuffer();
-    bufferCache.set(url, buffer);
-    return { ok: true, buffer };
+    const finalBuffer = isGlb(buffer) ? await convertGlbToStlBuffer(buffer) : buffer;
+    bufferCache.set(url, finalBuffer);
+    return { ok: true, buffer: finalBuffer };
   } catch (error) {
     return {
       ok: false,

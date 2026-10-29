@@ -61,6 +61,12 @@ export class FakeViewport implements Viewport, ViewController {
     if (idx !== -1) this.layers.splice(idx, 1);
   }
 
+  readonly layerGeometries = new Map<string, import("three").BufferGeometry>();
+
+  getLayerGeometry(id: string): import("three").BufferGeometry | null {
+    return this.layerGeometries.get(id) ?? null;
+  }
+
   setLayerVisible(id: string, visible: boolean): void {
     this.visibilityChanges.push({ id, visible });
   }

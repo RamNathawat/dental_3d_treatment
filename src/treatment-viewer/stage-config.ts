@@ -23,12 +23,12 @@ export const DEFAULT_CASE_MANIFEST: CaseManifest = {
       label: "Stage 1",
       doctorOnly: false,
       upper: {
-        filename: "Soumya Sarath Upper jaw - 01 - Model.stl",
-        url: "/models/Soumya Sarath Upper jaw - 01 - Model.stl",
+        filename: "Soumya Sarath Upper jaw - 01 - Model.glb",
+        url: "/models/Soumya Sarath Upper jaw - 01 - Model.glb",
       },
       lower: {
-        filename: "Soumya Sarath Lower jaw - 01 - Model.stl",
-        url: "/models/Soumya Sarath Lower jaw - 01 - Model.stl",
+        filename: "Soumya Sarath Lower jaw - 01 - Model.glb",
+        url: "/models/Soumya Sarath Lower jaw - 01 - Model.glb",
       },
     },
     {
@@ -37,12 +37,12 @@ export const DEFAULT_CASE_MANIFEST: CaseManifest = {
       label: "Stage 2",
       doctorOnly: false,
       upper: {
-        filename: "Soumya Sarath Upper jaw - 02 - Model.stl",
-        url: "/models/Soumya Sarath Upper jaw - 02 - Model.stl",
+        filename: "Soumya Sarath Upper jaw - 02 - Model.glb",
+        url: "/models/Soumya Sarath Upper jaw - 02 - Model.glb",
       },
       lower: {
-        filename: "Soumya Sarath Lower jaw - 02 - Model.stl",
-        url: "/models/Soumya Sarath Lower jaw - 02 - Model.stl",
+        filename: "Soumya Sarath Lower jaw - 02 - Model.glb",
+        url: "/models/Soumya Sarath Lower jaw - 02 - Model.glb",
       },
     },
   ],
@@ -52,12 +52,12 @@ export const DEFAULT_CASE_MANIFEST: CaseManifest = {
       label: "Template (Doctor Reference)",
       doctorOnly: true,
       upper: {
-        filename: "Soumya Sarath Upper jaw - 01 - Template.stl",
-        url: "/models/Soumya Sarath Upper jaw - 01 - Template.stl",
+        filename: "Soumya Sarath Upper jaw - 01 - Template.glb",
+        url: "/models/Soumya Sarath Upper jaw - 01 - Template.glb",
       },
       lower: {
-        filename: "Soumya Sarath Lower jaw - 01 - Template.stl",
-        url: "/models/Soumya Sarath Lower jaw - 01 - Template.stl",
+        filename: "Soumya Sarath Lower jaw - 01 - Template.glb",
+        url: "/models/Soumya Sarath Lower jaw - 01 - Template.glb",
       },
     },
   ],

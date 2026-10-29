@@ -83,12 +83,12 @@ import type {
   ViewportOptions,
 } from "./viewport";
 
-// Warm luxury alabaster — elegant clinical backdrop.
-const BACKGROUND_COLOUR = 0xf5f2eb;
+// Studio neutral alabaster — clinical backdrop with calibrated contrast.
+const BACKGROUND_COLOUR = 0xebe7e0;
 
 const GRID_DIVISIONS = 40;
-const GRID_COLOUR_LINES = 0xe2ddd2;  // subtle warm grid lines
-const GRID_COLOUR_AXIS  = 0xcbc4b6;  // slightly stronger axis
+const GRID_COLOUR_LINES = 0xd8d3ca;  // subtle warm grid lines
+const GRID_COLOUR_AXIS  = 0xc2bcb0;  // slightly stronger axis
 
 
 
@@ -263,8 +263,8 @@ class ThreeViewport implements Viewport {
 
     const material = new MeshStandardMaterial({
       color: new Color(baseColor),
-      roughness: 0.22,   // lower = more sheen, closer to Veer's glossy gum
-      metalness: 0.04,
+      roughness: 0.36,   // refined micro-sheen: preserves vivid gingival color without blown-out white glare
+      metalness: 0.01,
       vertexColors: isAnatomical && Boolean(geometry.getAttribute("color")),
       side: FrontSide,
     });
@@ -350,6 +350,10 @@ class ThreeViewport implements Viewport {
     if (this.isolatedId === id) this.isolatedId = null;
   }
 
+  getLayerGeometry(id: string): BufferGeometry | null {
+    return this.layers.get(id)?.geometry ?? null;
+  }
+
   setLayerVisible(id: string, visible: boolean): void {
     const layer = this.layerFor(id);
     layer.visible = visible;
@@ -366,6 +370,11 @@ class ThreeViewport implements Viewport {
     const layer = this.layerFor(id);
     layer.colour = colour;
     if (colour === "anatomical") {
+      computeAnatomicalColors(layer.geometry, layer.label);
+      layer.material.vertexColors = Boolean(layer.geometry.getAttribute("color"));
+      layer.material.color.set("#ffffff");
+    } else if (colour === "contacts") {
+      // Retain the contact collision heatmap vertex colors computed on the geometry
       layer.material.vertexColors = Boolean(layer.geometry.getAttribute("color"));
       layer.material.color.set("#ffffff");
     } else {
@@ -517,22 +526,22 @@ class ThreeViewport implements Viewport {
   }
 
   private addLights(): void {
-    // Subtle ambient hemisphere light so crevices and occlusal anatomy maintain depth.
-    this.scene.add(new HemisphereLight(0xfff8f0, 0xd0c9be, 0.95));
+    // Soft ambient hemisphere light so crevices and occlusal anatomy maintain depth.
+    this.scene.add(new HemisphereLight(0xfffaf5, 0xd4cfc5, 0.45));
 
-    // Primary key: strong frontal studio light creating specular highlights and crisp contrast.
-    const key = new DirectionalLight(0xfffdf7, 1.9);
+    // Primary key: balanced studio key light providing clear specular form without highlight blowout.
+    const key = new DirectionalLight(0xffffff, 1.25);
     key.position.set(50, -90, 100);
     this.scene.add(key);
 
     // Soft fill from side-below lifts lower jaw details.
-    const fill = new DirectionalLight(0xf7f0e6, 0.7);
+    const fill = new DirectionalLight(0xf5eedd, 0.45);
     fill.position.set(-80, -60, 40);
     this.scene.add(fill);
 
     // Rim / contour accent from behind to sharply separate model silhouette from canvas background.
-    const rim = new DirectionalLight(0xffffff, 0.9);
-    rim.position.set(0, 100, 60);
+    const rim = new DirectionalLight(0xffffff, 0.75);
+    rim.position.set(0, 110, 70);
     this.scene.add(rim);
   }
 
@@ -838,15 +847,18 @@ function toleranceOf(bounds: Bounds): number {
  * Axis conventions in this viewer (camera.up = Z, grid lies in XY):
  *   X = left / right across the arch
  *   Y = labial-to-lingual depth (front-to-back)
- *   Z = HEIGHT — the axis we must use for crown vs gum detection
+ * Axis conventions in dental scan space:
+ *   X = left / right across the arch
+ *   Z = anterior-to-posterior depth (front-to-back)
+ *   Y = occlusal-to-gingival HEIGHT — the vertical axis for crown vs gum separation
  *
  * Upper arch in scene space:
- *   Z high → gingival base (attached to maxilla above the bite plane)
- *   Z low  → crown tips (pointing downward toward the mandible)
+ *   Y high → gingival base (attached to maxilla)
+ *   Y low  → crown tips (pointing downward toward the mandible)
  *
  * Lower arch in scene space:
- *   Z low  → gingival base (attached to mandible below the bite plane)
- *   Z high → crown tips (pointing upward toward the maxilla)
+ *   Y low  → gingival base (attached to mandibular ridge)
+ *   Y high → crown tips (pointing upward toward the maxilla)
  */
 function computeAnatomicalColors(geometry: BufferGeometry, label: string): void {
   const posAttr = geometry.getAttribute("position");
@@ -856,53 +868,55 @@ function computeAnatomicalColors(geometry: BufferGeometry, label: string): void 
   const colors = new Float32Array(count * 3);
   const isUpper = !label.toLowerCase().includes("lower");
 
-  // ── Palette (Veer 3d.viewer.dental inspired) ───────────────────────────────
-  // Enamel: crisp warm-white so crowns are clearly distinct from the gum.
-  const cR = 0.975, cG = 0.965, cB = 0.945;
-  // Gingiva: vivid hot-pink / coral-magenta matching the Veer reference (#d0415e).
-  const gR = 0.816, gG = 0.255, gB = 0.369;
+  // ── Palette (Veer-calibrated Clinical Aesthetic) ───────────────────────────
+  // Tooth enamel: clean bright white with natural ceramic depth.
+  const tipR = 0.96, tipG = 0.95, tipB = 0.93; // incisal tip & body
+  const nckR = 0.91, nckG = 0.88, nckB = 0.82; // cervical margin depth
 
-  // ── Dynamic Z-range detection ──────────────────────────────────────────────
-  let zMin = Infinity, zMax = -Infinity;
+  // Gingiva: rich, healthy clinical coral-rose (#c43d59) matching Veer reference.
+  const gR = 0.77, gG = 0.24, gB = 0.36;
+
+  // ── Dynamic Y-range detection (Vertical occlusal-gingival axis) ────────────
+  let yMin = Infinity, yMax = -Infinity;
   for (let i = 0; i < count; i++) {
-    const z = posAttr.getZ(i);
-    if (z < zMin) zMin = z;
-    if (z > zMax) zMax = z;
+    const y = posAttr.getY(i);
+    if (y < yMin) yMin = y;
+    if (y > yMax) yMax = y;
   }
-  const zRange = zMax - zMin;
-  if (zRange === 0) return; // degenerate / flat geometry — nothing to paint
+  const yRange = yMax - yMin;
+  if (yRange === 0) return; // degenerate geometry
 
-  // Crown zone: outermost 45 % in the bite-plane direction.
-  // Gum zone:   innermost 45 % (away from the bite plane).
-  // Blend zone: the 30 % in between.
-  const CROWN_FRACTION = 0.45;
-  const BLEND_FRACTION = 0.30;
+  const CROWN_FRACTION = isUpper ? 0.42 : 0.44;
+  const BLEND_FRACTION = 0.10;
 
   for (let i = 0; i < count; i++) {
-    const z = posAttr.getZ(i);
+    const y = posAttr.getY(i);
     let t: number; // 0 = enamel/crown, 1 = gingiva/gum
+    let crownT: number; // 0 = incisal tip, 1 = cervical neck
 
     if (isUpper) {
-      // Crown tips are at LOW Z (pointing down toward mandible).
-      // Gingival base is at HIGH Z (toward the maxillary ridge).
-      const crownEdge  = zMin + zRange * CROWN_FRACTION;
-      const gingivaEdge = zMin + zRange * (CROWN_FRACTION + BLEND_FRACTION);
-      // t rises as z climbs from crown edge toward gingiva edge.
-      t = (z - crownEdge) / (gingivaEdge - crownEdge);
+      // Crown tips are at low Y (pointing down). Gum base is at high Y.
+      const crownEdge = yMin + yRange * CROWN_FRACTION;
+      const gumEdge = yMin + yRange * (CROWN_FRACTION + BLEND_FRACTION);
+      crownT = Math.max(0, Math.min(1, (y - yMin) / (crownEdge - yMin)));
+      t = (y - crownEdge) / (gumEdge - crownEdge);
     } else {
-      // Crown tips are at HIGH Z (pointing up toward maxilla).
-      // Gingival base is at LOW Z (toward the mandibular ridge).
-      const crownEdge   = zMax - zRange * CROWN_FRACTION;
-      const gingivaEdge = zMax - zRange * (CROWN_FRACTION + BLEND_FRACTION);
-      // t rises as z falls from crown edge toward gingiva edge.
-      t = (crownEdge - z) / (crownEdge - gingivaEdge);
+      // Crown tips are at high Y (pointing up). Gum base is at low Y.
+      const crownEdge = yMax - yRange * CROWN_FRACTION;
+      const gumEdge = yMax - yRange * (CROWN_FRACTION + BLEND_FRACTION);
+      crownT = Math.max(0, Math.min(1, (yMax - y) / (yMax - crownEdge)));
+      t = (crownEdge - y) / (crownEdge - gumEdge);
     }
 
     t = Math.max(0, Math.min(1, t));
 
-    // Double smoothstep gives a sharp enamel core that dissolves cleanly
-    // into the vivid gingival pink — closely matching the Veer aesthetic.
-    const s  = t * t * (3 - 2 * t);
+    // Subtle tooth crown gradient: incisal edge is brighter; cervical neck has natural dentin warmth
+    const cR = tipR * (1 - crownT * 0.35) + nckR * (crownT * 0.35);
+    const cG = tipG * (1 - crownT * 0.35) + nckG * (crownT * 0.35);
+    const cB = tipB * (1 - crownT * 0.35) + nckB * (crownT * 0.35);
+
+    // Smoothstep transition curve for natural gingival margin definition
+    const s = t * t * (3 - 2 * t);
     const s2 = s * s * (3 - 2 * s);
 
     colors[i * 3 + 0] = cR * (1 - s2) + gR * s2;

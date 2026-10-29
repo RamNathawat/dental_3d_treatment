@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { BufferAttribute, BufferGeometry } from "three";
 import {
   STAGE_COUNT,
   TREATMENT_STAGES,
@@ -30,8 +31,8 @@ describe("Treatment Stage Configuration", () => {
       expect(stage.label).toBe(`Stage ${index + 1}`);
       expect(stage.upperUrl).toContain("Upper");
       expect(stage.lowerUrl).toContain("Lower");
-      expect(stage.upperUrl).toMatch(/\.stl$/i);
-      expect(stage.lowerUrl).toMatch(/\.stl$/i);
+      expect(stage.upperUrl).toMatch(/\.(glb|stl)$/i);
+      expect(stage.lowerUrl).toMatch(/\.(glb|stl)$/i);
     }
   });
 
@@ -451,5 +452,92 @@ describe("Treatment Viewer Application", () => {
     app.dispose();
     expect(root.children.length).toBe(0);
     expect(fakeViewport.disposed).toBe(true);
+  });
+
+  it("toggles occlusal bite contacts inspection mode", () => {
+    const upperGeom = new BufferGeometry();
+    upperGeom.setAttribute("position", new BufferAttribute(new Float32Array([0, 10, 0, 5, 10, 0]), 3));
+    const lowerGeom = new BufferGeometry();
+    lowerGeom.setAttribute("position", new BufferAttribute(new Float32Array([0, 9.8, 0, 5, 9.5, 0]), 3));
+
+    fakeViewport.layerGeometries.set(`${UPPER_ARCH_ID}-0`, upperGeom);
+    fakeViewport.layerGeometries.set(`${LOWER_ARCH_ID}-0`, lowerGeom);
+
+    const app = createTreatmentApp(root, {
+      createViewport: () => fakeViewport,
+      autoLoad: false,
+    });
+
+    expect(app.getState().contactsActive).toBe(false);
+    const legendEl = root.querySelector(".tv-contacts-legend") as HTMLElement;
+    expect(legendEl.hidden).toBe(true);
+
+    app.toggleContacts();
+    expect(app.getState().contactsActive).toBe(true);
+    expect(legendEl.hidden).toBe(false);
+    expect(fakeViewport.separationFactors).toContain(0.18);
+    expect(fakeViewport.colourChanges).toContainEqual({ id: `${UPPER_ARCH_ID}-0`, colour: "contacts" });
+    expect(fakeViewport.colourChanges).toContainEqual({ id: `${LOWER_ARCH_ID}-0`, colour: "contacts" });
+
+    app.toggleContacts();
+    expect(app.getState().contactsActive).toBe(false);
+    expect(legendEl.hidden).toBe(true);
+    expect(fakeViewport.separationFactors).toContain(0);
+    expect(fakeViewport.colourChanges).toContainEqual({ id: `${UPPER_ARCH_ID}-0`, colour: "anatomical" });
+    expect(fakeViewport.colourChanges).toContainEqual({ id: `${LOWER_ARCH_ID}-0`, colour: "anatomical" });
+
+    app.dispose();
+  });
+
+  it("toggles overlay comparison mode and manages blend ratio", async () => {
+    const mockUpper = new Uint8Array([1, 2, 3]).buffer;
+    const mockLower = new Uint8Array([4, 5, 6]).buffer;
+    globalThis.fetch = vi.fn().mockImplementation((url: string) =>
+      Promise.resolve({
+        ok: true,
+        arrayBuffer: () =>
+          Promise.resolve(url.includes("Upper") ? mockUpper : mockLower),
+      }),
+    );
+
+    const app = createTreatmentApp(root, {
+      createViewport: () => fakeViewport,
+      autoLoad: false,
+    });
+
+    expect(app.getState().overlayActive).toBe(false);
+    const overlayPanel = root.querySelector(".tv-overlay-panel") as HTMLElement;
+    expect(overlayPanel.hidden).toBe(true);
+
+    await app.toggleOverlay();
+    expect(app.getState().overlayActive).toBe(true);
+    expect(overlayPanel.hidden).toBe(false);
+
+    app.setOverlayBlend(0.8);
+    expect(app.getState().overlayBlend).toBe(0.8);
+
+    await app.toggleOverlay();
+    expect(app.getState().overlayActive).toBe(false);
+    expect(overlayPanel.hidden).toBe(true);
+
+    app.dispose();
+  });
+
+  it("closes the sidebar when tapping the mobile sidebar backdrop", () => {
+    const app = createTreatmentApp(root, {
+      createViewport: () => fakeViewport,
+      autoLoad: false,
+    });
+
+    const appEl = root.querySelector(".tv-app") as HTMLElement;
+    appEl.classList.add("tv-app--sidebar-open");
+    expect(appEl.classList.contains("tv-app--sidebar-open")).toBe(true);
+
+    const backdrop = root.querySelector(".tv-sidebar-backdrop") as HTMLElement;
+    expect(backdrop).toBeDefined();
+    backdrop.click();
+    expect(appEl.classList.contains("tv-app--sidebar-open")).toBe(false);
+
+    app.dispose();
   });
 });

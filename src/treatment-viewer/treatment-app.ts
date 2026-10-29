@@ -28,6 +28,7 @@ import type {
 } from "./stage-manifest";
 import { pairTreatmentFiles } from "./stage-manifest";
 import { loadStageModels, prefetchStageModels } from "./model-loader";
+import { applyBiteContacts } from "./bite-contacts";
 
 // ─── Layer IDs ───────────────────────────────────────────────────────────────
 
@@ -36,11 +37,10 @@ export const UPPER_ARCH_ID = "upper-arch";
 export const LOWER_ARCH_ID = "lower-arch";
 
 /**
- * Sculpted warm ceramic enamel tone for both arches.
- * Selected to provide clear anatomical depth, highlights, and contrast against the warm cream background.
+ * Anatomical dental shading: crisp warm white crowns with natural healthy pink gums.
  */
-export const UPPER_ARCH_COLOUR = "#e8e2d8";
-export const LOWER_ARCH_COLOUR = "#e8e2d8";
+export const UPPER_ARCH_COLOUR = "anatomical";
+export const LOWER_ARCH_COLOUR = "anatomical";
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
@@ -61,6 +61,12 @@ export interface AppState {
   lowerVisible: boolean;
   /** Whether autoplay progression is currently running. */
   isPlaying: boolean;
+  /** Whether occlusal bite contacts inspection is active. */
+  contactsActive: boolean;
+  /** Whether dual-stage ghost overlay comparison is active. */
+  overlayActive: boolean;
+  /** Overlay blend ratio (0 = current stage, 1 = initial stage 1). */
+  overlayBlend: number;
   /** AbortController for the in-flight fetch, cancelled on new navigation. */
   abortController: AbortController | null;
 }
@@ -95,6 +101,9 @@ export interface TreatmentAppHandle {
   readonly toggleUpper: () => void;
   readonly toggleLower: () => void;
   readonly openStageSelector: () => void;
+  readonly toggleContacts: () => void;
+  readonly toggleOverlay: () => Promise<void>;
+  readonly setOverlayBlend: (ratio: number) => void;
   readonly getState: () => Readonly<AppState>;
 }
 
@@ -117,8 +126,15 @@ export function createTreatmentApp(
     upperVisible: true,
     lowerVisible: true,
     isPlaying: false,
+    contactsActive: false,
+    overlayActive: false,
+    overlayBlend: 0.5,
     abortController: null,
   };
+
+  const GHOST_UPPER_ID = "tv-ghost-upper";
+  const GHOST_LOWER_ID = "tv-ghost-lower";
+  const GHOST_COLOR = "#38bdf8";
 
   let playTimer: number | null = null;
   let activeUpperId = `${UPPER_ARCH_ID}-0`;
@@ -222,18 +238,23 @@ export function createTreatmentApp(
   toggleSidebarBtn.title = "Toggle stage progression drawer";
 
   // Floating Right Camera Toolbar
-  const camTopBtn = makeBtn("Top", () => viewport.setView("top"), "tv-cam-btn");
-  camTopBtn.title = "Occlusal view (top)";
-  const camFrontBtn = makeBtn("Front", () => viewport.setView("front"), "tv-cam-btn");
+  // Due to dental model scan coordinate space (+Z = Front, -Y = Bottom, -Z = Back, +Y = Top):
+  const camFrontBtn = makeBtn("Front", () => viewport.setView("top"), "tv-cam-btn");
   camFrontBtn.title = "Frontal smile view";
-  const camBottomBtn = makeBtn("Bottom", () => viewport.setView("bottom"), "tv-cam-btn");
-  camBottomBtn.title = "Occlusal view (bottom)";
-  const camBackBtn = makeBtn("Back", () => viewport.setView("back"), "tv-cam-btn");
-  camBackBtn.title = "Lingual view (back)";
+
+  const camBottomBtn = makeBtn("Bottom", () => viewport.setView("front"), "tv-cam-btn");
+  camBottomBtn.title = "Bottom view";
+
+  const camBackBtn = makeBtn("Back", () => viewport.setView("bottom"), "tv-cam-btn");
+  camBackBtn.title = "Lingual/back view";
+
+  const camTopBtn = makeBtn("Top", () => viewport.setView("back"), "tv-cam-btn");
+  camTopBtn.title = "Top occlusal view";
+
   const camResetBtn = makeBtn(
     "⊙ Reset",
     () => {
-      viewport.setView("front");
+      viewport.setView("top");
       viewport.fitAll();
     },
     "tv-cam-btn tv-cam-btn--gold",
@@ -241,10 +262,10 @@ export function createTreatmentApp(
   camResetBtn.title = "Reset view to frontal smile position";
 
   const cameraDockEl = div("tv-camera-dock", [
-    camTopBtn,
     camFrontBtn,
     camBottomBtn,
     camBackBtn,
+    camTopBtn,
     camResetBtn,
   ]);
 
@@ -311,6 +332,30 @@ export function createTreatmentApp(
 
   const beforeAfterPillEl = div("tv-ba-pill", [beforeBtn, afterBtn]);
 
+  // Feature 8: Contacts button
+  const contactsBtn = makeBtn(
+    "🦷 Contacts",
+    () => toggleContacts(),
+    "tv-ba-btn tv-dock-tool-btn",
+  );
+  contactsBtn.title = "Inspect occlusal bite contact collision & clearance heatmap";
+
+  // Feature 9: Overlay button
+  const overlayBtn = makeBtn(
+    "◩ Overlay",
+    () => {
+      void toggleOverlay();
+    },
+    "tv-ba-btn tv-dock-tool-btn",
+  );
+  overlayBtn.title = "Overlay initial stage against current stage with blend slider";
+
+  const dockToolsEl = div("tv-dock-tools", [
+    beforeAfterPillEl,
+    contactsBtn,
+    overlayBtn,
+  ]);
+
   // Interactive scrubber dots container
   const scrubberTrackEl = div("tv-scrubber-track");
   const scrubberFillEl = div("tv-scrubber-fill");
@@ -332,7 +377,7 @@ export function createTreatmentApp(
   ]);
 
   const bottomDockEl = div("tv-bottom-dock tv-stage-controls", [
-    beforeAfterPillEl,
+    dockToolsEl,
     scrubberWrapEl,
     div("tv-bottom-dock__actions", [
       circularPlayBtn,
@@ -341,6 +386,50 @@ export function createTreatmentApp(
       lowerToggleBtn,
     ]),
   ]);
+
+  // Floating Contacts Legend
+  const contactsLegendEl = div("tv-contacts-legend", [
+    div("tv-contacts-legend__header", [
+      span("tv-contacts-legend__title", "Bite Contacts"),
+      makeBtn("✕", () => toggleContacts(), "tv-btn--subtle tv-contacts-legend__close"),
+    ]),
+    div("tv-contacts-legend__scale", [
+      span("tv-contacts-legend__item tv-contacts-legend__item--heavy", "● <0.25mm Heavy"),
+      span("tv-contacts-legend__item tv-contacts-legend__item--medium", "● <0.6mm Medium"),
+      span("tv-contacts-legend__item tv-contacts-legend__item--light", "● <1.0mm Light"),
+    ]),
+  ]);
+  contactsLegendEl.hidden = true;
+
+  // Floating Overlay Blend Panel
+  const overlaySlider = document.createElement("input");
+  overlaySlider.type = "range";
+  overlaySlider.min = "0";
+  overlaySlider.max = "100";
+  overlaySlider.value = "50";
+  overlaySlider.className = "tv-overlay-slider";
+  overlaySlider.addEventListener("input", () => {
+    setOverlayBlend(Number(overlaySlider.value) / 100);
+  });
+
+  const overlayPanelEl = div("tv-overlay-panel", [
+    div("tv-overlay-panel__header", [
+      span("tv-overlay-panel__title", "Stage Comparison Overlay"),
+      makeBtn(
+        "✕",
+        () => {
+          void toggleOverlay();
+        },
+        "tv-btn--subtle tv-overlay-panel__close",
+      ),
+    ]),
+    div("tv-overlay-panel__controls", [
+      span("tv-overlay-panel__label", "Stage 1 (Initial)"),
+      overlaySlider,
+      span("tv-overlay-panel__label", "Current Stage"),
+    ]),
+  ]);
+  overlayPanelEl.hidden = true;
 
   // Doctor-only template inspection banner
   const templateNoticeEl = div("tv-template-notice", [
@@ -384,9 +473,12 @@ export function createTreatmentApp(
   const sidebarStageCountEl = div("tv-sidebar__badge", ["Stages"]);
   const sidebarListEl = div("tv-sidebar__list");
 
+  const sidebarBackdrop = div("tv-sidebar-backdrop");
+
   const sidebarEl = div("tv-sidebar", [
     div("tv-sidebar__header", [
       makeBtn("← Back to cases", () => openStageSelector(), "tv-btn--subtle tv-sidebar__back-btn"),
+      makeBtn("✕", () => appEl.classList.remove("tv-app--sidebar-open"), "tv-btn--subtle tv-sidebar__close-btn"),
     ]),
     div("tv-sidebar__card", [
       div("tv-sidebar__avatar", ["👤"]),
@@ -408,6 +500,8 @@ export function createTreatmentApp(
       div("tv-stage__top-right", [gridBtn, recenterBtn, caseSelectorBtn]),
     ]),
     templateNoticeEl,
+    contactsLegendEl,
+    overlayPanelEl,
     cameraDockEl,
     bottomDockEl,
     loadingEl,
@@ -417,7 +511,8 @@ export function createTreatmentApp(
   ]);
 
   // App shell with clean unbranded header, sidebar, and stage
-  const appEl = div("tv-app tv-app--sidebar-open", [
+  const isMobileScreen = typeof window !== "undefined" && window.innerWidth <= 900;
+  const appEl = div(isMobileScreen ? "tv-app" : "tv-app tv-app--sidebar-open", [
     div("tv-header", [
       div("tv-header__brand", [
         heading("3D Treatment Progression"),
@@ -435,10 +530,15 @@ export function createTreatmentApp(
       ]),
     ]),
     div("tv-main-container", [
+      sidebarBackdrop,
       sidebarEl,
       stageEl,
     ]),
   ]);
+
+  sidebarBackdrop.addEventListener("click", () => {
+    appEl.classList.remove("tv-app--sidebar-open");
+  });
 
   root.replaceChildren(appEl);
 
@@ -489,6 +589,15 @@ export function createTreatmentApp(
     viewport.setLayerVisible(activeLowerId, state.lowerVisible);
     if (prevUpperId) viewport.setLayerVisible(prevUpperId, state.upperVisible);
     if (prevLowerId) viewport.setLayerVisible(prevLowerId, state.lowerVisible);
+
+    if (state.overlayActive) {
+      viewport.setLayerVisible(GHOST_UPPER_ID, state.upperVisible);
+      viewport.setLayerVisible(GHOST_LOWER_ID, state.lowerVisible);
+    }
+
+    if (state.contactsActive) {
+      refreshBiteContacts();
+    }
 
     syncArchPillUI();
   }
@@ -682,8 +791,11 @@ export function createTreatmentApp(
       viewport.setLayerOpacity(activeLowerId, 1);
 
       if (isFirstSuccessfulLoad) {
+        viewport.setView("top");
         viewport.fitAll();
       }
+      if (state.contactsActive) refreshBiteContacts();
+      if (state.overlayActive) setOverlayBlend(state.overlayBlend);
     } else {
       // ── Smooth Simultaneous Cross-Dissolve Transition ─────────────────────
       if (transitionAnimId !== null) {
@@ -758,6 +870,8 @@ export function createTreatmentApp(
           viewport.setLayerOpacity(nextLowerId, 1);
           prevUpperId = null;
           prevLowerId = null;
+          if (state.contactsActive) refreshBiteContacts();
+          if (state.overlayActive) setOverlayBlend(state.overlayBlend);
         }
       };
 
@@ -766,6 +880,94 @@ export function createTreatmentApp(
 
     state.currentIndex = displayProgressionIndex;
     syncUI();
+  }
+
+  // ── Feature 8: Contacts Inspection ──────────────────────────────────────────
+
+  function toggleContacts(): void {
+    state.contactsActive = !state.contactsActive;
+    if (state.contactsActive) {
+      if (!state.upperVisible && !state.lowerVisible) {
+        setArchMode("both");
+      }
+      refreshBiteContacts();
+      viewport.setSeparation(0.18);
+      contactsLegendEl.hidden = false;
+      contactsBtn.classList.add("tv-ba-btn--active");
+    } else {
+      contactsLegendEl.hidden = true;
+      contactsBtn.classList.remove("tv-ba-btn--active");
+      viewport.setSeparation(0);
+      viewport.setLayerColour(activeUpperId, UPPER_ARCH_COLOUR);
+      viewport.setLayerColour(activeLowerId, LOWER_ARCH_COLOUR);
+    }
+  }
+
+  function refreshBiteContacts(): void {
+    if (!state.contactsActive) return;
+    const upperGeom = viewport.getLayerGeometry?.(activeUpperId);
+    const lowerGeom = viewport.getLayerGeometry?.(activeLowerId);
+    if (upperGeom && lowerGeom) {
+      applyBiteContacts(upperGeom, lowerGeom);
+      viewport.setLayerColour(activeUpperId, "contacts");
+      viewport.setLayerColour(activeLowerId, "contacts");
+    }
+  }
+
+  // ── Feature 9: Overlay Comparison ─────────────────────────────────────────
+
+  async function toggleOverlay(): Promise<void> {
+    state.overlayActive = !state.overlayActive;
+    if (state.overlayActive) {
+      overlayPanelEl.hidden = false;
+      overlayBtn.classList.add("tv-ba-btn--active");
+      await loadAndDisplayOverlay();
+    } else {
+      overlayPanelEl.hidden = true;
+      overlayBtn.classList.remove("tv-ba-btn--active");
+      viewport.removeLayer(GHOST_UPPER_ID);
+      viewport.removeLayer(GHOST_LOWER_ID);
+      viewport.setLayerOpacity(activeUpperId, 1);
+      viewport.setLayerOpacity(activeLowerId, 1);
+    }
+  }
+
+  function setOverlayBlend(ratio: number): void {
+    state.overlayBlend = ratio;
+    if (!state.overlayActive) return;
+    // ratio 0 = 100% current stage, ratio 1 = 100% initial stage
+    const ghostOpacity = (1 - ratio) * 0.7;
+    const currentOpacity = Math.max(0.25, ratio);
+    viewport.setLayerOpacity(GHOST_UPPER_ID, ghostOpacity);
+    viewport.setLayerOpacity(GHOST_LOWER_ID, ghostOpacity);
+    viewport.setLayerOpacity(activeUpperId, currentOpacity);
+    viewport.setLayerOpacity(activeLowerId, currentOpacity);
+  }
+
+  async function loadAndDisplayOverlay(): Promise<void> {
+    if (!state.overlayActive) return;
+    const stage1 = state.manifest.treatmentStages[0];
+    if (!stage1) return;
+    const outcome = await loadStageModels(stage1.upper, stage1.lower);
+    if (!outcome.ok) return;
+
+    viewport.addLayer({
+      id: GHOST_UPPER_ID,
+      label: "Initial Stage 1 - Upper Ghost",
+      colour: GHOST_COLOR,
+      stl: outcome.models.upperStl,
+    });
+    viewport.addLayer({
+      id: GHOST_LOWER_ID,
+      label: "Initial Stage 1 - Lower Ghost",
+      colour: GHOST_COLOR,
+      stl: outcome.models.lowerStl,
+    });
+
+    viewport.setLayerVisible(GHOST_UPPER_ID, state.upperVisible);
+    viewport.setLayerVisible(GHOST_LOWER_ID, state.lowerVisible);
+
+    setOverlayBlend(state.overlayBlend);
   }
 
   // ── Load a new Case Manifest ──────────────────────────────────────────────
@@ -1172,6 +1374,9 @@ export function createTreatmentApp(
     toggleUpper,
     toggleLower,
     openStageSelector,
+    toggleContacts,
+    toggleOverlay,
+    setOverlayBlend,
     getState: () => ({ ...state }),
   };
 }
