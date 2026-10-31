@@ -7,7 +7,7 @@ export default defineConfig({
   base: process.env["VITE_BASE"] || "/",
   server: {
     port: 5173,
-    open: "/treatment.html",
+    open: "/",
     // Allow Vite to serve files from the workspace root so the public/models symlink resolves.
     fs: {
       allow: ["."],

@@ -9,11 +9,7 @@
 
 import type { CaseManifest, StageDefinition } from "./stage-manifest";
 
-/**
- * Default explicit case manifest mapping the actual supplied assets.
- * Template scans are marked doctorOnly: true and separated into templateStages.
- */
-export const DEFAULT_CASE_MANIFEST: CaseManifest = {
+export const SOUMYA_SARATH_MANIFEST: CaseManifest = {
   caseId: "soumya-sarath",
   patientName: "Soumya Sarath",
   treatmentStages: [
@@ -63,6 +59,60 @@ export const DEFAULT_CASE_MANIFEST: CaseManifest = {
   ],
   ambiguities: [],
 };
+
+/**
+ * 10-Stage Treatment Progression for Patient "Niya Priority" (Ashina Models).
+ * Contains full 10 progressive aligner stages + reference template scan.
+ */
+export const NIYA_PRIORITY_MANIFEST: CaseManifest = {
+  caseId: "niya-priority",
+  patientName: "Niya Priority",
+  treatmentStages: Array.from({ length: 10 }, (_, i) => {
+    const stageNum = i + 1;
+    const pad = String(stageNum).padStart(2, "0");
+    const upperFilename = `Niya Priority Upper jaw - ${pad} - Model.stl`;
+    const lowerFilename = `Niya Priority Lower jaw - ${pad} - Model.stl`;
+    return {
+      id: `stage-${pad}`,
+      stageNumber: stageNum,
+      label: `Stage ${stageNum}`,
+      doctorOnly: false,
+      upper: {
+        filename: upperFilename,
+        url: `/models/Ashina%20models/${encodeURIComponent(upperFilename)}`,
+      },
+      lower: {
+        filename: lowerFilename,
+        url: `/models/Ashina%20models/${encodeURIComponent(lowerFilename)}`,
+      },
+    };
+  }),
+  templateStages: [
+    {
+      id: "template-01",
+      label: "Template (Doctor Reference)",
+      doctorOnly: true,
+      upper: {
+        filename: "Niya Priority Upper jaw - 01 - Template.stl",
+        url: `/models/Ashina%20models/${encodeURIComponent("Niya Priority Upper jaw - 01 - Template.stl")}`,
+      },
+      lower: {
+        filename: "Niya Priority Lower jaw - 01 - Template.stl",
+        url: `/models/Ashina%20models/${encodeURIComponent("Niya Priority Lower jaw - 01 - Template.stl")}`,
+      },
+    },
+  ],
+  ambiguities: [],
+};
+
+/** Default active case is the 10-stage Niya Priority clinical progression */
+export const DEFAULT_CASE_MANIFEST: CaseManifest = NIYA_PRIORITY_MANIFEST;
+
+/** Available pre-loaded demonstration cases */
+export const BUILTIN_CASES: readonly CaseManifest[] = [
+  NIYA_PRIORITY_MANIFEST,
+  SOUMYA_SARATH_MANIFEST,
+];
 
 // ─── Legacy compatibility interface ──────────────────────────────────────────
 

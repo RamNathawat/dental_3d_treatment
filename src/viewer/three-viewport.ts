@@ -4,8 +4,8 @@ import {
   type BufferGeometry,
   Color,
   DirectionalLight,
+  DoubleSide,
   Float32BufferAttribute,
-  FrontSide,
   GridHelper,
   Group,
   HemisphereLight,
@@ -23,6 +23,7 @@ import {
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
+import { capPlanarOpenings } from "./cap-planar";
 import { WELD_FRACTION, type CurvatureKind } from "../domain/curvature";
 import { separationOffsets, type Bounds } from "../domain/explode";
 import type { Matrix4Entries } from "../domain/matrix4";
@@ -101,7 +102,8 @@ const GRID_COLOUR_AXIS  = 0xc2bcb0;  // slightly stronger axis
  * How a surface is shown on it is `layer-surface`'s business, which is what the rest of these
  * fields are declared for.
  */
-interface RenderedLayer extends SurfaceLayer {
+interface RenderedLayer extends Omit<SurfaceLayer, "geometry"> {
+  geometry: BufferGeometry;
   /** The layer's own colour, kept while a curvature ramp is the thing on screen. */
   colour: string;
   readonly triangles: number;
@@ -274,7 +276,9 @@ class ThreeViewport implements Viewport {
   private createLayer(spec: LayerSpec): RenderedLayer {
     let geometry = this.geometryCache.get(spec.stl);
     if (!geometry) {
-      geometry = this.loader.parse(spec.stl);
+      const raw = this.loader.parse(spec.stl);
+      const isUpper = !spec.label.toLowerCase().includes("lower");
+      geometry = capPlanarOpenings(raw, isUpper);
       // Scanner exports often carry unusable facet normals, so shading is derived from
       // the triangles themselves.
       geometry.computeVertexNormals();
@@ -297,7 +301,7 @@ class ThreeViewport implements Viewport {
       roughness: 0.36,   // refined micro-sheen: preserves vivid gingival color without blown-out white glare
       metalness: 0.01,
       vertexColors: isAnatomical && Boolean(geometry.getAttribute("color")),
-      side: FrontSide,
+      side: DoubleSide,
     });
 
     // White on its own, because the ramp that arrives in the vertex colours is the reading.
@@ -306,7 +310,7 @@ class ThreeViewport implements Viewport {
       // The ramp was chosen by what it looks like on a screen, and a tone curve would print it as
       // something else again.
       toneMapped: false,
-      side: FrontSide,
+      side: DoubleSide,
     });
 
     const mesh: Mesh<BufferGeometry, SurfaceMaterial> = new Mesh(
@@ -385,6 +389,20 @@ class ThreeViewport implements Viewport {
 
   getLayerGeometry(id: string): BufferGeometry | null {
     return this.layers.get(id)?.geometry ?? null;
+  }
+
+  setLayerGeometry(id: string, geometry: BufferGeometry): void {
+    const layer = this.layers.get(id);
+    if (!layer) return;
+    layer.geometry = geometry;
+    layer.mesh.geometry = geometry;
+    if (layer.colour === "anatomical") {
+      if (!geometry.getAttribute("color")) {
+        computeAnatomicalColors(geometry, layer.label);
+      }
+      layer.material.vertexColors = Boolean(geometry.getAttribute("color"));
+      layer.material.needsUpdate = true;
+    }
   }
 
   setLayerVisible(id: string, visible: boolean): void {
@@ -937,7 +955,7 @@ function toleranceOf(bounds: Bounds): number {
  *   Y low  → gingival base (attached to mandibular ridge)
  *   Y high → crown tips (pointing upward toward the maxilla)
  */
-function computeAnatomicalColors(geometry: BufferGeometry, label: string): void {
+export function computeAnatomicalColors(geometry: BufferGeometry, label: string): void {
   const posAttr = geometry.getAttribute("position");
   if (!posAttr) return;
 

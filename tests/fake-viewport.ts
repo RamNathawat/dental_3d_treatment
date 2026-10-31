@@ -71,6 +71,10 @@ export class FakeViewport implements Viewport, ViewController {
     return this.layerGeometries.get(id) ?? null;
   }
 
+  setLayerGeometry(id: string, geometry: import("three").BufferGeometry): void {
+    this.layerGeometries.set(id, geometry);
+  }
+
   setLayerVisible(id: string, visible: boolean): void {
     this.visibilityChanges.push({ id, visible });
   }

@@ -123,48 +123,76 @@ body {
   justify-content: space-between;
   height: var(--tv-header-h);
   padding: 0 1.5rem;
-  background: var(--tv-surface-0);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--tv-border);
-  box-shadow: var(--tv-shadow-sm);
+  box-shadow: 0 2px 10px rgba(45, 38, 28, 0.04);
   z-index: 30;
 }
 
 .tv-header__brand {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
+  gap: 0.75rem;
 }
 
-.tv-brand {
-  margin: 0;
-  font-size: 1.25rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--tv-text);
+.tv-header__title-wrap {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
 }
 
 .tv-brand {
   margin: 0;
+  font-family: "Plus Jakarta Sans", system-ui, sans-serif;
   font-size: 1.15rem;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-weight: 750;
+  letter-spacing: -0.025em;
   color: var(--tv-text);
   display: flex;
   align-items: center;
-  gap: 0.5rem;
 }
 
-.tv-header__sub {
-  color: var(--tv-text-sub);
-  font-size: 0.82rem;
-  font-weight: 500;
-  margin-left: 0.75rem;
-  padding: 0.2rem 0.6rem;
-  background: var(--tv-surface-sunken);
+.tv-header__divider {
+  width: 1px;
+  height: 1.35rem;
+  background: rgba(206, 198, 182, 0.55);
+}
+
+.tv-header__sub.tv-header__patient-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.30rem 0.85rem;
+  background: #fdfbf7;
+  border: 1px solid rgba(206, 198, 182, 0.70);
   border-radius: var(--tv-radius-pill);
+  box-shadow: 0 1px 3px rgba(45, 38, 28, 0.04);
+  margin-left: 0;
+}
+
+.tv-header__patient-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #16a34a;
+  box-shadow: 0 0 6px rgba(22, 163, 74, 0.45);
+  flex-shrink: 0;
+}
+
+.tv-header__patient-label {
+  font-size: 0.70rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #87919f;
+}
+
+.tv-header__patient-name {
+  font-size: 0.84rem;
+  font-weight: 750;
+  color: #1b1f24;
+  letter-spacing: -0.01em;
 }
 
 .tv-header__actions {
@@ -227,15 +255,19 @@ body {
 }
 
 .tv-btn--accent {
-  background: var(--tv-gold-gradient);
-  border-color: transparent;
-  color: #ffffff;
-  box-shadow: var(--tv-gold-glow);
+  background: #ffffff;
+  border: 1.5px solid rgba(196, 154, 69, 0.55);
+  color: #8c681b;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(45, 38, 28, 0.05);
 }
 
 .tv-btn--accent:hover:not(:disabled) {
-  background: linear-gradient(135deg, #e0be5d 0%, #c49a45 100%);
-  color: #ffffff;
+  background: #fdfbf7;
+  border-color: #a87e2b;
+  color: #735310;
+  box-shadow: 0 4px 14px rgba(196, 154, 69, 0.16);
+  transform: translateY(-1px);
 }
 
 .tv-btn--subtle {
@@ -268,65 +300,93 @@ body {
 }
 
 .tv-sidebar__header {
-  padding: 0.85rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.1rem 1.25rem 0.85rem;
   border-bottom: 1px solid var(--tv-border-subtle);
 }
 
-.tv-sidebar__back-btn {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--tv-text-sub);
-  padding: 0.3rem 0.5rem;
+.tv-sidebar__header-title {
+  font-size: 0.90rem;
+  font-weight: 750;
+  color: var(--tv-text);
+  letter-spacing: -0.015em;
 }
 
 .tv-sidebar__card {
   display: flex;
   align-items: center;
   gap: 0.85rem;
-  margin: 1rem;
-  padding: 0.9rem 1rem;
-  background: var(--tv-surface-sunken);
-  border: 1px solid var(--tv-border-subtle);
-  border-radius: var(--tv-radius);
+  margin: 1rem 1rem 0.6rem;
+  padding: 0.95rem 1rem;
+  background: linear-gradient(135deg, #ffffff 0%, #faf7f2 100%);
+  border: 1px solid rgba(206, 198, 182, 0.70);
+  border-radius: 14px;
+  box-shadow: 0 3px 12px rgba(45, 38, 28, 0.04), inset 0 1px 0 #ffffff;
 }
 
 .tv-sidebar__avatar {
-  font-size: 1.35rem;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 2.6rem;
+  height: 2.6rem;
   border-radius: 50%;
-  background: #ffffff;
-  border: 1px solid var(--tv-border);
+  background: #f7f4ee;
+  border: 1.5px solid rgba(196, 154, 69, 0.35);
+  color: #8c681b;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: var(--tv-shadow-sm);
+  box-shadow: 0 2px 6px rgba(45, 38, 28, 0.04);
   flex-shrink: 0;
 }
 
+.tv-sidebar__patient-info {
+  flex: 1;
+  min-width: 0;
+}
+
 .tv-sidebar__patient-name {
-  font-weight: 700;
-  font-size: 0.92rem;
+  font-weight: 750;
+  font-size: 0.96rem;
   color: var(--tv-text);
+  letter-spacing: -0.015em;
   line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tv-sidebar__status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+
+.tv-sidebar__status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #16a34a;
+  box-shadow: 0 0 6px rgba(22, 163, 74, 0.45);
+  flex-shrink: 0;
 }
 
 .tv-sidebar__badge {
   display: inline-block;
-  font-size: 0.7rem;
+  font-size: 0.70rem;
   font-weight: 700;
-  color: var(--tv-gold-dark);
-  background: var(--tv-gold-light);
-  border: 1px solid var(--tv-border-gold-subtle);
+  color: #16a34a;
+  background: rgba(22, 163, 74, 0.09);
+  border: 1px solid rgba(22, 163, 74, 0.22);
   border-radius: var(--tv-radius-pill);
-  padding: 0.1rem 0.55rem;
-  margin-top: 0.3rem;
+  padding: 0.12rem 0.55rem;
 }
 
 .tv-sidebar__heading {
-  padding: 0.4rem 1.25rem;
+  padding: 0.5rem 1.25rem 0.35rem;
   font-size: 0.72rem;
-  font-weight: 700;
+  font-weight: 750;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--tv-text-muted);
@@ -335,67 +395,107 @@ body {
 .tv-sidebar__list {
   flex: 1;
   overflow-y: auto;
-  padding: 0 0.75rem 1rem;
+  padding: 0.4rem 0.85rem 1.25rem;
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.5rem;
 }
 
 .tv-stage-card {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.65rem 0.85rem;
-  border: 1px solid var(--tv-border-subtle);
-  border-radius: var(--tv-radius);
+  gap: 0.85rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid rgba(216, 208, 193, 0.60);
+  border-radius: 12px;
   background: #ffffff;
   cursor: pointer;
   text-align: left;
-  transition: all 0.18s ease;
-  box-shadow: var(--tv-shadow-sm);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 1px 4px rgba(45, 38, 28, 0.03);
+  position: relative;
+  overflow: hidden;
 }
 
 .tv-stage-card:hover {
-  border-color: var(--tv-border-gold);
-  background: var(--tv-gold-light);
-  transform: translateY(-1px);
+  border-color: rgba(196, 154, 69, 0.45);
+  background: #fdfbf7;
+  transform: translateY(-1.5px);
+  box-shadow: 0 4px 14px rgba(45, 38, 28, 0.06);
 }
 
 .tv-stage-card--active {
-  border-color: var(--tv-border-gold);
-  background: linear-gradient(135deg, #fffdf8 0%, #fbf6eb 100%);
-  box-shadow: var(--tv-gold-glow);
+  border-color: #c49a45;
+  background: linear-gradient(135deg, #ffffff 0%, #fdfbf7 100%);
+  box-shadow: 0 4px 16px rgba(196, 154, 69, 0.18), 0 1px 2px rgba(196, 154, 69, 0.08);
 }
 
 .tv-stage-card__thumb {
-  font-size: 1.15rem;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 8px;
-  background: var(--tv-surface-sunken);
+  font-size: 0.85rem;
+  font-weight: 750;
+  width: 2.15rem;
+  height: 2.15rem;
+  border-radius: 9px;
+  background: #f4f0e8;
+  color: #555d6b;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
 }
 
 .tv-stage-card--active .tv-stage-card__thumb {
-  background: #ffffff;
-  box-shadow: 0 0 0 1.5px var(--tv-gold);
+  background: #c49a45;
+  color: #ffffff;
+  font-weight: 800;
+  box-shadow: 0 2px 8px rgba(196, 154, 69, 0.35);
+}
+
+.tv-stage-card__info {
+  flex: 1;
+  min-width: 0;
 }
 
 .tv-stage-card__label {
-  font-weight: 600;
-  font-size: 0.84rem;
+  font-weight: 700;
+  font-size: 0.86rem;
   color: var(--tv-text);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tv-stage-card--active .tv-stage-card__label {
-  color: var(--tv-gold-dark);
+  color: #8c681b;
 }
 
 .tv-stage-card__meta {
   font-size: 0.72rem;
+  font-weight: 500;
   color: var(--tv-text-muted);
+  margin-top: 2px;
+}
+
+.tv-stage-card--active .tv-stage-card__meta {
+  color: #a87e2b;
+}
+
+.tv-stage-card__pip {
+  margin-left: auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #c49a45;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  flex-shrink: 0;
+}
+
+.tv-stage-card--active .tv-stage-card__pip {
+  opacity: 1;
+  box-shadow: 0 0 8px rgba(196, 154, 69, 0.6);
 }
 
 /* ── 3D Stage & Canvas ────────────────────────────────────────────────────── */
@@ -976,7 +1076,7 @@ body {
 
 .tv-dock-tool-btn {
   padding: 0.38rem 0.85rem;
-  border: 1px solid var(--tv-border-subtle);
+  border: 1px solid rgba(206, 198, 182, 0.65);
   border-radius: var(--tv-radius-pill);
   background: var(--tv-surface-sunken);
   color: var(--tv-text-sub);
@@ -984,13 +1084,24 @@ body {
   font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.16s ease;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
   white-space: nowrap;
 }
 
-.tv-dock-tool-btn:hover:not(.tv-ba-btn--active) {
+.tv-dock-tool-btn:hover:not(.tv-dock-tool-btn--active):not(.tv-ba-btn--active) {
   color: var(--tv-text);
-  border-color: var(--tv-border);
+  background: #fdfbf7;
+  border-color: rgba(196, 154, 69, 0.4);
+}
+
+.tv-dock-tool-btn.tv-dock-tool-btn--active,
+.tv-dock-tool-btn.tv-ba-btn--active {
+  background: #ffffff !important;
+  border: 1.5px solid var(--tv-gold) !important;
+  color: var(--tv-gold-dark) !important;
+  font-weight: 750 !important;
+  box-shadow: 0 2px 10px rgba(196, 154, 69, 0.22), inset 0 1px 0 #ffffff !important;
+  transform: translateY(-0.5px);
 }
 
 /* ── Contacts Legend ──────────────────────────────────────────────────────── */
@@ -1133,39 +1244,62 @@ body {
 
 @media (max-width: 900px) {
   .tv-header {
-    padding: 0 0.75rem;
-    min-height: 3.2rem;
+    padding: 0 0.85rem;
+    min-height: 3.4rem;
     height: auto;
   }
 
   .tv-header__brand {
-    gap: 0.4rem;
+    gap: 0.5rem;
+    min-width: 0;
   }
 
   .tv-brand {
-    font-size: 1rem;
+    font-size: 0.98rem;
+    white-space: nowrap;
   }
 
-  .tv-header__sub {
+  .tv-header__divider {
     display: none;
+  }
+
+  .tv-header__sub.tv-header__patient-chip {
+    display: inline-flex;
+    padding: 0.22rem 0.55rem;
+    gap: 0.35rem;
+    min-width: 0;
+  }
+
+  .tv-header__patient-label {
+    display: none;
+  }
+
+  .tv-header__patient-name {
+    font-size: 0.74rem;
+    max-width: 105px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .tv-header__actions {
     gap: 0.35rem;
+    flex-shrink: 0;
   }
 
   .tv-header__actions .tv-btn {
-    padding: 0.3rem 0.55rem;
+    padding: 0.32rem 0.60rem;
     font-size: 0.72rem;
+    min-height: 32px;
   }
 
   .tv-sidebar-backdrop {
     display: block;
     position: fixed;
     inset: 0;
-    background: rgba(18, 14, 10, 0.48);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
+    background: rgba(22, 18, 14, 0.45);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
     z-index: 90;
     opacity: 0;
     pointer-events: none;
@@ -1182,11 +1316,11 @@ body {
     top: 0;
     bottom: 0;
     left: 0;
-    width: min(310px, 86vw);
+    width: min(320px, 86vw);
     z-index: 100;
     margin-left: 0 !important;
     transform: translateX(-100%);
-    box-shadow: 0 0 32px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 0 36px rgba(45, 38, 28, 0.25);
     transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
@@ -1198,13 +1332,16 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    padding: 1rem 1.15rem 0.8rem;
   }
 
   .tv-sidebar__close-btn {
     display: inline-flex;
     font-size: 1.15rem;
-    padding: 0.2rem 0.5rem;
+    padding: 0.35rem 0.65rem;
     color: var(--tv-text-sub);
+    min-height: 40px;
+    min-width: 40px;
   }
 
   .tv-stage__top-bar {
@@ -1214,8 +1351,9 @@ body {
   }
 
   .tv-stage__top-left .tv-btn {
-    padding: 0.35rem 0.65rem;
-    font-size: 0.75rem;
+    padding: 0.38rem 0.70rem;
+    font-size: 0.76rem;
+    min-height: 34px;
   }
 
   .tv-arch-pill {
@@ -1225,6 +1363,7 @@ body {
   .tv-arch-pill__btn {
     padding: 0.32rem 0.65rem;
     font-size: 0.72rem;
+    min-height: 30px;
   }
 
   .tv-camera-dock {
@@ -1255,23 +1394,32 @@ body {
   }
 
   .tv-bottom-dock {
-    width: calc(100% - 1rem);
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "tools tools"
+      "scrubber play";
+    align-items: center;
+    gap: 0.45rem 0.65rem;
+    padding: 0.55rem 0.75rem 0.55rem;
+    width: min(440px, calc(100% - 1rem));
     left: 50%;
     transform: translateX(-50%);
-    bottom: 0.5rem;
-    padding: 0.55rem 0.65rem;
-    gap: 0.45rem;
-    flex-direction: column;
-    border-radius: 18px;
-    align-items: stretch;
+    bottom: max(0.6rem, env(safe-area-inset-bottom, 0.6rem));
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(206, 198, 182, 0.75);
+    box-shadow: 0 10px 36px rgba(45, 38, 28, 0.12), 0 2px 8px rgba(45, 38, 28, 0.05);
   }
 
   .tv-dock-tools {
+    grid-area: tools;
     display: flex;
     justify-content: center;
     gap: 0.35rem;
     width: 100%;
-    flex-wrap: wrap;
   }
 
   .tv-ba-pill {
@@ -1279,11 +1427,19 @@ body {
   }
 
   .tv-ba-btn {
-    padding: 0.3rem 0.65rem;
+    padding: 0.32rem 0.68rem;
     font-size: 0.72rem;
+    min-height: 30px;
+  }
+
+  .tv-dock-tool-btn {
+    padding: 0.32rem 0.68rem;
+    font-size: 0.72rem;
+    min-height: 30px;
   }
 
   .tv-scrubber-wrap {
+    grid-area: scrubber;
     min-width: 0;
     width: 100%;
   }
@@ -1293,41 +1449,44 @@ body {
   }
 
   .tv-stepper-btn {
-    width: 1.85rem;
-    height: 1.85rem;
-    font-size: 0.95rem;
+    width: 2rem;
+    height: 2rem;
+    font-size: 1rem;
+    min-width: 2rem;
   }
 
   .tv-bottom-dock__actions {
+    grid-area: play;
     display: flex;
+    align-items: center;
     justify-content: center;
   }
 
   .tv-btn--play-circle {
-    width: 2.35rem;
-    height: 2.35rem;
-    font-size: 0.95rem;
+    width: 2.45rem;
+    height: 2.45rem;
+    font-size: 1rem;
   }
 }
 
-/* ── Tooth Hover Tooltip ──────────────────────────────────────────────────── */
+/* ── Tooth Hover Tooltip (Luxury Light Clinical Aesthetic) ─────────────────── */
 
 .tv-tooth-tooltip {
   position: absolute;
   z-index: 80;
   pointer-events: none;   /* Never blocks clicks or drag */
-  width: 250px;
+  width: 260px;
 
-  background: rgba(16, 21, 32, 0.94);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(20px) saturate(190%);
+  -webkit-backdrop-filter: blur(20px) saturate(190%);
+  border: 1px solid rgba(206, 198, 182, 0.70);
   border-radius: 14px;
   padding: 13px 15px 12px;
   box-shadow:
-    0 12px 36px rgba(0, 0, 0, 0.45),
-    0 2px 10px rgba(0, 0, 0, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+    0 16px 38px rgba(45, 38, 28, 0.14),
+    0 3px 10px rgba(45, 38, 28, 0.06),
+    inset 0 1px 0 #ffffff;
 
   animation: tv-tooltip-in 0.12s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -1346,9 +1505,9 @@ body {
   transform: translateX(-50%) rotate(45deg);
   width: 12px;
   height: 12px;
-  background: rgba(16, 21, 32, 0.94);
-  border-right: 1px solid rgba(255, 255, 255, 0.14);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  background: #ffffff;
+  border-right: 1px solid rgba(206, 198, 182, 0.70);
+  border-bottom: 1px solid rgba(206, 198, 182, 0.70);
 }
 
 /* Header row: FDI badge + Shorthand + Quadrant Chip */
@@ -1362,19 +1521,19 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 2px 9px;
+  padding: 2px 8px;
   border-radius: 6px;
   background: #2563eb;
   color: #ffffff;
-  font-size: 0.82rem;
+  font-size: 0.80rem;
   font-weight: 700;
   letter-spacing: 0.02em;
   line-height: 1.5;
-  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.40);
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.28);
 }
 
 .tv-tooth-tooltip__notation {
-  color: #ffffff;
+  color: #1b1f24;
   font-size: 0.88rem;
   font-weight: 700;
   letter-spacing: 0.01em;
@@ -1386,21 +1545,22 @@ body {
   align-items: center;
   padding: 3px 8px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.72);
+  background: rgba(45, 38, 28, 0.05);
+  color: #555d6b;
+  border: 1px solid rgba(206, 198, 182, 0.40);
   font-size: 0.72rem;
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: 0.01em;
 }
 
 /* Full anatomical tooth name */
 .tv-tooth-tooltip__name {
-  color: #ffffff;
-  font-size: 0.95rem;
+  color: #1b1f24;
+  font-size: 0.94rem;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
   margin: 9px 0 10px 0;
-  line-height: 1.25;
+  line-height: 1.3;
 }
 
 /* Movement row */
@@ -1410,25 +1570,31 @@ body {
   gap: 6px;
   font-size: 0.80rem;
   padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(206, 198, 182, 0.45);
 }
 
 .tv-tooth-tooltip__pulse {
-  width: 15px;
-  height: 15px;
-  color: #60a5fa;
+  width: 14px;
+  height: 14px;
+  color: #2563eb;
   flex-shrink: 0;
 }
 
 .tv-tooth-tooltip__movement-label {
-  color: rgba(255, 255, 255, 0.75);
+  color: #555d6b;
+  font-size: 0.78rem;
+  font-weight: 500;
   flex: 1;
 }
 
 .tv-tooth-tooltip__delta {
-  color: #34d399;   /* luminous mint green matching clinical reference */
+  color: #15803d;
+  background: rgba(22, 163, 74, 0.09);
+  border: 1px solid rgba(22, 163, 74, 0.25);
+  padding: 2px 7px;
+  border-radius: 5px;
   font-weight: 700;
-  font-size: 0.86rem;
+  font-size: 0.84rem;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
 }
@@ -1475,4 +1641,169 @@ body {
   background: rgba(37, 99, 235, 0.35);
   transform: translateY(-50%);
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Clinical Tooth Movement Drawer (Right Side Panel matching reference table)
+   ───────────────────────────────────────────────────────────────────────────── */
+.tv-movement-drawer {
+  position: absolute;
+  top: 60px;
+  right: 16px;
+  bottom: 96px;
+  width: 290px;
+  max-width: calc(100vw - 32px);
+  background: rgba(18, 22, 31, 0.92);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: tvSlideInRight 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes tvSlideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.tv-movement-drawer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tv-movement-drawer__title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tv-movement-drawer__title-wrap h3 {
+  margin: 0;
+  font-size: 0.90rem;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.01em;
+}
+
+.tv-movement-drawer__stage-badge {
+  font-size: 0.70rem;
+  font-weight: 600;
+  color: #60a5fa;
+  font-variant-numeric: tabular-nums;
+}
+
+.tv-movement-drawer__close {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+}
+
+.tv-movement-drawer__close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.tv-movement-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 10px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.tv-movement-section {
+  margin-bottom: 14px;
+}
+
+.tv-movement-section__header {
+  padding: 6px 4px 4px 4px;
+}
+
+.tv-movement-section__title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.tv-movement-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tv-movement-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  transition: background 0.15s ease;
+  user-select: none;
+}
+
+.tv-movement-row:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.tv-movement-row__name {
+  color: rgba(255, 255, 255, 0.82);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-movement-row__delta {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.45);
+  font-variant-numeric: tabular-nums;
+  margin-left: 8px;
+}
+
+.tv-movement-row--moved .tv-movement-row__delta {
+  color: #34d399;   /* Green highlight when tooth has moved */
+  font-weight: 700;
+}
+
+.tv-movement-row--moved .tv-movement-row__name {
+  color: #ffffff;
+}
+
+.tv-stepper-btn--jump {
+  font-size: 0.80rem;
+  padding: 4px 8px;
+}
+
+.tv-stage-grid__item--selected {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.08);
+}
+
 

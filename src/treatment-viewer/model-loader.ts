@@ -11,7 +11,11 @@
 
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import type { ArchAsset } from "./stage-manifest";
+import type { BufferGeometry } from "three";
+import { computeAnatomicalColors } from "../viewer/three-viewport";
+import { capPlanarOpenings } from "../viewer/cap-planar";
+import { computeToothCentroids } from "./tooth-data";
+import type { ArchAsset, StageDefinition } from "./stage-manifest";
 
 export type ModelSource = string | ArchAsset | File | Blob;
 
@@ -85,6 +89,19 @@ export function prefetchStageModels(upper: ModelSource, lower: ModelSource): voi
   void resolveStlBuffer(upper, "Upper jaw (prefetch)");
   void resolveStlBuffer(lower, "Lower jaw (prefetch)");
 }
+
+/**
+ * Pre-warms an entire case progression in the background so that all
+ * intermediate stages load with 0ms latency during playback and scrubbing.
+ */
+export function prewarmAllStages(
+  stages: readonly { upper: ModelSource; lower: ModelSource }[],
+): void {
+  for (const s of stages) {
+    prefetchStageModels(s.upper, s.lower);
+  }
+}
+
 
 interface BufferSuccess {
   readonly ok: true;
@@ -252,3 +269,112 @@ async function fetchStl(
 }
 
 export { stlLoader };
+
+export interface StageGeometries {
+  readonly upper: BufferGeometry;
+  readonly lower: BufferGeometry;
+  readonly upperCentroids: Record<number, [number, number, number]>;
+  readonly lowerCentroids: Record<number, [number, number, number]>;
+}
+
+const stageGeomCache = new Map<string, StageGeometries>();
+
+export function getCachedStageGeometries(
+  stageId: string,
+): StageGeometries | undefined {
+  return stageGeomCache.get(stageId);
+}
+
+export function clearStageGeometryCache(): void {
+  stageGeomCache.clear();
+}
+
+/**
+ * Loads, parses, and caches full Three.js geometries for a stage, including
+ * pre-computed vertex normals, anatomical colors, and per-tooth spatial centroids.
+ *
+ * Subsequent requests for the same stage resolve with 0ms latency.
+ */
+export async function loadStageGeometries(
+  stage: StageDefinition,
+  signal?: AbortSignal,
+): Promise<
+  { ok: true; geometries: StageGeometries } | { ok: false; reason: string }
+> {
+  const cached = stageGeomCache.get(stage.id);
+  if (cached) {
+    return { ok: true, geometries: cached };
+  }
+
+  const outcome = await loadStageModels(stage.upper, stage.lower, signal);
+  if (!outcome.ok) {
+    return outcome;
+  }
+
+  try {
+    const rawUpper = stlLoader.parse(outcome.models.upperStl);
+    const upperGeom = capPlanarOpenings(rawUpper, true);
+    upperGeom.computeVertexNormals();
+    upperGeom.computeBoundingBox();
+    upperGeom.computeBoundingSphere();
+    computeAnatomicalColors(
+      upperGeom,
+      stage.upper.filename || `${stage.label} - Upper`,
+    );
+
+    const rawLower = stlLoader.parse(outcome.models.lowerStl);
+    const lowerGeom = capPlanarOpenings(rawLower, false);
+    lowerGeom.computeVertexNormals();
+    lowerGeom.computeBoundingBox();
+    lowerGeom.computeBoundingSphere();
+    computeAnatomicalColors(
+      lowerGeom,
+      stage.lower.filename || `${stage.label} - Lower`,
+    );
+
+    const upperCentroids = computeToothCentroids(upperGeom, true);
+    const lowerCentroids = computeToothCentroids(lowerGeom, false);
+
+    const geometries: StageGeometries = {
+      upper: upperGeom,
+      lower: lowerGeom,
+      upperCentroids,
+      lowerCentroids,
+    };
+    stageGeomCache.set(stage.id, geometries);
+    return { ok: true, geometries };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Pre-warms and parses all stage 3D geometries in the background,
+ * spaced across ticks so the main thread remains 100% fluid and responsive.
+ */
+export function prewarmAllStageGeometries(
+  stages: readonly StageDefinition[],
+): void {
+  let index = 0;
+  function processNext(): void {
+    if (index >= stages.length) return;
+    const stage = stages[index++];
+    if (!stage) return;
+    if (stageGeomCache.has(stage.id)) {
+      setTimeout(processNext, 16);
+      return;
+    }
+    loadStageGeometries(stage)
+      .then(() => {
+        setTimeout(processNext, 32);
+      })
+      .catch(() => {
+        setTimeout(processNext, 32);
+      });
+  }
+  setTimeout(processNext, 100);
+}
+

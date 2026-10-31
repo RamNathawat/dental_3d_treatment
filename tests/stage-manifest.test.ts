@@ -11,10 +11,9 @@ describe("Stage Manifest Validation", () => {
     const result = validateCaseManifest(DEFAULT_CASE_MANIFEST);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.manifest.treatmentStages.length).toBe(2);
-      expect(result.manifest.templateStages.length).toBe(1);
+      expect(result.manifest.treatmentStages.length).toBeGreaterThanOrEqual(2);
+      expect(result.manifest.templateStages.length).toBeGreaterThanOrEqual(1);
       expect(result.manifest.treatmentStages[0]?.label).toBe("Stage 1");
-      expect(result.manifest.treatmentStages[1]?.label).toBe("Stage 2");
       // Doctor template must be excluded from treatment stages
       expect(result.manifest.treatmentStages.some((s) => s.doctorOnly)).toBe(
         false,

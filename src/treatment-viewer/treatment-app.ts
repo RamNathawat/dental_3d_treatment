@@ -27,12 +27,20 @@ import type {
   StageDefinition,
 } from "./stage-manifest";
 import { pairTreatmentFiles } from "./stage-manifest";
-import { loadStageModels, prefetchStageModels } from "./model-loader";
+import {
+  loadStageModels,
+  prefetchStageModels,
+  prewarmAllStages,
+  loadStageGeometries,
+  prewarmAllStageGeometries,
+  getCachedStageGeometries,
+} from "./model-loader";
 import { applyBiteContacts } from "./bite-contacts";
 import {
   identifyToothAtPoint,
   computeToothCentroids,
   computeToothDisplacements,
+  getClinicalToothList,
 } from "./tooth-data";
 
 // ─── Layer IDs ───────────────────────────────────────────────────────────────
@@ -74,6 +82,8 @@ export interface AppState {
   overlayBlend: number;
   /** AbortController for the in-flight fetch, cancelled on new navigation. */
   abortController: AbortController | null;
+  /** Whether the clinical tooth movements panel is open. */
+  metricsPanelOpen: boolean;
 }
 
 export interface TreatmentAppOptions {
@@ -89,9 +99,9 @@ export interface TreatmentAppOptions {
   ) => Viewport;
   /** The case manifest to load (defaults to DEFAULT_CASE_MANIFEST). */
   readonly caseManifest?: CaseManifest;
-  /** Autoplay interval in milliseconds (defaults to 2000ms). */
+  /** Autoplay interval in milliseconds (defaults to 600ms). */
   readonly autoplayIntervalMs?: number;
-  /** Duration of cross-dissolve transition between stages in ms (defaults to 350ms, 0 for instant). */
+  /** Duration of cross-dissolve transition between stages in ms (defaults to 260ms, 0 for instant). */
   readonly transitionDurationMs?: number;
   /** Whether to load stage 0 automatically on creation (defaults to true). */
   readonly autoLoad?: boolean;
@@ -119,8 +129,8 @@ export function createTreatmentApp(
   options: TreatmentAppOptions = {},
 ): TreatmentAppHandle {
   const makeViewport = options.createViewport ?? createViewport;
-  const autoplayInterval = options.autoplayIntervalMs ?? 1400;
-  const transitionDuration = options.transitionDurationMs ?? 350;
+  const autoplayInterval = options.autoplayIntervalMs ?? 240;
+  const transitionDuration = options.transitionDurationMs ?? 0;
 
   const state: AppState = {
     manifest: options.caseManifest ?? DEFAULT_CASE_MANIFEST,
@@ -135,6 +145,7 @@ export function createTreatmentApp(
     overlayActive: false,
     overlayBlend: 0.5,
     abortController: null,
+    metricsPanelOpen: false,
   };
 
   const GHOST_UPPER_ID = "tv-ghost-upper";
@@ -234,21 +245,21 @@ export function createTreatmentApp(
   const pillLowerBtn = document.createElement("button");
   pillLowerBtn.type = "button";
   pillLowerBtn.className = "tv-arch-pill__btn";
-  pillLowerBtn.innerHTML = `<span class="tv-arch-pill__icon">🦷</span> Lower`;
+  pillLowerBtn.textContent = "Lower";
   pillLowerBtn.title = "View Lower (Mandibular) arch only";
   pillLowerBtn.addEventListener("click", () => setArchMode("lower"));
 
   const pillUpperBtn = document.createElement("button");
   pillUpperBtn.type = "button";
   pillUpperBtn.className = "tv-arch-pill__btn";
-  pillUpperBtn.innerHTML = `<span class="tv-arch-pill__icon">🦷</span> Upper`;
+  pillUpperBtn.textContent = "Upper";
   pillUpperBtn.title = "View Upper (Maxillary) arch only";
   pillUpperBtn.addEventListener("click", () => setArchMode("upper"));
 
   const pillBothBtn = document.createElement("button");
   pillBothBtn.type = "button";
   pillBothBtn.className = "tv-arch-pill__btn tv-arch-pill__btn--active";
-  pillBothBtn.innerHTML = `<span class="tv-arch-pill__icon">🦷</span> Both`;
+  pillBothBtn.textContent = "Both";
   pillBothBtn.title = "View Both arches";
   pillBothBtn.addEventListener("click", () => setArchMode("both"));
 
@@ -274,10 +285,40 @@ export function createTreatmentApp(
   const graphGridEl = div("tv-graph-grid");
   graphGridEl.hidden = true;
 
+  // ── Clinical Tooth Movement Drawer ────────────────────────────────────────
+  const movementDrawerStageBadgeEl = span("tv-movement-drawer__stage-badge", "Stage 1 of 1");
+  const movementUpperListEl = div("tv-movement-list");
+  const movementLowerListEl = div("tv-movement-list");
+
+  const movementDrawerEl = div("tv-movement-drawer", [
+    div("tv-movement-drawer__header", [
+      div("tv-movement-drawer__title-wrap", [
+        (() => { const h3 = document.createElement("h3"); h3.textContent = "Tooth Movements"; return h3; })(),
+        movementDrawerStageBadgeEl,
+      ]),
+      makeBtn("✕", () => toggleMovementsDrawer(), "tv-movement-drawer__close"),
+    ]),
+    div("tv-movement-content", [
+      div("tv-movement-section", [
+        div("tv-movement-section__header", [
+          span("tv-movement-section__title", "Upper Arch (Maxillary)"),
+        ]),
+        movementUpperListEl,
+      ]),
+      div("tv-movement-section", [
+        div("tv-movement-section__header", [
+          span("tv-movement-section__title", "Lower Arch (Mandibular)"),
+        ]),
+        movementLowerListEl,
+      ]),
+    ]),
+  ]);
+  movementDrawerEl.hidden = true;
+
   // Quick tools in top bar
   let isGridVisible = false;
   const gridBtn = makeBtn(
-    "# Grid",
+    "Grid",
     () => {
       isGridVisible = !isGridVisible;
       graphGridEl.hidden = !isGridVisible;
@@ -289,7 +330,7 @@ export function createTreatmentApp(
   gridBtn.title = "Toggle alignment reference grid";
 
   const recenterBtn = makeBtn(
-    "⊙ Recenter",
+    "Recenter",
     () => {
       viewport.setView("front");
       viewport.fitAll();
@@ -299,14 +340,14 @@ export function createTreatmentApp(
   recenterBtn.title = "Reset and frame dental models in center";
 
   const caseSelectorBtn = makeBtn(
-    "📁 Cases",
+    "Cases",
     () => openStageSelector(),
     "tv-btn--tool tv-btn--accent",
   );
   caseSelectorBtn.title = "Inspect stages, doctor template, or load case files";
 
   const toggleSidebarBtn = makeBtn(
-    "☰ Stages",
+    "Stages",
     () => {
       appEl.classList.toggle("tv-app--sidebar-open");
     },
@@ -329,7 +370,7 @@ export function createTreatmentApp(
   camTopBtn.title = "Top occlusal view";
 
   const camResetBtn = makeBtn(
-    "⊙ Reset",
+    "Reset",
     () => {
       viewport.setView("top");
       viewport.fitAll();
@@ -411,7 +452,7 @@ export function createTreatmentApp(
 
   // Feature 8: Contacts button
   const contactsBtn = makeBtn(
-    "🦷 Contacts",
+    "Contacts",
     () => toggleContacts(),
     "tv-ba-btn tv-dock-tool-btn",
   );
@@ -419,7 +460,7 @@ export function createTreatmentApp(
 
   // Feature 9: Overlay button
   const overlayBtn = makeBtn(
-    "◩ Overlay",
+    "Overlay",
     () => {
       void toggleOverlay();
     },
@@ -512,7 +553,7 @@ export function createTreatmentApp(
   const templateNoticeEl = div("tv-template-notice", [
     span(
       "tv-template-badge",
-      "🩺 Doctor Mode: Viewing Reference Template (Excluded from Patient Progression)",
+      "Doctor Mode: Viewing Reference Template (Excluded from Patient Progression)",
     ),
     makeBtn(
       "Return to Patient Progression",
@@ -547,24 +588,44 @@ export function createTreatmentApp(
 
   // Left Collapsible Case Drawer / Sidebar
   const sidebarPatientNameEl = div("tv-sidebar__patient-name", ["Patient Case"]);
-  const sidebarStageCountEl = div("tv-sidebar__badge", ["Stages"]);
+  const sidebarStageCountEl = span("tv-sidebar__badge", "10 Stages");
+  const sidebarStatusDotEl = span("tv-sidebar__status-dot", "");
   const sidebarListEl = div("tv-sidebar__list");
 
   const sidebarBackdrop = div("tv-sidebar-backdrop");
 
+  const avatarSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  avatarSvg.setAttribute("viewBox", "0 0 24 24");
+  avatarSvg.setAttribute("width", "18");
+  avatarSvg.setAttribute("height", "18");
+  avatarSvg.setAttribute("fill", "none");
+  avatarSvg.setAttribute("stroke", "currentColor");
+  avatarSvg.setAttribute("stroke-width", "2");
+  avatarSvg.setAttribute("stroke-linecap", "round");
+  avatarSvg.setAttribute("stroke-linejoin", "round");
+  const avatarPath1 = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  avatarPath1.setAttribute("d", "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2");
+  const avatarPath2 = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  avatarPath2.setAttribute("cx", "12");
+  avatarPath2.setAttribute("cy", "7");
+  avatarPath2.setAttribute("r", "4");
+  avatarSvg.append(avatarPath1, avatarPath2);
+
   const sidebarEl = div("tv-sidebar", [
     div("tv-sidebar__header", [
-      makeBtn("← Back to cases", () => openStageSelector(), "tv-btn--subtle tv-sidebar__back-btn"),
+      span("tv-sidebar__header-title", "Treatment Stages"),
       makeBtn("✕", () => appEl.classList.remove("tv-app--sidebar-open"), "tv-btn--subtle tv-sidebar__close-btn"),
     ]),
     div("tv-sidebar__card", [
-      div("tv-sidebar__avatar", ["👤"]),
+      div("tv-sidebar__avatar", [avatarSvg]),
       div("tv-sidebar__patient-info", [
         sidebarPatientNameEl,
-        sidebarStageCountEl,
+        div("tv-sidebar__status-row", [
+          sidebarStatusDotEl,
+          sidebarStageCountEl,
+        ]),
       ]),
     ]),
-    div("tv-sidebar__heading", ["Treatment Stages"]),
     sidebarListEl,
   ]);
 
@@ -614,6 +675,7 @@ export function createTreatmentApp(
     templateNoticeEl,
     contactsLegendEl,
     overlayPanelEl,
+    movementDrawerEl,
     cameraDockEl,
     bottomDockEl,
     loadingEl,
@@ -628,13 +690,18 @@ export function createTreatmentApp(
   const appEl = div(isMobileScreen ? "tv-app" : "tv-app tv-app--sidebar-open", [
     div("tv-header", [
       div("tv-header__brand", [
-        heading("3D Treatment Progression"),
-        span(
-          "tv-header__sub",
-          state.manifest.patientName
-            ? `Patient: ${state.manifest.patientName}`
-            : "Case Progression",
-        ),
+        div("tv-header__title-wrap", [
+          heading("3D Treatment Progression"),
+        ]),
+        div("tv-header__divider"),
+        div("tv-header__sub tv-header__patient-chip", [
+          span("tv-header__patient-dot", ""),
+          span("tv-header__patient-label", "Patient"),
+          span(
+            "tv-header__patient-name",
+            state.manifest.patientName ?? state.manifest.caseId,
+          ),
+        ]),
       ]),
       div("tv-header__actions", [
         gridBtn,
@@ -835,6 +902,49 @@ export function createTreatmentApp(
 
     const isFirstSuccessfulLoad = state.currentIndex === -1;
 
+    // ── Ultra-Fast Instant Geometry Swap for Video-Like Fluid Playback & Scrubbing ──
+    if (
+      !isFirstSuccessfulLoad &&
+      transitionDuration <= 0 &&
+      viewport.setLayerGeometry &&
+      activeUpperId &&
+      activeLowerId
+    ) {
+      const cached = getCachedStageGeometries(stage.id);
+      if (cached) {
+        state.abortController = null;
+        viewport.setLayerGeometry(activeUpperId, cached.upper);
+        viewport.setLayerGeometry(activeLowerId, cached.lower);
+
+        if (displayProgressionIndex === 0) {
+          stage1UpperCentroids = cached.upperCentroids;
+          stage1LowerCentroids = cached.lowerCentroids;
+          upperToothDisplacements = {};
+          lowerToothDisplacements = {};
+        } else {
+          if (stage1UpperCentroids) {
+            upperToothDisplacements = computeToothDisplacements(
+              stage1UpperCentroids,
+              cached.upperCentroids,
+            );
+          }
+          if (stage1LowerCentroids) {
+            lowerToothDisplacements = computeToothDisplacements(
+              stage1LowerCentroids,
+              cached.lowerCentroids,
+            );
+          }
+        }
+
+        state.currentIndex = displayProgressionIndex;
+        syncUI();
+        refreshMovementDrawer();
+        if (state.contactsActive) refreshBiteContacts();
+        if (state.overlayActive) setOverlayBlend(state.overlayBlend);
+        return;
+      }
+    }
+
     // Only show full blocking loading overlay on initial boot.
     // Stage-to-stage navigation stays seamless without any loading popup or jump.
     if (isFirstSuccessfulLoad) {
@@ -842,6 +952,52 @@ export function createTreatmentApp(
       syncUI();
     }
     state.error = null;
+
+    // Try to load pre-parsed geometries (with normals & colors already computed)
+    const geomOutcome = await loadStageGeometries(stage, controller.signal);
+    if (controller.signal.aborted) return;
+
+    if (
+      geomOutcome.ok &&
+      !isFirstSuccessfulLoad &&
+      transitionDuration <= 0 &&
+      viewport.setLayerGeometry &&
+      activeUpperId &&
+      activeLowerId
+    ) {
+      state.abortController = null;
+      state.loading = false;
+      const cached = geomOutcome.geometries;
+      viewport.setLayerGeometry(activeUpperId, cached.upper);
+      viewport.setLayerGeometry(activeLowerId, cached.lower);
+
+      if (displayProgressionIndex === 0) {
+        stage1UpperCentroids = cached.upperCentroids;
+        stage1LowerCentroids = cached.lowerCentroids;
+        upperToothDisplacements = {};
+        lowerToothDisplacements = {};
+      } else {
+        if (stage1UpperCentroids) {
+          upperToothDisplacements = computeToothDisplacements(
+            stage1UpperCentroids,
+            cached.upperCentroids,
+          );
+        }
+        if (stage1LowerCentroids) {
+          lowerToothDisplacements = computeToothDisplacements(
+            stage1LowerCentroids,
+            cached.lowerCentroids,
+          );
+        }
+      }
+
+      state.currentIndex = displayProgressionIndex;
+      syncUI();
+      refreshMovementDrawer();
+      if (state.contactsActive) refreshBiteContacts();
+      if (state.overlayActive) setOverlayBlend(state.overlayBlend);
+      return;
+    }
 
     const outcome = await loadStageModels(
       stage.upper,
@@ -908,24 +1064,47 @@ export function createTreatmentApp(
       if (isFirstSuccessfulLoad) {
         viewport.setView("top");
         viewport.fitAll();
+        prewarmAllStageGeometries(state.manifest.treatmentStages);
       }
 
       // Capture Stage 1 centroids or compute per-tooth displacements for subsequent stages
-      const ug = viewport.getLayerGeometry?.(activeUpperId);
-      const lg = viewport.getLayerGeometry?.(activeLowerId);
-      if (displayProgressionIndex === 0) {
-        if (ug) stage1UpperCentroids = computeToothCentroids(ug, true);
-        if (lg) stage1LowerCentroids = computeToothCentroids(lg, false);
-        upperToothDisplacements = {};
-        lowerToothDisplacements = {};
-      } else {
-        if (ug && stage1UpperCentroids) {
-          const currUpper = computeToothCentroids(ug, true);
-          upperToothDisplacements = computeToothDisplacements(stage1UpperCentroids, currUpper);
+      if (geomOutcome.ok) {
+        if (displayProgressionIndex === 0) {
+          stage1UpperCentroids = geomOutcome.geometries.upperCentroids;
+          stage1LowerCentroids = geomOutcome.geometries.lowerCentroids;
+          upperToothDisplacements = {};
+          lowerToothDisplacements = {};
+        } else {
+          if (stage1UpperCentroids) {
+            upperToothDisplacements = computeToothDisplacements(
+              stage1UpperCentroids,
+              geomOutcome.geometries.upperCentroids,
+            );
+          }
+          if (stage1LowerCentroids) {
+            lowerToothDisplacements = computeToothDisplacements(
+              stage1LowerCentroids,
+              geomOutcome.geometries.lowerCentroids,
+            );
+          }
         }
-        if (lg && stage1LowerCentroids) {
-          const currLower = computeToothCentroids(lg, false);
-          lowerToothDisplacements = computeToothDisplacements(stage1LowerCentroids, currLower);
+      } else {
+        const ug = viewport.getLayerGeometry?.(activeUpperId);
+        const lg = viewport.getLayerGeometry?.(activeLowerId);
+        if (displayProgressionIndex === 0) {
+          if (ug) stage1UpperCentroids = computeToothCentroids(ug, true);
+          if (lg) stage1LowerCentroids = computeToothCentroids(lg, false);
+          upperToothDisplacements = {};
+          lowerToothDisplacements = {};
+        } else {
+          if (ug && stage1UpperCentroids) {
+            const currUpper = computeToothCentroids(ug, true);
+            upperToothDisplacements = computeToothDisplacements(stage1UpperCentroids, currUpper);
+          }
+          if (lg && stage1LowerCentroids) {
+            const currLower = computeToothCentroids(lg, false);
+            lowerToothDisplacements = computeToothDisplacements(stage1LowerCentroids, currLower);
+          }
         }
       }
 
@@ -1034,12 +1213,74 @@ export function createTreatmentApp(
 
     state.currentIndex = displayProgressionIndex;
     syncUI();
+    refreshMovementDrawer();
+  }
+
+  // ── Clinical Tooth Movements Drawer ─────────────────────────────────────────
+
+  function toggleMovementsDrawer(): void {
+    state.metricsPanelOpen = !state.metricsPanelOpen;
+    movementDrawerEl.hidden = !state.metricsPanelOpen;
+    if (state.metricsPanelOpen) {
+      refreshMovementDrawer();
+    }
+  }
+
+  function refreshMovementDrawer(): void {
+    if (!state.metricsPanelOpen) return;
+
+    const stages = state.manifest.treatmentStages;
+    const count = stages.length;
+    const idx = state.currentIndex;
+    const current = stages[idx];
+
+    // Update stage badge
+    if (current) {
+      const stageNum = current.stageNumber ?? idx + 1;
+      movementDrawerStageBadgeEl.textContent =
+        idx === 0
+          ? `Initial (Stage ${stageNum})`
+          : `Stage ${stageNum} of ${count}`;
+    }
+
+    // Render tooth rows for upper arch
+    const upperItems = getClinicalToothList(true, upperToothDisplacements);
+    movementUpperListEl.replaceChildren(
+      ...upperItems
+        .map(item => buildMovementRow(item.fdi, item.fullLabel, item.displacementMm)),
+    );
+
+    // Render tooth rows for lower arch
+    const lowerItems = getClinicalToothList(false, lowerToothDisplacements);
+    movementLowerListEl.replaceChildren(
+      ...lowerItems.map(item => buildMovementRow(item.fdi, item.fullLabel, item.displacementMm)),
+    );
+  }
+
+  function buildMovementRow(
+    fdi: number,
+    label: string,
+    displacementMm: number,
+  ): HTMLDivElement {
+    const moved = displacementMm > 0.05; // >0.05mm threshold to mark as "moved"
+    const row = div(
+      moved ? "tv-movement-row tv-movement-row--moved" : "tv-movement-row",
+    );
+    const namePart = span("tv-movement-row__name", `#${fdi} ${label}`);
+    const deltaPart = span(
+      "tv-movement-row__delta",
+      moved ? `${displacementMm.toFixed(2)} mm` : "—",
+    );
+    row.append(namePart, deltaPart);
+    return row;
   }
 
   // ── Feature 8: Contacts Inspection ──────────────────────────────────────────
 
   function toggleContacts(): void {
     state.contactsActive = !state.contactsActive;
+    contactsBtn.classList.toggle("tv-dock-tool-btn--active", state.contactsActive);
+    contactsBtn.classList.toggle("tv-ba-btn--active", state.contactsActive);
     if (state.contactsActive) {
       if (!state.upperVisible && !state.lowerVisible) {
         setArchMode("both");
@@ -1047,10 +1288,8 @@ export function createTreatmentApp(
       refreshBiteContacts();
       viewport.setSeparation(0);
       contactsLegendEl.hidden = false;
-      contactsBtn.classList.add("tv-ba-btn--active");
     } else {
       contactsLegendEl.hidden = true;
-      contactsBtn.classList.remove("tv-ba-btn--active");
       viewport.setSeparation(0);
       viewport.setLayerColour(activeUpperId, UPPER_ARCH_COLOUR);
       viewport.setLayerColour(activeLowerId, LOWER_ARCH_COLOUR);
@@ -1072,13 +1311,13 @@ export function createTreatmentApp(
 
   async function toggleOverlay(): Promise<void> {
     state.overlayActive = !state.overlayActive;
+    overlayBtn.classList.toggle("tv-dock-tool-btn--active", state.overlayActive);
+    overlayBtn.classList.toggle("tv-ba-btn--active", state.overlayActive);
     if (state.overlayActive) {
       overlayPanelEl.hidden = false;
-      overlayBtn.classList.add("tv-ba-btn--active");
       await loadAndDisplayOverlay();
     } else {
       overlayPanelEl.hidden = true;
-      overlayBtn.classList.remove("tv-ba-btn--active");
       viewport.removeLayer(GHOST_UPPER_ID);
       viewport.removeLayer(GHOST_LOWER_ID);
       viewport.setLayerOpacity(activeUpperId, 1);
@@ -1151,11 +1390,10 @@ export function createTreatmentApp(
     sliderEl.value = "1";
 
     // Update patient brand in header
-    const subEl = root.querySelector(".tv-header__sub");
-    if (subEl) {
-      subEl.textContent = newManifest.patientName
-        ? `Patient: ${newManifest.patientName}`
-        : `Case: ${newManifest.caseId}`;
+    const patientNameEl = root.querySelector(".tv-header__patient-name");
+    if (patientNameEl) {
+      patientNameEl.textContent =
+        newManifest.patientName ?? newManifest.caseId;
     }
 
     // Rebuild dots and sidebar for the new case
@@ -1164,7 +1402,7 @@ export function createTreatmentApp(
 
     // Report ambiguities if any exist
     if (newManifest.ambiguities.length > 0) {
-      ambiguityBannerEl.textContent = `⚠ ${newManifest.ambiguities.length} pairing ambiguity detected: ${newManifest.ambiguities[0]}`;
+      ambiguityBannerEl.textContent = `${newManifest.ambiguities.length} pairing ambiguity detected: ${newManifest.ambiguities[0]}`;
       ambiguityBannerEl.hidden = false;
     } else {
       ambiguityBannerEl.hidden = true;
@@ -1172,6 +1410,9 @@ export function createTreatmentApp(
 
     if (newManifest.treatmentStages.length > 0) {
       await navigate(0);
+      // Background prewarm: load and parse all subsequent stage geometries into cache silently
+      void prewarmAllStages(newManifest.treatmentStages);
+      prewarmAllStageGeometries(newManifest.treatmentStages);
     } else {
       state.error = "This case has no patient-visible treatment stages.";
       syncUI();
@@ -1225,12 +1466,13 @@ export function createTreatmentApp(
       card.type = "button";
       card.className = "tv-stage-card";
       card.title = `Go to ${stg.label}`;
-      const thumb = div("tv-stage-card__thumb", ["🦷"]);
+      const thumb = div("tv-stage-card__thumb", [String(stg.stageNumber ?? idx + 1)]);
       const info = div("tv-stage-card__info", [
         div("tv-stage-card__label", [stg.label]),
         div("tv-stage-card__meta", [`Stage ${stg.stageNumber ?? idx + 1} of ${count}`]),
       ]);
-      card.append(thumb, info);
+      const pip = div("tv-stage-card__pip");
+      card.append(thumb, info, pip);
       card.addEventListener("click", () => {
         stopPlay();
         void navigate(idx);
@@ -1290,7 +1532,7 @@ export function createTreatmentApp(
     loadingEl.hidden = !state.loading;
 
     if (state.error !== null) {
-      statusEl.textContent = `⚠ ${state.error}`;
+      statusEl.textContent = state.error;
       statusEl.className = "tv-status tv-status--error";
       statusEl.hidden = false;
     } else if (state.loading) {
@@ -1316,7 +1558,7 @@ export function createTreatmentApp(
       heading(
         `Case Setup: ${state.manifest.patientName ?? state.manifest.caseId}`,
       ),
-      makeBtn("✕ Close", () => backdrop.remove(), "tv-btn--subtle"),
+      makeBtn("Close", () => backdrop.remove(), "tv-btn--subtle"),
     ]);
 
     // Ambiguities Section
@@ -1324,7 +1566,7 @@ export function createTreatmentApp(
     if (state.manifest.ambiguities.length > 0) {
       ambiguitySection.append(
         div("tv-modal__subtitle--danger", [
-          `⚠ Detected Ambiguities (${state.manifest.ambiguities.length}):`,
+          `Detected Ambiguities (${state.manifest.ambiguities.length}):`,
         ]),
         ...state.manifest.ambiguities.map((a) =>
           div("tv-ambiguity-item", [`• ${a}`]),
@@ -1333,7 +1575,7 @@ export function createTreatmentApp(
     } else {
       ambiguitySection.append(
         div("tv-modal__subtitle--success", [
-          "✓ All treatment stages and arch pairings are validated.",
+          "All treatment stages and arch pairings are validated.",
         ]),
       );
     }
@@ -1420,7 +1662,7 @@ export function createTreatmentApp(
     fileInput.style.display = "none";
 
     const uploadBtn = makeBtn(
-      "📁 Select STL Files to Ingest & Pair…",
+      "Select STL Files to Ingest & Pair…",
       () => fileInput.click(),
       "tv-btn--primary",
     );
@@ -1460,7 +1702,7 @@ export function createTreatmentApp(
       if (paired.ambiguities.length > 0) {
         validationResultEl.append(
           div("tv-modal__subtitle--danger", [
-            `⚠ Ambiguities Detected (${paired.ambiguities.length}):`,
+            `Ambiguities Detected (${paired.ambiguities.length}):`,
           ]),
           ...paired.ambiguities.map((a) =>
             div("tv-ambiguity-item", [`• ${a}`]),
@@ -1470,7 +1712,7 @@ export function createTreatmentApp(
 
       if (paired.treatmentStages.length > 0) {
         const successMsg = div("tv-validation-success", [
-          `✓ Successfully paired ${paired.treatmentStages.length} treatment stages (${paired.templateStages.length} template reference scans).`,
+          `Successfully paired ${paired.treatmentStages.length} treatment stages (${paired.templateStages.length} template reference scans).`,
         ]);
         const loadBtn = makeBtn(
           "Load Validated Case Into Viewer",

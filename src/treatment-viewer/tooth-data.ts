@@ -264,3 +264,72 @@ export function toothInfoForLayerId(layerId: string): {
   }
   return null;
 }
+
+export interface ClinicalToothItem {
+  readonly fdi: number;
+  readonly sidePrefix: "(R)" | "(L)";
+  readonly toothName: string;
+  readonly fullLabel: string;
+  readonly isUpper: boolean;
+  readonly displacementMm: number;
+}
+
+export const UPPER_TEETH_ORDER: readonly { fdi: number; sidePrefix: "(R)" | "(L)"; name: string }[] = [
+  { fdi: 18, sidePrefix: "(R)", name: "Third Molar" },
+  { fdi: 17, sidePrefix: "(R)", name: "Second Molar" },
+  { fdi: 16, sidePrefix: "(R)", name: "First Molar" },
+  { fdi: 15, sidePrefix: "(R)", name: "Second Premolar" },
+  { fdi: 14, sidePrefix: "(R)", name: "First Premolar" },
+  { fdi: 13, sidePrefix: "(R)", name: "Canine" },
+  { fdi: 12, sidePrefix: "(R)", name: "Lateral Incisor" },
+  { fdi: 11, sidePrefix: "(R)", name: "Central Incisor" },
+  { fdi: 21, sidePrefix: "(L)", name: "Central Incisor" },
+  { fdi: 22, sidePrefix: "(L)", name: "Lateral Incisor" },
+  { fdi: 23, sidePrefix: "(L)", name: "Canine" },
+  { fdi: 24, sidePrefix: "(L)", name: "First Premolar" },
+  { fdi: 25, sidePrefix: "(L)", name: "Second Premolar" },
+  { fdi: 26, sidePrefix: "(L)", name: "First Molar" },
+  { fdi: 27, sidePrefix: "(L)", name: "Second Molar" },
+  { fdi: 28, sidePrefix: "(L)", name: "Third Molar" },
+];
+
+export const LOWER_TEETH_ORDER: readonly { fdi: number; sidePrefix: "(R)" | "(L)"; name: string }[] = [
+  { fdi: 38, sidePrefix: "(L)", name: "Third Molar" },
+  { fdi: 37, sidePrefix: "(L)", name: "Second Molar" },
+  { fdi: 36, sidePrefix: "(L)", name: "First Molar" },
+  { fdi: 35, sidePrefix: "(L)", name: "Second Premolar" },
+  { fdi: 34, sidePrefix: "(L)", name: "First Premolar" },
+  { fdi: 33, sidePrefix: "(L)", name: "Canine" },
+  { fdi: 32, sidePrefix: "(L)", name: "Lateral Incisor" },
+  { fdi: 31, sidePrefix: "(L)", name: "Central Incisor" },
+  { fdi: 41, sidePrefix: "(R)", name: "Central Incisor" },
+  { fdi: 42, sidePrefix: "(R)", name: "Lateral Incisor" },
+  { fdi: 43, sidePrefix: "(R)", name: "Canine" },
+  { fdi: 44, sidePrefix: "(R)", name: "First Premolar" },
+  { fdi: 45, sidePrefix: "(R)", name: "Second Premolar" },
+  { fdi: 46, sidePrefix: "(R)", name: "First Molar" },
+  { fdi: 47, sidePrefix: "(R)", name: "Second Molar" },
+  { fdi: 48, sidePrefix: "(R)", name: "Third Molar" },
+];
+
+/**
+ * Returns structured clinical tooth list with real-time displacement values.
+ */
+export function getClinicalToothList(
+  isUpper: boolean,
+  displacements?: Record<number, number> | null,
+): ClinicalToothItem[] {
+  const order = isUpper ? UPPER_TEETH_ORDER : LOWER_TEETH_ORDER;
+  return order.map((item) => {
+    const d = displacements?.[item.fdi] ?? 0;
+    return {
+      fdi: item.fdi,
+      sidePrefix: item.sidePrefix,
+      toothName: item.name,
+      fullLabel: `${item.sidePrefix} ${item.name}`,
+      isUpper,
+      displacementMm: d,
+    };
+  });
+}
+
