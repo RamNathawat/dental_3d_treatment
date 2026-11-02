@@ -11,7 +11,7 @@
 
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import type { BufferGeometry } from "three";
+import type { BufferGeometry, Mesh } from "three";
 import { computeAnatomicalColors } from "../viewer/three-viewport";
 import { capPlanarOpenings } from "../viewer/cap-planar";
 import { computeToothCentroids } from "./tooth-data";
@@ -217,11 +217,32 @@ export async function convertGlbToStlBuffer(glbBuffer: ArrayBuffer): Promise<Arr
 }
 
 const bufferCache = new Map<string, ArrayBuffer>();
+const rawGlbCache = new Map<string, ArrayBuffer>();
 const inFlightFetches = new Map<string, Promise<BufferOutcome>>();
 
 export function clearStlBufferCache(): void {
   bufferCache.clear();
+  rawGlbCache.clear();
   inFlightFetches.clear();
+}
+
+/** Extracts native BufferGeometry directly from an in-memory GLB buffer in ~10ms */
+export async function extractGeometryFromGlb(glbBuffer: ArrayBuffer): Promise<BufferGeometry | null> {
+  const gltfLoader = new GLTFLoader();
+  const gltf = await gltfLoader.parseAsync(glbBuffer, "");
+  let geom: BufferGeometry | null = null;
+  gltf.scene.traverse((child) => {
+    if ((child as Mesh).isMesh && !geom) {
+      geom = (child as Mesh).geometry;
+    }
+  });
+  if (geom) {
+    if (!(geom as BufferGeometry).getAttribute("normal")) {
+      (geom as BufferGeometry).computeVertexNormals();
+    }
+    return geom;
+  }
+  return null;
 }
 
 async function fetchStl(
@@ -254,6 +275,9 @@ async function fetchStl(
         };
       }
       const buffer = await response.arrayBuffer();
+      if (isGlb(buffer)) {
+        rawGlbCache.set(url, buffer);
+      }
       const finalBuffer = isGlb(buffer) ? await convertGlbToStlBuffer(buffer) : buffer;
       bufferCache.set(url, finalBuffer);
       return { ok: true, buffer: finalBuffer };
@@ -331,25 +355,50 @@ export async function loadStageGeometries(
         return outcome;
       }
 
-      const rawUpper = stlLoader.parse(outcome.models.upperStl);
-      const upperGeom = capPlanarOpenings(rawUpper, true);
-      upperGeom.computeVertexNormals();
+      const getGlbBuffer = (source: ModelSource): ArrayBuffer | undefined => {
+        if (typeof source === "object" && source !== null && "url" in source && source.url) {
+          return rawGlbCache.get(source.url);
+        }
+        if (typeof source === "string") {
+          return rawGlbCache.get(source);
+        }
+        return undefined;
+      };
+
+      const upperGlb = getGlbBuffer(stage.upper);
+      const lowerGlb = getGlbBuffer(stage.lower);
+
+      let upperGeom: BufferGeometry | null = null;
+      if (upperGlb) {
+        upperGeom = await extractGeometryFromGlb(upperGlb);
+      }
+      if (!upperGeom) {
+        const rawUpper = stlLoader.parse(outcome.models.upperStl);
+        upperGeom = capPlanarOpenings(rawUpper, true);
+        upperGeom.computeVertexNormals();
+        computeAnatomicalColors(
+          upperGeom,
+          stage.upper.filename || `${stage.label} - Upper`,
+        );
+      }
       upperGeom.computeBoundingBox();
       upperGeom.computeBoundingSphere();
-      computeAnatomicalColors(
-        upperGeom,
-        stage.upper.filename || `${stage.label} - Upper`,
-      );
 
-      const rawLower = stlLoader.parse(outcome.models.lowerStl);
-      const lowerGeom = capPlanarOpenings(rawLower, false);
-      lowerGeom.computeVertexNormals();
+      let lowerGeom: BufferGeometry | null = null;
+      if (lowerGlb) {
+        lowerGeom = await extractGeometryFromGlb(lowerGlb);
+      }
+      if (!lowerGeom) {
+        const rawLower = stlLoader.parse(outcome.models.lowerStl);
+        lowerGeom = capPlanarOpenings(rawLower, false);
+        lowerGeom.computeVertexNormals();
+        computeAnatomicalColors(
+          lowerGeom,
+          stage.lower.filename || `${stage.label} - Lower`,
+        );
+      }
       lowerGeom.computeBoundingBox();
       lowerGeom.computeBoundingSphere();
-      computeAnatomicalColors(
-        lowerGeom,
-        stage.lower.filename || `${stage.label} - Lower`,
-      );
 
       const upperCentroids = computeToothCentroids(upperGeom, true);
       const lowerCentroids = computeToothCentroids(lowerGeom, false);

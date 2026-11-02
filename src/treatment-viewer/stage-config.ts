@@ -70,8 +70,8 @@ export const NIYA_PRIORITY_MANIFEST: CaseManifest = {
   treatmentStages: Array.from({ length: 10 }, (_, i) => {
     const stageNum = i + 1;
     const pad = String(stageNum).padStart(2, "0");
-    const upperFilename = `Niya Priority Upper jaw - ${pad} - Model.stl`;
-    const lowerFilename = `Niya Priority Lower jaw - ${pad} - Model.stl`;
+    const upperFilename = `Niya Priority Upper jaw - ${pad} - Model.glb`;
+    const lowerFilename = `Niya Priority Lower jaw - ${pad} - Model.glb`;
     return {
       id: `stage-${pad}`,
       stageNumber: stageNum,
@@ -93,12 +93,12 @@ export const NIYA_PRIORITY_MANIFEST: CaseManifest = {
       label: "Template (Doctor Reference)",
       doctorOnly: true,
       upper: {
-        filename: "Niya Priority Upper jaw - 01 - Template.stl",
-        url: `/models/Ashina%20models/${encodeURIComponent("Niya Priority Upper jaw - 01 - Template.stl")}`,
+        filename: "Niya Priority Upper jaw - 01 - Template.glb",
+        url: `/models/Ashina%20models/${encodeURIComponent("Niya Priority Upper jaw - 01 - Template.glb")}`,
       },
       lower: {
-        filename: "Niya Priority Lower jaw - 01 - Template.stl",
-        url: `/models/Ashina%20models/${encodeURIComponent("Niya Priority Lower jaw - 01 - Template.stl")}`,
+        filename: "Niya Priority Lower jaw - 01 - Template.glb",
+        url: `/models/Ashina%20models/${encodeURIComponent("Niya Priority Lower jaw - 01 - Template.glb")}`,
       },
     },
   ],
