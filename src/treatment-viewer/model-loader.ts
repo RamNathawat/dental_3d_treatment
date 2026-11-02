@@ -217,9 +217,11 @@ export async function convertGlbToStlBuffer(glbBuffer: ArrayBuffer): Promise<Arr
 }
 
 const bufferCache = new Map<string, ArrayBuffer>();
+const inFlightFetches = new Map<string, Promise<BufferOutcome>>();
 
 export function clearStlBufferCache(): void {
   bufferCache.clear();
+  inFlightFetches.clear();
 }
 
 async function fetchStl(
@@ -237,35 +239,37 @@ async function fetchStl(
     return { ok: true, buffer: cached };
   }
 
-  let response: Response;
-  try {
-    response = await fetch(url, { signal });
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") throw error;
-    return {
-      ok: false,
-      reason: `Network error fetching "${url}": ${error instanceof Error ? error.message : String(error)}`,
-    };
+  const inFlight = inFlightFetches.get(url);
+  if (inFlight) {
+    return inFlight;
   }
 
-  if (!response.ok) {
-    return {
-      ok: false,
-      reason: `HTTP ${response.status} fetching "${url}"`,
-    };
-  }
+  const promise = (async (): Promise<BufferOutcome> => {
+    try {
+      const response = await fetch(url, { signal });
+      if (!response.ok) {
+        return {
+          ok: false,
+          reason: `HTTP ${response.status} fetching "${url}"`,
+        };
+      }
+      const buffer = await response.arrayBuffer();
+      const finalBuffer = isGlb(buffer) ? await convertGlbToStlBuffer(buffer) : buffer;
+      bufferCache.set(url, finalBuffer);
+      return { ok: true, buffer: finalBuffer };
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      return {
+        ok: false,
+        reason: `Network error fetching "${url}": ${error instanceof Error ? error.message : String(error)}`,
+      };
+    } finally {
+      inFlightFetches.delete(url);
+    }
+  })();
 
-  try {
-    const buffer = await response.arrayBuffer();
-    const finalBuffer = isGlb(buffer) ? await convertGlbToStlBuffer(buffer) : buffer;
-    bufferCache.set(url, finalBuffer);
-    return { ok: true, buffer: finalBuffer };
-  } catch (error) {
-    return {
-      ok: false,
-      reason: `Could not read response from "${url}": ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
+  inFlightFetches.set(url, promise);
+  return promise;
 }
 
 export { stlLoader };
@@ -278,6 +282,12 @@ export interface StageGeometries {
 }
 
 const stageGeomCache = new Map<string, StageGeometries>();
+const inFlightGeoms = new Map<
+  string,
+  Promise<
+    { ok: true; geometries: StageGeometries } | { ok: false; reason: string }
+  >
+>();
 
 export function getCachedStageGeometries(
   stageId: string,
@@ -287,6 +297,7 @@ export function getCachedStageGeometries(
 
 export function clearStageGeometryCache(): void {
   stageGeomCache.clear();
+  inFlightGeoms.clear();
 }
 
 /**
@@ -306,49 +317,63 @@ export async function loadStageGeometries(
     return { ok: true, geometries: cached };
   }
 
-  const outcome = await loadStageModels(stage.upper, stage.lower, signal);
-  if (!outcome.ok) {
-    return outcome;
+  const inFlight = inFlightGeoms.get(stage.id);
+  if (inFlight) {
+    return inFlight;
   }
 
-  try {
-    const rawUpper = stlLoader.parse(outcome.models.upperStl);
-    const upperGeom = capPlanarOpenings(rawUpper, true);
-    upperGeom.computeVertexNormals();
-    upperGeom.computeBoundingBox();
-    upperGeom.computeBoundingSphere();
-    computeAnatomicalColors(
-      upperGeom,
-      stage.upper.filename || `${stage.label} - Upper`,
-    );
+  const promise = (async (): Promise<
+    { ok: true; geometries: StageGeometries } | { ok: false; reason: string }
+  > => {
+    try {
+      const outcome = await loadStageModels(stage.upper, stage.lower, signal);
+      if (!outcome.ok) {
+        return outcome;
+      }
 
-    const rawLower = stlLoader.parse(outcome.models.lowerStl);
-    const lowerGeom = capPlanarOpenings(rawLower, false);
-    lowerGeom.computeVertexNormals();
-    lowerGeom.computeBoundingBox();
-    lowerGeom.computeBoundingSphere();
-    computeAnatomicalColors(
-      lowerGeom,
-      stage.lower.filename || `${stage.label} - Lower`,
-    );
+      const rawUpper = stlLoader.parse(outcome.models.upperStl);
+      const upperGeom = capPlanarOpenings(rawUpper, true);
+      upperGeom.computeVertexNormals();
+      upperGeom.computeBoundingBox();
+      upperGeom.computeBoundingSphere();
+      computeAnatomicalColors(
+        upperGeom,
+        stage.upper.filename || `${stage.label} - Upper`,
+      );
 
-    const upperCentroids = computeToothCentroids(upperGeom, true);
-    const lowerCentroids = computeToothCentroids(lowerGeom, false);
+      const rawLower = stlLoader.parse(outcome.models.lowerStl);
+      const lowerGeom = capPlanarOpenings(rawLower, false);
+      lowerGeom.computeVertexNormals();
+      lowerGeom.computeBoundingBox();
+      lowerGeom.computeBoundingSphere();
+      computeAnatomicalColors(
+        lowerGeom,
+        stage.lower.filename || `${stage.label} - Lower`,
+      );
 
-    const geometries: StageGeometries = {
-      upper: upperGeom,
-      lower: lowerGeom,
-      upperCentroids,
-      lowerCentroids,
-    };
-    stageGeomCache.set(stage.id, geometries);
-    return { ok: true, geometries };
-  } catch (err) {
-    return {
-      ok: false,
-      reason: err instanceof Error ? err.message : String(err),
-    };
-  }
+      const upperCentroids = computeToothCentroids(upperGeom, true);
+      const lowerCentroids = computeToothCentroids(lowerGeom, false);
+
+      const geometries: StageGeometries = {
+        upper: upperGeom,
+        lower: lowerGeom,
+        upperCentroids,
+        lowerCentroids,
+      };
+      stageGeomCache.set(stage.id, geometries);
+      return { ok: true, geometries };
+    } catch (err) {
+      return {
+        ok: false,
+        reason: err instanceof Error ? err.message : String(err),
+      };
+    } finally {
+      inFlightGeoms.delete(stage.id);
+    }
+  })();
+
+  inFlightGeoms.set(stage.id, promise);
+  return promise;
 }
 
 /**

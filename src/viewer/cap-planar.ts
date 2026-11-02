@@ -48,23 +48,49 @@ export function capPlanarOpenings(
     return k1 < k2 ? `${k1}_${k2}` : `${k2}_${k1}`;
   }
 
+  // Find extreme Y bounds to isolate the base planar cut plane
+  let minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < count; i += 3) {
+    const y0 = posAttr.getY(i), y1 = posAttr.getY(i + 1), y2 = posAttr.getY(i + 2);
+    if (y0 < minY) minY = y0; if (y0 > maxY) maxY = y0;
+    if (y1 < minY) minY = y1; if (y1 > maxY) maxY = y1;
+    if (y2 < minY) minY = y2; if (y2 > maxY) maxY = y2;
+  }
+
+  const cutY = isUpper ? maxY : minY;
+  const cutThreshold = 2.0; // only triangles within 2mm of the cut plane can form boundary loops
+
   const pts = new Map<string, Point3D>();
   for (let i = 0; i < numTriangles; i++) {
+    const i3 = i * 3;
+    const y0 = posAttr.getY(i3);
+    const y1 = posAttr.getY(i3 + 1);
+    const y2 = posAttr.getY(i3 + 2);
+
+    // Fast reject: triangles nowhere near the cut plane can never form the base cap
+    if (
+      Math.abs(y0 - cutY) > cutThreshold &&
+      Math.abs(y1 - cutY) > cutThreshold &&
+      Math.abs(y2 - cutY) > cutThreshold
+    ) {
+      continue;
+    }
+
     const v: Point3D[] = [
       {
-        x: posAttr.getX(i * 3),
-        y: posAttr.getY(i * 3),
-        z: posAttr.getZ(i * 3),
+        x: posAttr.getX(i3),
+        y: y0,
+        z: posAttr.getZ(i3),
       },
       {
-        x: posAttr.getX(i * 3 + 1),
-        y: posAttr.getY(i * 3 + 1),
-        z: posAttr.getZ(i * 3 + 1),
+        x: posAttr.getX(i3 + 1),
+        y: y1,
+        z: posAttr.getZ(i3 + 1),
       },
       {
-        x: posAttr.getX(i * 3 + 2),
-        y: posAttr.getY(i * 3 + 2),
-        z: posAttr.getZ(i * 3 + 2),
+        x: posAttr.getX(i3 + 2),
+        y: y2,
+        z: posAttr.getZ(i3 + 2),
       },
     ];
 

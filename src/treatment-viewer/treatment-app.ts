@@ -153,6 +153,8 @@ export function createTreatmentApp(
   const GHOST_COLOR = "#38bdf8";
 
   let playTimer: number | null = null;
+  let pendingStageIndex: number | null = null;
+  let isStageLoading = false;
   let activeUpperId = `${UPPER_ARCH_ID}-0`;
   let activeLowerId = `${LOWER_ARCH_ID}-0`;
   let prevUpperId: string | null = null;
@@ -421,9 +423,20 @@ export function createTreatmentApp(
   }, "tv-stepper-btn");
   nextBtn.title = "Next stage";
 
+  let sliderDebounceTimer: number | null = null;
   sliderEl.addEventListener("input", () => {
     stopPlay();
-    void navigate(Number(sliderEl.value) - 1);
+    const target = Number(sliderEl.value) - 1;
+    pendingStageIndex = target;
+    updateScrubberProgress();
+    syncSidebarSelection();
+    if (sliderDebounceTimer !== null) {
+      clearTimeout(sliderDebounceTimer);
+    }
+    sliderDebounceTimer = window.setTimeout(() => {
+      sliderDebounceTimer = null;
+      void navigate(target);
+    }, 45);
   });
 
   // Before / After Comparison Pill
@@ -823,6 +836,23 @@ export function createTreatmentApp(
     }
   }
 
+  async function stepPlayLoop(): Promise<void> {
+    if (!state.isPlaying) return;
+    const count = state.manifest.treatmentStages.length;
+    if (count <= 1) return;
+
+    const nextIndex = (state.currentIndex + 1) % count;
+    await navigate(nextIndex);
+
+    if (!state.isPlaying) return;
+
+    // At the final outcome stage, pause for 1200ms so user can appreciate the final result before looping
+    const delay = nextIndex === count - 1 ? 1200 : autoplayInterval;
+    playTimer = window.setTimeout(() => {
+      void stepPlayLoop();
+    }, delay);
+  }
+
   function startPlay(): void {
     if (state.isPlaying) return;
     const count = state.manifest.treatmentStages.length;
@@ -834,24 +864,18 @@ export function createTreatmentApp(
     circularPlayBtn.textContent = "⏸";
     circularPlayBtn.classList.add("tv-btn--active");
 
-    if (state.currentIndex >= count - 1) {
-      void navigate(0);
-    } else {
-      void navigate(state.currentIndex + 1);
+    if (playTimer !== null) {
+      clearTimeout(playTimer);
+      playTimer = null;
     }
 
-    playTimer = window.setInterval(() => {
-      if (state.loading) return;
-      const nextIndex = (state.currentIndex + 1) % count;
-      void navigate(nextIndex);
-    }, autoplayInterval);
+    void stepPlayLoop();
   }
 
   function stopPlay(): void {
-    if (!state.isPlaying && playTimer === null) return;
     state.isPlaying = false;
     if (playTimer !== null) {
-      clearInterval(playTimer);
+      clearTimeout(playTimer);
       playTimer = null;
     }
     playBtn.textContent = "▶ Play";
@@ -867,19 +891,31 @@ export function createTreatmentApp(
     if (stages.length === 0) return;
 
     const clamped = Math.max(0, Math.min(stages.length - 1, index));
+    if (clamped === state.currentIndex && !state.activeTemplateStage) return;
+
     const stage = stages[clamped];
     if (!stage) return;
 
     state.activeTemplateStage = null;
     templateNoticeEl.hidden = true;
 
-    await loadAndDisplayStage(stage, clamped);
+    pendingStageIndex = clamped;
+    syncUI();
 
-    // Prefetch adjacent stages into the buffer cache so the next navigation is instant.
+    try {
+      await loadAndDisplayStage(stage, clamped);
+    } finally {
+      pendingStageIndex = null;
+      syncUI();
+    }
+
+    // Prefetch adjacent stages into the buffer cache so subsequent navigations are instant.
     const prev = stages[clamped - 1];
-    const next = stages[clamped + 1];
+    const next1 = stages[clamped + 1];
+    const next2 = stages[clamped + 2];
     if (prev) prefetchStageModels(prev.upper, prev.lower);
-    if (next) prefetchStageModels(next.upper, next.lower);
+    if (next1) prefetchStageModels(next1.upper, next1.lower);
+    if (next2) prefetchStageModels(next2.upper, next2.lower);
   }
 
   async function inspectTemplate(
@@ -951,11 +987,17 @@ export function createTreatmentApp(
       state.loading = true;
       syncUI();
     }
+    isStageLoading = true;
+    syncUI();
     state.error = null;
 
     // Try to load pre-parsed geometries (with normals & colors already computed)
     const geomOutcome = await loadStageGeometries(stage, controller.signal);
-    if (controller.signal.aborted) return;
+    if (controller.signal.aborted) {
+      isStageLoading = false;
+      return;
+    }
+    isStageLoading = false;
 
     if (
       geomOutcome.ok &&
@@ -967,6 +1009,7 @@ export function createTreatmentApp(
     ) {
       state.abortController = null;
       state.loading = false;
+      isStageLoading = false;
       const cached = geomOutcome.geometries;
       viewport.setLayerGeometry(activeUpperId, cached.upper);
       viewport.setLayerGeometry(activeLowerId, cached.lower);
@@ -1440,14 +1483,19 @@ export function createTreatmentApp(
 
   function updateScrubberProgress(): void {
     const count = state.manifest.treatmentStages.length;
+    const targetIdx = pendingStageIndex ?? state.currentIndex;
     const dots = scrubberDotsContainer.querySelectorAll<HTMLButtonElement>(".tv-scrubber-dot");
     dots.forEach((dot, idx) => {
-      dot.classList.toggle("tv-scrubber-dot--active", idx === state.currentIndex);
-      dot.classList.toggle("tv-scrubber-dot--passed", idx < state.currentIndex);
+      dot.classList.toggle("tv-scrubber-dot--active", idx === targetIdx);
+      dot.classList.toggle("tv-scrubber-dot--passed", idx < targetIdx);
+      dot.classList.toggle(
+        "tv-scrubber-dot--loading",
+        idx === pendingStageIndex && pendingStageIndex !== state.currentIndex,
+      );
     });
 
-    if (count > 1 && state.currentIndex >= 0) {
-      const pct = (state.currentIndex / (count - 1)) * 100;
+    if (count > 1 && targetIdx >= 0) {
+      const pct = (targetIdx / (count - 1)) * 100;
       scrubberFillEl.style.width = `${pct}%`;
     } else {
       scrubberFillEl.style.width = "0%";
@@ -1483,9 +1531,14 @@ export function createTreatmentApp(
   }
 
   function syncSidebarSelection(): void {
+    const targetIdx = pendingStageIndex ?? state.currentIndex;
     const cards = sidebarListEl.querySelectorAll<HTMLButtonElement>(".tv-stage-card");
     cards.forEach((card, idx) => {
-      card.classList.toggle("tv-stage-card--active", idx === state.currentIndex);
+      card.classList.toggle("tv-stage-card--active", idx === targetIdx);
+      card.classList.toggle(
+        "tv-stage-card--loading",
+        idx === pendingStageIndex && pendingStageIndex !== state.currentIndex,
+      );
     });
   }
 
@@ -1494,34 +1547,36 @@ export function createTreatmentApp(
   function syncUI(): void {
     const stages = state.manifest.treatmentStages;
     const count = stages.length;
-    const current = stages[state.currentIndex];
+    const targetIdx = pendingStageIndex ?? state.currentIndex;
+    const current = stages[targetIdx];
 
     if (state.activeTemplateStage) {
       stageLabel.textContent = `${state.activeTemplateStage.label} (Doctor Reference)`;
     } else if (current) {
-      const actualNumber = current.stageNumber ?? state.currentIndex + 1;
-      stageLabel.textContent = `Stage ${actualNumber} (${state.currentIndex + 1} of ${count})`;
+      const actualNumber = current.stageNumber ?? targetIdx + 1;
+      const isLoading = isStageLoading && pendingStageIndex !== null && pendingStageIndex !== state.currentIndex;
+      stageLabel.textContent = isLoading
+        ? `Stage ${actualNumber} (${targetIdx + 1} of ${count}) · Loading 3D model…`
+        : `Stage ${actualNumber} (${targetIdx + 1} of ${count})`;
     } else {
       stageLabel.textContent = `Stage — / ${count}`;
     }
 
-    sliderEl.value = String(state.currentIndex + 1);
-    sliderEl.disabled = state.loading || Boolean(state.activeTemplateStage);
+    sliderEl.value = String(targetIdx + 1);
+    sliderEl.disabled = Boolean(state.activeTemplateStage);
 
     prevBtn.disabled =
-      state.loading ||
-      state.currentIndex <= 0 ||
+      targetIdx <= 0 ||
       Boolean(state.activeTemplateStage);
     nextBtn.disabled =
-      state.loading ||
-      state.currentIndex >= count - 1 ||
+      targetIdx >= count - 1 ||
       Boolean(state.activeTemplateStage);
-    playBtn.disabled = state.loading || Boolean(state.activeTemplateStage);
-    circularPlayBtn.disabled = state.loading || Boolean(state.activeTemplateStage);
+    playBtn.disabled = Boolean(state.activeTemplateStage);
+    circularPlayBtn.disabled = Boolean(state.activeTemplateStage);
 
     // Sync Before / After buttons
-    const isBefore = state.currentIndex === 0;
-    const isAfter = count > 0 && state.currentIndex === count - 1;
+    const isBefore = targetIdx === 0;
+    const isAfter = count > 0 && targetIdx === count - 1;
     beforeBtn.classList.toggle("tv-ba-btn--active", isBefore);
     afterBtn.classList.toggle("tv-ba-btn--active", isAfter);
 

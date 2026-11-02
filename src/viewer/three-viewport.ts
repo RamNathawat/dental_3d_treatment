@@ -5,7 +5,6 @@ import {
   Color,
   DirectionalLight,
   DoubleSide,
-  Float32BufferAttribute,
   GridHelper,
   Group,
   HemisphereLight,
@@ -24,6 +23,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { capPlanarOpenings } from "./cap-planar";
+import { computeAnatomicalColors } from "./dental-segmentation";
 import { WELD_FRACTION, type CurvatureKind } from "../domain/curvature";
 import { separationOffsets, type Bounds } from "../domain/explode";
 import type { Matrix4Entries } from "../domain/matrix4";
@@ -955,69 +955,4 @@ function toleranceOf(bounds: Bounds): number {
  *   Y low  → gingival base (attached to mandibular ridge)
  *   Y high → crown tips (pointing upward toward the maxilla)
  */
-export function computeAnatomicalColors(geometry: BufferGeometry, label: string): void {
-  const posAttr = geometry.getAttribute("position");
-  if (!posAttr) return;
-
-  const count = posAttr.count;
-  const colors = new Float32Array(count * 3);
-  const isUpper = !label.toLowerCase().includes("lower");
-
-  // ── Palette (Veer-calibrated Clinical Aesthetic) ───────────────────────────
-  // Tooth enamel: clean bright white with natural ceramic depth.
-  const tipR = 0.96, tipG = 0.95, tipB = 0.93; // incisal tip & body
-  const nckR = 0.91, nckG = 0.88, nckB = 0.82; // cervical margin depth
-
-  // Gingiva: rich, healthy clinical coral-rose (#c43d59) matching Veer reference.
-  const gR = 0.77, gG = 0.24, gB = 0.36;
-
-  // ── Dynamic Y-range detection (Vertical occlusal-gingival axis) ────────────
-  let yMin = Infinity, yMax = -Infinity;
-  for (let i = 0; i < count; i++) {
-    const y = posAttr.getY(i);
-    if (y < yMin) yMin = y;
-    if (y > yMax) yMax = y;
-  }
-  const yRange = yMax - yMin;
-  if (yRange === 0) return; // degenerate geometry
-
-  const CROWN_FRACTION = isUpper ? 0.42 : 0.44;
-  const BLEND_FRACTION = 0.10;
-
-  for (let i = 0; i < count; i++) {
-    const y = posAttr.getY(i);
-    let t: number; // 0 = enamel/crown, 1 = gingiva/gum
-    let crownT: number; // 0 = incisal tip, 1 = cervical neck
-
-    if (isUpper) {
-      // Crown tips are at low Y (pointing down). Gum base is at high Y.
-      const crownEdge = yMin + yRange * CROWN_FRACTION;
-      const gumEdge = yMin + yRange * (CROWN_FRACTION + BLEND_FRACTION);
-      crownT = Math.max(0, Math.min(1, (y - yMin) / (crownEdge - yMin)));
-      t = (y - crownEdge) / (gumEdge - crownEdge);
-    } else {
-      // Crown tips are at high Y (pointing up). Gum base is at low Y.
-      const crownEdge = yMax - yRange * CROWN_FRACTION;
-      const gumEdge = yMax - yRange * (CROWN_FRACTION + BLEND_FRACTION);
-      crownT = Math.max(0, Math.min(1, (yMax - y) / (yMax - crownEdge)));
-      t = (crownEdge - y) / (crownEdge - gumEdge);
-    }
-
-    t = Math.max(0, Math.min(1, t));
-
-    // Subtle tooth crown gradient: incisal edge is brighter; cervical neck has natural dentin warmth
-    const cR = tipR * (1 - crownT * 0.35) + nckR * (crownT * 0.35);
-    const cG = tipG * (1 - crownT * 0.35) + nckG * (crownT * 0.35);
-    const cB = tipB * (1 - crownT * 0.35) + nckB * (crownT * 0.35);
-
-    // Smoothstep transition curve for natural gingival margin definition
-    const s = t * t * (3 - 2 * t);
-    const s2 = s * s * (3 - 2 * s);
-
-    colors[i * 3 + 0] = cR * (1 - s2) + gR * s2;
-    colors[i * 3 + 1] = cG * (1 - s2) + gG * s2;
-    colors[i * 3 + 2] = cB * (1 - s2) + gB * s2;
-  }
-
-  geometry.setAttribute("color", new Float32BufferAttribute(colors, 3));
-}
+export { computeAnatomicalColors } from "./dental-segmentation";
