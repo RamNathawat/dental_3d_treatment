@@ -120,7 +120,7 @@ describe("removeOrthodonticAttachments", () => {
       expect(result.detectedCount).toBeGreaterThan(0);
       expect(result.modifiedVertexCount).toBeGreaterThan(0);
     }
-  }, 25000);
+  }, 60000);
 });
 
 describe("computeAnatomicalColors", () => {

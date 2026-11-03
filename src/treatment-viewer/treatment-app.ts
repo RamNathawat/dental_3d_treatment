@@ -1079,6 +1079,7 @@ export function createTreatmentApp(
         label: `${stage.label} - Upper`,
         colour: UPPER_ARCH_COLOUR,
         stl: outcome.models.upperStl,
+        geometry: geomOutcome.ok ? geomOutcome.geometries.upper : undefined,
       });
 
       const lowerOutcome = viewport.addLayer({
@@ -1086,6 +1087,7 @@ export function createTreatmentApp(
         label: `${stage.label} - Lower`,
         colour: LOWER_ARCH_COLOUR,
         stl: outcome.models.lowerStl,
+        geometry: geomOutcome.ok ? geomOutcome.geometries.lower : undefined,
       });
 
       if (!upperOutcome.ok) {
@@ -1174,6 +1176,7 @@ export function createTreatmentApp(
         label: `${stage.label} - Upper`,
         colour: UPPER_ARCH_COLOUR,
         stl: outcome.models.upperStl,
+        geometry: geomOutcome.ok ? geomOutcome.geometries.upper : undefined,
       });
 
       const lowerOutcome = viewport.addLayer({
@@ -1181,6 +1184,7 @@ export function createTreatmentApp(
         label: `${stage.label} - Lower`,
         colour: LOWER_ARCH_COLOUR,
         stl: outcome.models.lowerStl,
+        geometry: geomOutcome.ok ? geomOutcome.geometries.lower : undefined,
       });
 
       if (!upperOutcome.ok) {
@@ -1384,7 +1388,10 @@ export function createTreatmentApp(
     if (!state.overlayActive) return;
     const stage1 = state.manifest.treatmentStages[0];
     if (!stage1) return;
-    const outcome = await loadStageModels(stage1.upper, stage1.lower);
+    const [outcome, geom1] = await Promise.all([
+      loadStageModels(stage1.upper, stage1.lower),
+      loadStageGeometries(stage1),
+    ]);
     if (!outcome.ok) return;
 
     viewport.addLayer({
@@ -1392,12 +1399,14 @@ export function createTreatmentApp(
       label: "Initial Stage 1 - Upper Ghost",
       colour: GHOST_COLOR,
       stl: outcome.models.upperStl,
+      geometry: geom1.ok ? geom1.geometries.upper : undefined,
     });
     viewport.addLayer({
       id: GHOST_LOWER_ID,
       label: "Initial Stage 1 - Lower Ghost",
       colour: GHOST_COLOR,
       stl: outcome.models.lowerStl,
+      geometry: geom1.ok ? geom1.geometries.lower : undefined,
     });
 
     viewport.setLayerVisible(GHOST_UPPER_ID, state.upperVisible);

@@ -13,6 +13,23 @@ export default defineConfig({
       allow: ["."],
     },
   },
+  plugins: [
+    {
+      name: "clean-dist-models",
+      async closeBundle() {
+        const fs = await import("node:fs");
+        const path = await import("node:path");
+        const distNiya = path.resolve("dist/models/NIYA ");
+        if (fs.existsSync(distNiya)) {
+          fs.rmSync(distNiya, { recursive: true, force: true });
+        }
+        const distM3d = path.resolve("dist/models/Niya Priority.m3d");
+        if (fs.existsSync(distM3d)) {
+          fs.rmSync(distM3d, { force: true });
+        }
+      },
+    },
+  ],
   build: {
     target: "es2022",
     sourcemap: true,
@@ -25,3 +42,4 @@ export default defineConfig({
     },
   },
 });
+

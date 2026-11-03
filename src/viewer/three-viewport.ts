@@ -274,23 +274,30 @@ class ThreeViewport implements Viewport {
   private readonly geometryCache = new Map<ArrayBuffer, BufferGeometry>();
 
   private createLayer(spec: LayerSpec): RenderedLayer {
-    let geometry = this.geometryCache.get(spec.stl);
+    let geometry = spec.geometry;
     if (!geometry) {
-      const raw = this.loader.parse(spec.stl);
-      const isUpper = !spec.label.toLowerCase().includes("lower");
-      geometry = capPlanarOpenings(raw, isUpper);
-      // Scanner exports often carry unusable facet normals, so shading is derived from
-      // the triangles themselves.
-      geometry.computeVertexNormals();
-      geometry.computeBoundingBox();
-      this.geometryCache.set(spec.stl, geometry);
+      if (spec.stl) {
+        geometry = this.geometryCache.get(spec.stl);
+        if (!geometry) {
+          const raw = this.loader.parse(spec.stl);
+          const isUpper = !spec.label.toLowerCase().includes("lower");
+          geometry = capPlanarOpenings(raw, isUpper);
+          // Scanner exports often carry unusable facet normals, so shading is derived from
+          // the triangles themselves.
+          geometry.computeVertexNormals();
+          geometry.computeBoundingBox();
+          this.geometryCache.set(spec.stl, geometry);
+        }
+      } else {
+        throw new Error(`Layer ${spec.id} missing both geometry and stl buffer`);
+      }
     }
 
-    // Always (re)compute anatomical colours so a change in the colour algorithm
-    // is picked up without having to clear the geometry cache.
+    // Only compute anatomical colors if the geometry does not already have native pre-baked colors
     if (spec.colour === "anatomical") {
-      geometry.deleteAttribute("color");
-      computeAnatomicalColors(geometry, spec.label);
+      if (!geometry.getAttribute("color")) {
+        computeAnatomicalColors(geometry, spec.label);
+      }
     }
 
     const isAnatomical = spec.colour === "anatomical";

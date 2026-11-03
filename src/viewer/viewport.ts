@@ -16,8 +16,10 @@ export interface LayerSpec {
   readonly id: string;
   readonly label: string;
   readonly colour: string;
-  /** Raw STL bytes; the viewport decides how to decode them. */
-  readonly stl: ArrayBuffer;
+  /** Raw STL bytes; the viewport decides how to decode them if geometry is not provided. */
+  readonly stl?: ArrayBuffer;
+  /** Direct pre-parsed BufferGeometry (e.g. from native GLB loader). */
+  readonly geometry?: import("three").BufferGeometry;
 }
 
 export type AddLayerOutcome =
