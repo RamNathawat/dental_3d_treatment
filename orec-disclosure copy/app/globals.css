@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  /* Design tokens */
+  --radius-card: 1rem;       /* 16px — squircle cards */
+  --radius-input: 0.75rem;   /* 12px — inputs */
+  --blue: #2463EB;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Prevent invisible text while Inter loads */
+body {
+  font-family: var(--font-sans);
+  background: var(--background);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Prevent layout shift from scrollbar appearing */
+html {
+  scrollbar-gutter: stable;
+}
+
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ─── Squircle form design system ─────────────────────────────────────────── */
+
+/* Text inputs and textareas */
+.disclosure-form input[type="text"],
+.disclosure-form input[type="email"],
+.disclosure-form input[type="number"],
+.disclosure-form input[type="tel"],
+.disclosure-form input[type="date"],
+.disclosure-form textarea {
+  border-radius: var(--radius-input) !important;
+  border-color: #e5e7eb;
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+
+.disclosure-form input[type="text"]:focus,
+.disclosure-form input[type="email"]:focus,
+.disclosure-form input[type="number"]:focus,
+.disclosure-form input[type="tel"]:focus,
+.disclosure-form input[type="date"]:focus,
+.disclosure-form textarea:focus {
+  border-color: var(--blue) !important;
+  box-shadow: 0 0 0 3px rgba(36, 99, 235, 0.1);
+  outline: none;
+}
+
+/* Section cards — the rounded-xl borders around each question block */
+.disclosure-form .rounded-xl {
+  border-radius: var(--radius-card) !important;
+}
+
+/* Radio button accent color */
+.disclosure-form input[type="radio"] {
+  accent-color: var(--blue);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* Checkbox accent */
+.disclosure-form input[type="checkbox"] {
+  accent-color: var(--blue);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+/* Select dropdowns */
+.disclosure-form select {
+  border-radius: var(--radius-input) !important;
+  border-color: #e5e7eb;
+  background-color: #f9fafb;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  color: #1f2937;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.disclosure-form select:focus {
+  border-color: var(--blue) !important;
+  box-shadow: 0 0 0 3px rgba(36, 99, 235, 0.1);
+  outline: none;
+}
+
+/* No-scrollbar utility */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

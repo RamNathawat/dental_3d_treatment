@@ -1,2 +1,38 @@
-node_modules
-orec-disclosure copy
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+.next/
+out/
+build/
+dist/
+
+# Environment files
+.env
+.env.local
+.env*.local
+
+# Vercel
+.vercel
+
+# Debug and logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# System & IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*.tsbuildinfo
+
+# Heavy CAD archives & temporary assets
+*.zip
+*.tar.gz
+*.stl.planed
