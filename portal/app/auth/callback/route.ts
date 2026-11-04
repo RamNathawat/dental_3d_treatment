@@ -9,9 +9,16 @@ export async function GET(request: NextRequest) {
 
   if (code) {
     const cookieStore = await cookies()
+    const supabaseUrl =
+      process.env.NEXT_PUBLIC_SUPABASE_URL ||
+      "https://yrjulcwnabnhgtqebrtn.supabase.co";
+    const supabaseKey =
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+      "sb_publishable_REBvv8NOv8KPkDHw3mVnnQ_rzM2165H";
+
     const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      supabaseUrl,
+      supabaseKey,
       {
         cookies: {
           getAll() { return cookieStore.getAll() },
