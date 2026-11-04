@@ -36,3 +36,10 @@ Thumbs.db
 *.zip
 *.tar.gz
 *.stl.planed
+
+# 3D Dental Model Assets
+models/
+**/public/models/
+*.glb
+*.stl
+*.obj
