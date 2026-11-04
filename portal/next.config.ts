@@ -21,6 +21,15 @@ const nextConfig: NextConfig = {
     },
   ],
 
+  async rewrites() {
+    return [
+      {
+        source: "/treatment.html",
+        destination: "/treatment",
+      },
+    ];
+  },
+
   // Compress output
   compress: true,
 

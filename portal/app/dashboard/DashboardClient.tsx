@@ -75,7 +75,7 @@ export default function DashboardClient({
 
   function handleCopyShareLink(shareToken: string) {
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    const url = `${origin}/treatment.html?case=${shareToken}`;
+    const url = `${origin}/treatment?case=${shareToken}`;
     navigator.clipboard.writeText(url);
     setCopiedToken(shareToken);
     showToast("Patient share link copied to clipboard");
@@ -472,7 +472,7 @@ export default function DashboardClient({
                     <div className="pt-4 border-t border-slate-100/90 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
                       {/* Primary CTA: Launch 3D Progression */}
                       <a
-                        href={`/treatment.html?case=${item.share_token}`}
+                        href={`/treatment?case=${item.share_token}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex-1 py-2.5 px-4 rounded-xl text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 shadow-sm transition-all flex items-center justify-center gap-2 active:scale-98"
