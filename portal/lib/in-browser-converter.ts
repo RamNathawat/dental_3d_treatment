@@ -19,117 +19,205 @@ export interface IngestResult {
 /**
  * Plans and seals the open planar boundary of the dental model.
  */
-function capPlanarOpenings(geometry: THREE.BufferGeometry, isUpper: boolean): THREE.BufferGeometry {
+interface Point3D {
+  x: number;
+  y: number;
+  z: number;
+}
+
+interface EdgeEntry {
+  count: number;
+  v1: Point3D;
+  v2: Point3D;
+  k1: string;
+  k2: string;
+}
+
+/**
+ * Plans and seals the open planar boundary of the dental model using
+ * exact polygon triangulation (Earcut). Properly handles horseshoe/concave arches.
+ */
+function capPlanarOpenings(
+  geometry: THREE.BufferGeometry,
+  isUpper: boolean,
+): THREE.BufferGeometry {
   const posAttr = geometry.getAttribute("position");
   if (!posAttr) return geometry;
 
-  const positions = posAttr.array;
-  let targetPlaneY = isUpper ? -Infinity : Infinity;
+  const count = posAttr.count;
+  const numTriangles = count / 3;
+  const edgeMap = new Map<string, EdgeEntry>();
 
-  // Find planar extreme Y
-  for (let i = 1; i < positions.length; i += 3) {
-    const y = positions[i];
-    if (isUpper) {
-      if (y > targetPlaneY) targetPlaneY = y;
-    } else {
-      if (y < targetPlaneY) targetPlaneY = y;
+  function getPtKey(x: number, y: number, z: number): string {
+    return `${x.toFixed(3)},${y.toFixed(3)},${z.toFixed(3)}`;
+  }
+  function getEdgeKey(k1: string, k2: string): string {
+    return k1 < k2 ? `${k1}_${k2}` : `${k2}_${k1}`;
+  }
+
+  // Find extreme Y bounds to isolate the base planar cut plane
+  let minY = Infinity,
+    maxY = -Infinity;
+  for (let i = 0; i < count; i += 3) {
+    const y0 = posAttr.getY(i),
+      y1 = posAttr.getY(i + 1),
+      y2 = posAttr.getY(i + 2);
+    if (y0 < minY) minY = y0;
+    if (y0 > maxY) maxY = y0;
+    if (y1 < minY) minY = y1;
+    if (y1 > maxY) maxY = y1;
+    if (y2 < minY) minY = y2;
+    if (y2 > maxY) maxY = y2;
+  }
+
+  const cutY = isUpper ? maxY : minY;
+  const cutThreshold = 2.0;
+
+  const pts = new Map<string, Point3D>();
+  for (let i = 0; i < numTriangles; i++) {
+    const i3 = i * 3;
+    const y0 = posAttr.getY(i3);
+    const y1 = posAttr.getY(i3 + 1);
+    const y2 = posAttr.getY(i3 + 2);
+
+    if (
+      Math.abs(y0 - cutY) > cutThreshold &&
+      Math.abs(y1 - cutY) > cutThreshold &&
+      Math.abs(y2 - cutY) > cutThreshold
+    ) {
+      continue;
+    }
+
+    const v: Point3D[] = [
+      { x: posAttr.getX(i3), y: y0, z: posAttr.getZ(i3) },
+      { x: posAttr.getX(i3 + 1), y: y1, z: posAttr.getZ(i3 + 1) },
+      { x: posAttr.getX(i3 + 2), y: y2, z: posAttr.getZ(i3 + 2) },
+    ];
+
+    for (let j = 0; j < 3; j++) {
+      const v1 = v[j]!;
+      const v2 = v[(j + 1) % 3]!;
+      const k1 = getPtKey(v1.x, v1.y, v1.z);
+      const k2 = getPtKey(v2.x, v2.y, v2.z);
+      pts.set(k1, v1);
+      pts.set(k2, v2);
+      const ek = getEdgeKey(k1, k2);
+      let entry = edgeMap.get(ek);
+      if (!entry) {
+        entry = { count: 0, v1, v2, k1, k2 };
+        edgeMap.set(ek, entry);
+      }
+      entry.count++;
     }
   }
 
-  const boundaryEpsilon = 0.45;
-  const edgeCounts = new Map<string, number>();
-  const vertexCoords = new Map<string, [number, number, number]>();
-
-  const vertexCount = posAttr.count;
-  for (let i = 0; i < vertexCount; i += 3) {
-    const p1 = [posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)] as const;
-    const p2 = [posAttr.getX(i + 1), posAttr.getY(i + 1), posAttr.getZ(i + 1)] as const;
-    const p3 = [posAttr.getX(i + 2), posAttr.getY(i + 2), posAttr.getZ(i + 2)] as const;
-
-    const near1 = Math.abs(p1[1] - targetPlaneY) < boundaryEpsilon;
-    const near2 = Math.abs(p2[1] - targetPlaneY) < boundaryEpsilon;
-    const near3 = Math.abs(p3[1] - targetPlaneY) < boundaryEpsilon;
-
-    if (near1 && near2) recordEdge(p1, p2, edgeCounts, vertexCoords);
-    if (near2 && near3) recordEdge(p2, p3, edgeCounts, vertexCoords);
-    if (near3 && near1) recordEdge(p3, p1, edgeCounts, vertexCoords);
-  }
-
-  const boundaryPoints: [number, number, number][] = [];
-  for (const [key, count] of edgeCounts.entries()) {
-    if (count === 1) {
-      const pt = vertexCoords.get(key.split("::")[0]);
-      if (pt) boundaryPoints.push(pt);
+  // Find single-use boundary edges
+  const adj = new Map<string, string[]>();
+  for (const entry of edgeMap.values()) {
+    if (entry.count === 1) {
+      if (!adj.has(entry.k1)) adj.set(entry.k1, []);
+      if (!adj.has(entry.k2)) adj.set(entry.k2, []);
+      adj.get(entry.k1)!.push(entry.k2);
+      adj.get(entry.k2)!.push(entry.k1);
     }
   }
 
-  if (boundaryPoints.length < 3) return geometry;
+  if (adj.size === 0) return geometry;
 
-  let sumX = 0;
-  let sumZ = 0;
-  for (const pt of boundaryPoints) {
-    sumX += pt[0];
-    sumZ += pt[2];
-  }
-  const centroid: [number, number, number] = [
-    sumX / boundaryPoints.length,
-    targetPlaneY,
-    sumZ / boundaryPoints.length,
-  ];
-
-  const sorted = boundaryPoints.slice().sort((a, b) => {
-    return Math.atan2(a[2] - centroid[2], a[0] - centroid[0]) -
-           Math.atan2(b[2] - centroid[2], b[0] - centroid[0]);
-  });
-
-  const newPos: number[] = Array.from(positions);
-  const colorAttr = geometry.getAttribute("color");
-  const newCol: number[] = colorAttr ? Array.from(colorAttr.array) : [];
-  const gumR = 0.792, gumG = 0.565, gumB = 0.565;
-
-  for (let i = 0; i < sorted.length; i++) {
-    const pCur = sorted[i];
-    const pNext = sorted[(i + 1) % sorted.length];
-
-    if (isUpper) {
-      newPos.push(centroid[0], centroid[1], centroid[2]);
-      newPos.push(pCur[0], pCur[1], pCur[2]);
-      newPos.push(pNext[0], pNext[1], pNext[2]);
-    } else {
-      newPos.push(centroid[0], centroid[1], centroid[2]);
-      newPos.push(pNext[0], pNext[1], pNext[2]);
-      newPos.push(pCur[0], pCur[1], pCur[2]);
+  // Extract closed boundary loops
+  const visited = new Set<string>();
+  const loops: string[][] = [];
+  for (const start of adj.keys()) {
+    if (visited.has(start)) continue;
+    const loop = [start];
+    visited.add(start);
+    let curr = start;
+    let prev: string | null = null;
+    while (true) {
+      const neighbors = adj.get(curr);
+      if (!neighbors) break;
+      const next = neighbors.find((n) => n !== prev && !visited.has(n));
+      if (!next) break;
+      visited.add(next);
+      loop.push(next);
+      prev = curr;
+      curr = next;
     }
+    if (loop.length >= 3) loops.push(loop);
+  }
 
-    if (colorAttr) {
-      for (let k = 0; k < 3; k++) {
-        newCol.push(gumR, gumG, gumB);
+  const capTriangles: Point3D[] = [];
+  for (const loop of loops) {
+    const yVals = loop.map((k) => pts.get(k)!.y);
+    const minLoopY = Math.min(...yVals);
+    const maxLoopY = Math.max(...yVals);
+
+    // Only cap loops that lie on a flat cutting plane (tolerance <= 0.6mm)
+    if (maxLoopY - minLoopY > 0.6) continue;
+
+    const points2D = loop.map((k) => {
+      const p = pts.get(k)!;
+      return new THREE.Vector2(p.x, p.z);
+    });
+
+    const triIndices = THREE.ShapeUtils.triangulateShape(points2D, []);
+    let totalAreaY = 0;
+    for (const tri of triIndices) {
+      const i0 = tri[0],
+        i1 = tri[1],
+        i2 = tri[2];
+      if (i0 === undefined || i1 === undefined || i2 === undefined) continue;
+      const p0 = points2D[i0],
+        p1 = points2D[i1],
+        p2 = points2D[i2];
+      if (!p0 || !p1 || !p2) continue;
+      totalAreaY += (p1.y - p0.y) * (p2.x - p0.x) - (p1.x - p0.x) * (p2.y - p0.y);
+    }
+    const targetPositiveY = isUpper;
+    const shouldFlip = targetPositiveY ? totalAreaY < 0 : totalAreaY > 0;
+
+    for (const tri of triIndices) {
+      let i0 = tri[0],
+        i1 = tri[1],
+        i2 = tri[2];
+      if (i0 === undefined || i1 === undefined || i2 === undefined) continue;
+
+      if (shouldFlip) {
+        const tmp = i1;
+        i1 = i2;
+        i2 = tmp;
+      }
+      const k0 = loop[i0],
+        k1 = loop[i1],
+        k2 = loop[i2];
+      if (!k0 || !k1 || !k2) continue;
+      const p0 = pts.get(k0),
+        p1 = pts.get(k1),
+        p2 = pts.get(k2);
+      if (p0 && p1 && p2) {
+        capTriangles.push(p0, p1, p2);
       }
     }
   }
 
-  const capped = new THREE.BufferGeometry();
-  capped.setAttribute("position", new THREE.Float32BufferAttribute(newPos, 3));
-  if (colorAttr) {
-    capped.setAttribute("color", new THREE.Float32BufferAttribute(newCol, 3));
-  }
-  capped.computeVertexNormals();
-  return capped;
-}
+  if (capTriangles.length === 0) return geometry;
 
-function recordEdge(
-  p1: readonly [number, number, number],
-  p2: readonly [number, number, number],
-  edgeCounts: Map<string, number>,
-  coords: Map<string, [number, number, number]>,
-) {
-  const k1 = `${Math.round(p1[0] * 100)}_${Math.round(p1[2] * 100)}`;
-  const k2 = `${Math.round(p2[0] * 100)}_${Math.round(p2[2] * 100)}`;
-  if (k1 === k2) return;
-  coords.set(k1, [p1[0], p1[1], p1[2]]);
-  coords.set(k2, [p2[0], p2[1], p2[2]]);
-  const edgeKey = k1 < k2 ? `${k1}::${k2}` : `${k2}::${k1}`;
-  edgeCounts.set(edgeKey, (edgeCounts.get(edgeKey) || 0) + 1);
+  const oldPositions = posAttr.array;
+  const newPositions = new Float32Array(oldPositions.length + capTriangles.length * 3);
+  newPositions.set(oldPositions, 0);
+
+  let offset = oldPositions.length;
+  for (const pt of capTriangles) {
+    newPositions[offset++] = pt.x;
+    newPositions[offset++] = pt.y;
+    newPositions[offset++] = pt.z;
+  }
+
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(newPositions, 3));
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
 }
 
 /**
@@ -334,6 +422,7 @@ export async function processDentalZipInBrowser(
           .from("treatment-models")
           .upload(storagePath, glbBlob, {
             contentType: "model/gltf-binary",
+            cacheControl: "31536000",
             upsert: true,
           });
 

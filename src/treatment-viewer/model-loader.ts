@@ -278,9 +278,8 @@ async function fetchStl(
       if (isGlb(buffer)) {
         rawGlbCache.set(url, buffer);
       }
-      const finalBuffer = isGlb(buffer) ? await convertGlbToStlBuffer(buffer) : buffer;
-      bufferCache.set(url, finalBuffer);
-      return { ok: true, buffer: finalBuffer };
+      bufferCache.set(url, buffer);
+      return { ok: true, buffer };
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") throw error;
       return {
@@ -373,13 +372,20 @@ export async function loadStageGeometries(
         upperGeom = await extractGeometryFromGlb(upperGlb);
       }
       if (!upperGeom) {
-        const rawUpper = stlLoader.parse(outcome.models.upperStl);
-        upperGeom = capPlanarOpenings(rawUpper, true);
-        upperGeom.computeVertexNormals();
-        computeAnatomicalColors(
-          upperGeom,
-          stage.upper.filename || `${stage.label} - Upper`,
-        );
+        const rawUpper = isGlb(outcome.models.upperStl)
+          ? await extractGeometryFromGlb(outcome.models.upperStl)
+          : stlLoader.parse(outcome.models.upperStl);
+        if (rawUpper) {
+          upperGeom = capPlanarOpenings(rawUpper, true);
+          upperGeom.computeVertexNormals();
+          computeAnatomicalColors(
+            upperGeom,
+            stage.upper.filename || `${stage.label} - Upper`,
+          );
+        }
+      }
+      if (!upperGeom) {
+        return { ok: false, reason: "Could not parse Upper jaw geometry." };
       }
       upperGeom.computeBoundingBox();
       upperGeom.computeBoundingSphere();
@@ -389,13 +395,20 @@ export async function loadStageGeometries(
         lowerGeom = await extractGeometryFromGlb(lowerGlb);
       }
       if (!lowerGeom) {
-        const rawLower = stlLoader.parse(outcome.models.lowerStl);
-        lowerGeom = capPlanarOpenings(rawLower, false);
-        lowerGeom.computeVertexNormals();
-        computeAnatomicalColors(
-          lowerGeom,
-          stage.lower.filename || `${stage.label} - Lower`,
-        );
+        const rawLower = isGlb(outcome.models.lowerStl)
+          ? await extractGeometryFromGlb(outcome.models.lowerStl)
+          : stlLoader.parse(outcome.models.lowerStl);
+        if (rawLower) {
+          lowerGeom = capPlanarOpenings(rawLower, false);
+          lowerGeom.computeVertexNormals();
+          computeAnatomicalColors(
+            lowerGeom,
+            stage.lower.filename || `${stage.label} - Lower`,
+          );
+        }
+      }
+      if (!lowerGeom) {
+        return { ok: false, reason: "Could not parse Lower jaw geometry." };
       }
       lowerGeom.computeBoundingBox();
       lowerGeom.computeBoundingSphere();
@@ -432,23 +445,26 @@ export async function loadStageGeometries(
 export function prewarmAllStageGeometries(
   stages: readonly StageDefinition[],
 ): void {
-  let index = 0;
+  // Start at index 1: Stage 0 is already prioritized by navigate(0)
+  let index = 1;
   function processNext(): void {
     if (index >= stages.length) return;
     const stage = stages[index++];
     if (!stage) return;
     if (stageGeomCache.has(stage.id)) {
-      setTimeout(processNext, 16);
+      setTimeout(processNext, 100);
       return;
     }
     loadStageGeometries(stage)
       .then(() => {
-        setTimeout(processNext, 32);
+        // Space sequential background downloads so playback stays at 60 FPS
+        setTimeout(processNext, 250);
       })
       .catch(() => {
-        setTimeout(processNext, 32);
+        setTimeout(processNext, 250);
       });
   }
-  setTimeout(processNext, 100);
+  // Allow initial Stage 1 to settle and render before background prewarming
+  setTimeout(processNext, 800);
 }
 

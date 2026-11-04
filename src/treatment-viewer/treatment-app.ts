@@ -30,7 +30,6 @@ import { pairTreatmentFiles } from "./stage-manifest";
 import {
   loadStageModels,
   prefetchStageModels,
-  prewarmAllStages,
   loadStageGeometries,
   prewarmAllStageGeometries,
   getCachedStageGeometries,
@@ -1463,7 +1462,6 @@ export function createTreatmentApp(
     if (newManifest.treatmentStages.length > 0) {
       await navigate(0);
       // Background prewarm: load and parse all subsequent stage geometries into cache silently
-      void prewarmAllStages(newManifest.treatmentStages);
       prewarmAllStageGeometries(newManifest.treatmentStages);
     } else {
       state.error = "This case has no patient-visible treatment stages.";
