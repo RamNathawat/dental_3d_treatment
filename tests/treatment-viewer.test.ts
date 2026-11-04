@@ -36,8 +36,8 @@ describe("Treatment Stage Configuration", () => {
       expect(stage.label).toBe(`Stage ${index + 1}`);
       expect(stage.upperUrl).toContain("Upper");
       expect(stage.lowerUrl).toContain("Lower");
-      expect(stage.upperUrl).toMatch(/\.(glb|stl)$/i);
-      expect(stage.lowerUrl).toMatch(/\.(glb|stl)$/i);
+      expect(stage.upperUrl).toMatch(/\.(glb|stl)($|\?)/i);
+      expect(stage.lowerUrl).toMatch(/\.(glb|stl)($|\?)/i);
     }
   });
 

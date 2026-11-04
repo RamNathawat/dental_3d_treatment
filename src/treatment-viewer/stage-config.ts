@@ -79,11 +79,11 @@ export const NIYA_PRIORITY_MANIFEST: CaseManifest = {
       doctorOnly: false,
       upper: {
         filename: upperFilename,
-        url: `/models/Ashina%20models/${encodeURIComponent(upperFilename)}`,
+        url: `/models/Ashina%20models/${encodeURIComponent(upperFilename)}?v=clean2`,
       },
       lower: {
         filename: lowerFilename,
-        url: `/models/Ashina%20models/${encodeURIComponent(lowerFilename)}`,
+        url: `/models/Ashina%20models/${encodeURIComponent(lowerFilename)}?v=clean2`,
       },
     };
   }),
@@ -94,11 +94,11 @@ export const NIYA_PRIORITY_MANIFEST: CaseManifest = {
       doctorOnly: true,
       upper: {
         filename: "Niya Priority Upper jaw - 01 - Template.glb",
-        url: `/models/Ashina%20models/${encodeURIComponent("Niya Priority Upper jaw - 01 - Template.glb")}`,
+        url: `/models/Ashina%20models/${encodeURIComponent("Niya Priority Upper jaw - 01 - Template.glb")}?v=clean2`,
       },
       lower: {
         filename: "Niya Priority Lower jaw - 01 - Template.glb",
-        url: `/models/Ashina%20models/${encodeURIComponent("Niya Priority Lower jaw - 01 - Template.glb")}`,
+        url: `/models/Ashina%20models/${encodeURIComponent("Niya Priority Lower jaw - 01 - Template.glb")}?v=clean2`,
       },
     },
   ],

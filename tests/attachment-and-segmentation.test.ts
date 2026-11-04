@@ -101,7 +101,9 @@ describe("removeOrthodonticAttachments", () => {
     const { STLLoader } = require("three/examples/jsm/loaders/STLLoader.js");
     const loader = new STLLoader();
 
-    const lowerPath = "models/Ashina models/Niya Priority Lower jaw - 01 - Model.stl";
+    const lowerPath = fs.existsSync("tests/fixtures/Niya Priority Lower jaw - 01 - Model.stl")
+      ? "tests/fixtures/Niya Priority Lower jaw - 01 - Model.stl"
+      : "models/Ashina models/Niya Priority Lower jaw - 01 - Model.stl";
     if (fs.existsSync(lowerPath)) {
       const buf = fs.readFileSync(lowerPath);
       const geom = loader.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
@@ -111,7 +113,9 @@ describe("removeOrthodonticAttachments", () => {
       expect(result.modifiedVertexCount).toBeGreaterThan(0);
     }
 
-    const upperPath = "models/Ashina models/Niya Priority Upper jaw - 01 - Model.stl";
+    const upperPath = fs.existsSync("tests/fixtures/Niya Priority Upper jaw - 01 - Model.stl")
+      ? "tests/fixtures/Niya Priority Upper jaw - 01 - Model.stl"
+      : "models/Ashina models/Niya Priority Upper jaw - 01 - Model.stl";
     if (fs.existsSync(upperPath)) {
       const buf = fs.readFileSync(upperPath);
       const geom = loader.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
@@ -223,8 +227,15 @@ describe("computeAnatomicalColors", () => {
       expect(gumPct).toBeGreaterThan(12);
     }
 
-    checkRealModel("models/Ashina models/Niya Priority Lower jaw - 01 - Model.stl", "Lower jaw");
-    checkRealModel("models/Ashina models/Niya Priority Upper jaw - 01 - Model.stl", "Upper jaw");
+    const realLower = fs.existsSync("tests/fixtures/Niya Priority Lower jaw - 01 - Model.stl")
+      ? "tests/fixtures/Niya Priority Lower jaw - 01 - Model.stl"
+      : "models/Ashina models/Niya Priority Lower jaw - 01 - Model.stl";
+    const realUpper = fs.existsSync("tests/fixtures/Niya Priority Upper jaw - 01 - Model.stl")
+      ? "tests/fixtures/Niya Priority Upper jaw - 01 - Model.stl"
+      : "models/Ashina models/Niya Priority Upper jaw - 01 - Model.stl";
+
+    checkRealModel(realLower, "Lower jaw");
+    checkRealModel(realUpper, "Upper jaw");
   });
 });
 
