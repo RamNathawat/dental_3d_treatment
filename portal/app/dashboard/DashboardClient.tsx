@@ -471,15 +471,16 @@ export default function DashboardClient({
                     {/* Bottom Actions Row */}
                     <div className="pt-4 border-t border-slate-100/90 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
                       {/* Primary CTA: Launch 3D Progression */}
-                      <Link
+                      <a
                         href={`/treatment.html?case=${item.share_token}`}
                         target="_blank"
+                        rel="noopener noreferrer"
                         className="flex-1 py-2.5 px-4 rounded-xl text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 shadow-sm transition-all flex items-center justify-center gap-2 active:scale-98"
                       >
                         <Eye className="w-4 h-4 text-white" />
                         <span>3D Progression</span>
                         <ArrowUpRight className="w-3.5 h-3.5 text-slate-400" />
-                      </Link>
+                      </a>
 
                       {/* Secondary CTA: Share Link */}
                       <button
