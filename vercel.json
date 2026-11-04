@@ -1,11 +1,5 @@
 {
   "cleanUrls": true,
-  "rewrites": [
-    {
-      "source": "/",
-      "destination": "/treatment.html"
-    }
-  ],
   "headers": [
     {
       "source": "/models/(.*)",

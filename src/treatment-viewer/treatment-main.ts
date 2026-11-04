@@ -9,72 +9,128 @@ import type { CaseManifest } from "./stage-manifest";
 const root = document.querySelector<HTMLElement>("#app");
 if (root === null) throw new Error("The page has no #app mount point.");
 
+function showEmptyState(
+  title: string,
+  message: string,
+  buttonHref: string,
+  buttonText: string,
+) {
+  if (!root) return;
+  root.innerHTML = `
+    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; width: 100vw; background: radial-gradient(circle at 50% 30%, #151821 0%, #0a0b0e 100%); color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center; padding: 24px; box-sizing: border-box;">
+      <div style="width: 64px; height: 64px; border-radius: 16px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); display: flex; align-items: center; justify-content: center; margin-bottom: 24px; box-shadow: 0 0 30px rgba(56, 189, 248, 0.15);">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+      </div>
+      <h1 style="font-size: 24px; font-weight: 600; margin: 0 0 12px 0; color: #ffffff; letter-spacing: -0.02em;">${title}</h1>
+      <p style="font-size: 14px; line-height: 1.6; color: #94a3b8; max-width: 440px; margin: 0 0 28px 0;">${message}</p>
+      <a href="${buttonHref}" style="display: inline-flex; align-items: center; gap: 8px; padding: 12px 24px; border-radius: 10px; background: #2563eb; color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 500; transition: background 0.15s ease; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);">
+        ${buttonText}
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12h14"/>
+          <path d="m12 5 7 7-7 7"/>
+        </svg>
+      </a>
+    </div>
+  `;
+}
+
 async function init() {
   const params = new URLSearchParams(window.location.search);
   const shareToken = params.get("case");
 
-  if (shareToken && shareToken !== "demo") {
-    try {
-      const supabaseUrl = "https://yrjulcwnabnhgtqebrtn.supabase.co";
-      const supabaseKey = "sb_publishable_REBvv8NOv8KPkDHw3mVnnQ_rzM2165H";
-      const res = await fetch(
-        `${supabaseUrl}/rest/v1/cases?share_token=eq.${encodeURIComponent(shareToken)}&select=*`,
-        {
-          headers: {
-            apikey: supabaseKey,
-            Authorization: `Bearer ${supabaseKey}`,
-          },
-        },
-      );
-
-      if (res.ok) {
-        const rows = await res.json();
-        if (rows && rows.length > 0) {
-          const caseRecord = rows[0];
-          const totalStages = caseRecord.total_stages || 1;
-          const patientName = caseRecord.patient_name || "Patient";
-          const caseId = caseRecord.id;
-
-          const dynamicManifest: CaseManifest = {
-            caseId: caseId,
-            patientName: patientName,
-            treatmentStages: Array.from({ length: totalStages }, (_, i) => {
-              const stageNum = i + 1;
-              const pad = String(stageNum).padStart(2, "0");
-              const upperFilename = `${patientName} Upper jaw - ${pad} - Model.glb`;
-              const lowerFilename = `${patientName} Lower jaw - ${pad} - Model.glb`;
-              const baseStorage = `${supabaseUrl}/storage/v1/object/public/treatment-models/${caseId}`;
-
-              return {
-                id: `stage-${pad}`,
-                stageNumber: stageNum,
-                label: `Stage ${stageNum}`,
-                doctorOnly: false,
-                upper: {
-                  filename: upperFilename,
-                  url: `${baseStorage}/${encodeURIComponent(upperFilename)}`,
-                },
-                lower: {
-                  filename: lowerFilename,
-                  url: `${baseStorage}/${encodeURIComponent(lowerFilename)}`,
-                },
-              };
-            }),
-            templateStages: [],
-            ambiguities: [],
-          };
-
-          createTreatmentApp(root!, { caseManifest: dynamicManifest });
-          return;
-        }
-      }
-    } catch (err) {
-      console.warn("Could not load dynamic case from cloud:", err);
-    }
+  if (!shareToken || shareToken === "demo") {
+    showEmptyState(
+      "No Case Selected",
+      "Only uploaded treatment cases can be viewed. Please select or upload a case from the Doctor Dashboard.",
+      "/dashboard",
+      "Go to Dashboard",
+    );
+    return;
   }
 
-  // Fallback / default
-  createTreatmentApp(root!);
+  try {
+    const supabaseUrl = "https://yrjulcwnabnhgtqebrtn.supabase.co";
+    const supabaseKey = "sb_publishable_REBvv8NOv8KPkDHw3mVnnQ_rzM2165H";
+    const res = await fetch(
+      `${supabaseUrl}/rest/v1/cases?share_token=eq.${encodeURIComponent(shareToken)}&select=*`,
+      {
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+        },
+      },
+    );
+
+    if (res.ok) {
+      const rows = await res.json();
+      if (rows && rows.length > 0) {
+        const caseRecord = rows[0];
+        const totalStages = caseRecord.total_stages || 0;
+        const patientName = caseRecord.patient_name || "Patient";
+        const caseId = caseRecord.id;
+
+        if (totalStages === 0) {
+          showEmptyState(
+            "No 3D Models in Case",
+            `Case "${patientName}" has no stages uploaded yet. Please upload aligner stages from the dashboard.`,
+            "/dashboard",
+            "Go to Dashboard",
+          );
+          return;
+        }
+
+        const dynamicManifest: CaseManifest = {
+          caseId: caseId,
+          patientName: patientName,
+          treatmentStages: Array.from({ length: totalStages }, (_, i) => {
+            const stageNum = i + 1;
+            const pad = String(stageNum).padStart(2, "0");
+            const upperFilename = `${patientName} Upper jaw - ${pad} - Model.glb`;
+            const lowerFilename = `${patientName} Lower jaw - ${pad} - Model.glb`;
+            const baseStorage = `${supabaseUrl}/storage/v1/object/public/treatment-models/${caseId}`;
+
+            return {
+              id: `stage-${pad}`,
+              stageNumber: stageNum,
+              label: `Stage ${stageNum}`,
+              doctorOnly: false,
+              upper: {
+                filename: upperFilename,
+                url: `${baseStorage}/${encodeURIComponent(upperFilename)}`,
+              },
+              lower: {
+                filename: lowerFilename,
+                url: `${baseStorage}/${encodeURIComponent(lowerFilename)}`,
+              },
+            };
+          }),
+          templateStages: [],
+          ambiguities: [],
+        };
+
+        createTreatmentApp(root!, { caseManifest: dynamicManifest });
+        return;
+      }
+    }
+    showEmptyState(
+      "Case Not Found",
+      "The requested treatment case could not be found or has no uploaded models.",
+      "/dashboard",
+      "Go to Dashboard",
+    );
+  } catch (err) {
+    console.warn("Could not load dynamic case from cloud:", err);
+    showEmptyState(
+      "Error Loading Case",
+      "Could not retrieve this treatment case. Please check your connection or return to the dashboard.",
+      "/dashboard",
+      "Go to Dashboard",
+    );
+  }
 }
 
 init();

@@ -1816,7 +1816,7 @@ export function createTreatmentApp(
 
   // ── Auto Load ─────────────────────────────────────────────────────────────
 
-  if (options.autoLoad !== false) {
+  if (options.autoLoad !== false && state.manifest.treatmentStages.length > 0) {
     void navigate(0);
   }
 

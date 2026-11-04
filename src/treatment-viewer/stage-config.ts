@@ -105,14 +105,15 @@ export const NIYA_PRIORITY_MANIFEST: CaseManifest = {
   ambiguities: [],
 };
 
-/** Default active case is the 10-stage Niya Priority clinical progression */
-export const DEFAULT_CASE_MANIFEST: CaseManifest = NIYA_PRIORITY_MANIFEST;
+export const EMPTY_CASE_MANIFEST: CaseManifest = {
+  caseId: "",
+  patientName: "No Case Loaded",
+  treatmentStages: [],
+  templateStages: [],
+  ambiguities: [],
+};
 
-/** Available pre-loaded demonstration cases */
-export const BUILTIN_CASES: readonly CaseManifest[] = [
-  NIYA_PRIORITY_MANIFEST,
-  SOUMYA_SARATH_MANIFEST,
-];
+export const DEFAULT_CASE_MANIFEST: CaseManifest = SOUMYA_SARATH_MANIFEST;
 
 // ─── Legacy compatibility interface ──────────────────────────────────────────
 
