@@ -23,6 +23,7 @@ import type { Viewport } from "../viewer/viewport";
 import { DEFAULT_CASE_MANIFEST } from "./stage-config";
 import type {
   CaseManifest,
+  IprEntry,
   RawFileDescriptor,
   StageDefinition,
 } from "./stage-manifest";
@@ -41,6 +42,7 @@ import {
   computeToothCentroids,
   computeToothDisplacements,
   getClinicalToothList,
+  getContactPoint,
 } from "./tooth-data";
 
 // ─── Layer IDs ───────────────────────────────────────────────────────────────
@@ -72,6 +74,8 @@ export interface AppState {
   upperVisible: boolean;
   /** Visibility of the lower arch. */
   lowerVisible: boolean;
+  /** Whether orthodontic composite attachments are visible. */
+  attachmentsVisible: boolean;
   /** Whether autoplay progression is currently running. */
   isPlaying: boolean;
   /** Whether occlusal bite contacts inspection is active. */
@@ -80,6 +84,8 @@ export interface AppState {
   overlayActive: boolean;
   /** Overlay blend ratio (0 = current stage, 1 = initial stage 1). */
   overlayBlend: number;
+  /** Whether Interproximal Reduction (IPR) values and contact callouts are active. */
+  iprActive: boolean;
   /** AbortController for the in-flight fetch, cancelled on new navigation. */
   abortController: AbortController | null;
   /** Whether the clinical tooth movements panel is open. */
@@ -119,6 +125,10 @@ export interface TreatmentAppHandle {
   readonly toggleContacts: () => void;
   readonly toggleOverlay: () => Promise<void>;
   readonly setOverlayBlend: (ratio: number) => void;
+  readonly toggleAttachments: () => void;
+  readonly setAttachmentsVisible: (visible: boolean) => void;
+  readonly toggleIpr: () => void;
+  readonly setIprActive: (active: boolean) => void;
   readonly getState: () => Readonly<AppState>;
 }
 
@@ -132,18 +142,26 @@ export function createTreatmentApp(
   const autoplayInterval = options.autoplayIntervalMs ?? 240;
   const transitionDuration = options.transitionDurationMs ?? 0;
 
+  const manifest = options.caseManifest ?? DEFAULT_CASE_MANIFEST;
+  const caseHasUpper = manifest.treatmentStages.some((s) => Boolean(s.upper));
+  const caseHasLower = manifest.treatmentStages.some((s) => Boolean(s.lower));
+  const isSingleArchUpper = caseHasUpper && !caseHasLower;
+  const isSingleArchLower = !caseHasUpper && caseHasLower;
+
   const state: AppState = {
-    manifest: options.caseManifest ?? DEFAULT_CASE_MANIFEST,
+    manifest,
     currentIndex: -1,
     activeTemplateStage: null,
     loading: false,
     error: null,
-    upperVisible: true,
-    lowerVisible: true,
+    upperVisible: !isSingleArchLower,
+    lowerVisible: !isSingleArchUpper,
+    attachmentsVisible: false,
     isPlaying: false,
     contactsActive: false,
     overlayActive: false,
     overlayBlend: 0.5,
+    iprActive: false,
     abortController: null,
     metricsPanelOpen: false,
   };
@@ -362,6 +380,10 @@ export function createTreatmentApp(
       isDarkMode = !isDarkMode;
       if (isDarkMode) {
         appEl.classList.add("tv-app--dark");
+        if (typeof document !== "undefined") {
+          document.documentElement.classList.add("dark");
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
         themeToggleBtn.textContent = "☀️ Light";
         themeToggleBtn.title = "Switch to Light Mode";
         try {
@@ -370,6 +392,10 @@ export function createTreatmentApp(
         viewport.setBackgroundColor?.(0x0f141f);
       } else {
         appEl.classList.remove("tv-app--dark");
+        if (typeof document !== "undefined") {
+          document.documentElement.classList.remove("dark");
+          document.documentElement.setAttribute("data-theme", "light");
+        }
         themeToggleBtn.textContent = "🌙 Dark";
         themeToggleBtn.title = "Switch to Dark Mode";
         try {
@@ -517,10 +543,30 @@ export function createTreatmentApp(
   );
   overlayBtn.title = "Overlay initial stage against current stage with blend slider";
 
+  // Feature 10: Attachments toggle button (default: toggled off / no attachments visible)
+  const attachmentsBtn = makeBtn(
+    "Attachments",
+    () => toggleAttachments(),
+    "tv-ba-btn tv-dock-tool-btn",
+  );
+  attachmentsBtn.title = "Toggle visibility of orthodontic composite attachments (engagers/buttons)";
+  attachmentsBtn.setAttribute("aria-pressed", "false");
+
+  // Feature 11: IPR toggle button (default: toggled off)
+  const iprBtn = makeBtn(
+    "IPR",
+    () => toggleIpr(),
+    "tv-ba-btn tv-dock-tool-btn",
+  );
+  iprBtn.title = "Toggle planned Interproximal Reduction (IPR) values and contact callouts";
+  iprBtn.setAttribute("aria-pressed", "false");
+
   const dockToolsEl = div("tv-dock-tools", [
     beforeAfterPillEl,
     contactsBtn,
     overlayBtn,
+    attachmentsBtn,
+    iprBtn,
   ]);
 
   // Interactive scrubber dots container
@@ -567,6 +613,23 @@ export function createTreatmentApp(
     ]),
   ]);
   contactsLegendEl.hidden = true;
+
+  // Feature 11: 3D Callout SVG Overlay
+  const iprSvgOverlay = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  iprSvgOverlay.setAttribute("class", "tv-ipr-overlay");
+
+  // Feature 11: Floating IPR Legend / Summary Panel
+  const iprLegendBodyEl = div("tv-ipr-legend__body");
+  const iprLegendEl = div("tv-ipr-legend", [
+    div("tv-ipr-legend__header", [
+      div("tv-ipr-legend__title-wrap", [
+        span("tv-ipr-legend__title", "Interproximal Reduction (IPR)"),
+      ]),
+      makeBtn("✕", () => toggleIpr(), "tv-btn--subtle tv-contacts-legend__close"),
+    ]),
+    iprLegendBodyEl,
+  ]);
+  iprLegendEl.hidden = true;
 
   // Floating Overlay Blend Panel
   const overlaySlider = document.createElement("input");
@@ -626,7 +689,7 @@ export function createTreatmentApp(
   ambiguityBannerEl.hidden = true;
 
   // Loading overlay
-  const loadingTextEl = span("tv-loading__text", "Loading 3D models…");
+  const loadingTextEl = span("tv-loading__text", "Loading 3D Models…");
   const loadingEl = div("tv-loading", [
     div("tv-loading__spinner", []),
     loadingTextEl,
@@ -728,6 +791,7 @@ export function createTreatmentApp(
   const stageEl = div("tv-stage", [
     canvas,
     graphGridEl,
+    iprSvgOverlay,
     div("tv-stage__top-bar", [
       div("tv-stage__top-left", [toggleSidebarBtn]),
       div("tv-stage__top-center", [archPillEl]),
@@ -735,6 +799,7 @@ export function createTreatmentApp(
     ]),
     templateNoticeEl,
     contactsLegendEl,
+    iprLegendEl,
     overlayPanelEl,
     movementDrawerEl,
     cameraDockEl,
@@ -779,7 +844,18 @@ export function createTreatmentApp(
 
   if (isDarkMode) {
     appEl.classList.add("tv-app--dark");
+    if (typeof document !== "undefined") {
+      document.documentElement.classList.add("dark");
+      document.documentElement.setAttribute("data-theme", "dark");
+    }
     viewport.setBackgroundColor?.(0x0f141f);
+  } else {
+    appEl.classList.remove("tv-app--dark");
+    if (typeof document !== "undefined") {
+      document.documentElement.classList.remove("dark");
+      document.documentElement.setAttribute("data-theme", "light");
+    }
+    viewport.setBackgroundColor?.(0xebe7e0);
   }
 
   sidebarBackdrop.addEventListener("click", () => {
@@ -844,11 +920,20 @@ export function createTreatmentApp(
     if (state.contactsActive) {
       refreshBiteContacts();
     }
+    if (state.iprActive) {
+      renderIprOverlay();
+    }
 
     syncArchPillUI();
   }
 
   function syncArchPillUI(): void {
+    if (isSingleArchUpper || isSingleArchLower) {
+      archPillEl.style.display = "none";
+      contactsBtn.style.display = "none";
+      return;
+    }
+
     const isLower = !state.upperVisible && state.lowerVisible;
     const isUpper = state.upperVisible && !state.lowerVisible;
     const isBoth = state.upperVisible && state.lowerVisible;
@@ -867,6 +952,9 @@ export function createTreatmentApp(
     if (prevUpperId) {
       viewport.setLayerVisible(prevUpperId, state.upperVisible);
     }
+    if (state.iprActive) {
+      renderIprOverlay();
+    }
     syncArchPillUI();
   }
 
@@ -875,6 +963,9 @@ export function createTreatmentApp(
     viewport.setLayerVisible(activeLowerId, state.lowerVisible);
     if (prevLowerId) {
       viewport.setLayerVisible(prevLowerId, state.lowerVisible);
+    }
+    if (state.iprActive) {
+      renderIprOverlay();
     }
     syncArchPillUI();
   }
@@ -985,25 +1076,52 @@ export function createTreatmentApp(
     stage: StageDefinition,
     displayProgressionIndex: number,
   ): Promise<void> {
-    state.abortController?.abort();
-    const controller = new AbortController();
-    state.abortController = controller;
+    if (!state.isPlaying) {
+      state.abortController?.abort();
+      state.abortController = new AbortController();
+    }
+    const controller = state.abortController ?? new AbortController();
 
     const isFirstSuccessfulLoad = state.currentIndex === -1;
+    const hasRequiredArchLayers = isSingleArchUpper
+      ? Boolean(activeUpperId)
+      : isSingleArchLower
+      ? Boolean(activeLowerId)
+      : Boolean(activeUpperId && activeLowerId);
 
     // ── Ultra-Fast Instant Geometry Swap for Video-Like Fluid Playback & Scrubbing ──
     if (
       !isFirstSuccessfulLoad &&
       transitionDuration <= 0 &&
       viewport.setLayerGeometry &&
-      activeUpperId &&
-      activeLowerId
+      hasRequiredArchLayers
     ) {
       const cached = getCachedStageGeometries(stage.id);
       if (cached) {
         state.abortController = null;
-        viewport.setLayerGeometry(activeUpperId, cached.upper);
-        viewport.setLayerGeometry(activeLowerId, cached.lower);
+        if (transitionAnimId !== null) {
+          cancelAnimationFrame(transitionAnimId);
+          transitionAnimId = null;
+          if (prevUpperId && caseHasUpper) viewport.removeLayer(prevUpperId);
+          if (prevLowerId && caseHasLower) viewport.removeLayer(prevLowerId);
+          prevUpperId = null;
+          prevLowerId = null;
+        }
+
+        const targetUpper = state.attachmentsVisible
+          ? cached.upper
+          : (cached.upperNoAttachments || cached.upper);
+        const targetLower = state.attachmentsVisible
+          ? cached.lower
+          : (cached.lowerNoAttachments || cached.lower);
+        if (targetUpper && activeUpperId) {
+          viewport.setLayerGeometry(activeUpperId, targetUpper);
+          viewport.setLayerOpacity(activeUpperId, 1);
+        }
+        if (targetLower && activeLowerId) {
+          viewport.setLayerGeometry(activeLowerId, targetLower);
+          viewport.setLayerOpacity(activeLowerId, 1);
+        }
 
         if (displayProgressionIndex === 0) {
           stage1UpperCentroids = cached.upperCentroids;
@@ -1028,8 +1146,12 @@ export function createTreatmentApp(
         state.currentIndex = displayProgressionIndex;
         syncUI();
         refreshMovementDrawer();
-        if (state.contactsActive) refreshBiteContacts();
+        if (state.contactsActive && !isSingleArchUpper && !isSingleArchLower) refreshBiteContacts();
         if (state.overlayActive) setOverlayBlend(state.overlayBlend);
+        if (state.iprActive) {
+          refreshIprPanel();
+          renderIprOverlay();
+        }
         return;
       }
     }
@@ -1057,15 +1179,34 @@ export function createTreatmentApp(
       !isFirstSuccessfulLoad &&
       transitionDuration <= 0 &&
       viewport.setLayerGeometry &&
-      activeUpperId &&
-      activeLowerId
+      hasRequiredArchLayers
     ) {
       state.abortController = null;
       state.loading = false;
       isStageLoading = false;
+      if (transitionAnimId !== null) {
+        cancelAnimationFrame(transitionAnimId);
+        transitionAnimId = null;
+        if (prevUpperId && caseHasUpper) viewport.removeLayer(prevUpperId);
+        if (prevLowerId && caseHasLower) viewport.removeLayer(prevLowerId);
+        prevUpperId = null;
+        prevLowerId = null;
+      }
       const cached = geomOutcome.geometries;
-      viewport.setLayerGeometry(activeUpperId, cached.upper);
-      viewport.setLayerGeometry(activeLowerId, cached.lower);
+      const targetUpper = state.attachmentsVisible
+        ? cached.upper
+        : (cached.upperNoAttachments || cached.upper);
+      const targetLower = state.attachmentsVisible
+        ? cached.lower
+        : (cached.lowerNoAttachments || cached.lower);
+      if (targetUpper && activeUpperId) {
+        viewport.setLayerGeometry(activeUpperId, targetUpper);
+        viewport.setLayerOpacity(activeUpperId, 1);
+      }
+      if (targetLower && activeLowerId) {
+        viewport.setLayerGeometry(activeLowerId, targetLower);
+        viewport.setLayerOpacity(activeLowerId, 1);
+      }
 
       if (displayProgressionIndex === 0) {
         stage1UpperCentroids = cached.upperCentroids;
@@ -1092,11 +1233,23 @@ export function createTreatmentApp(
       refreshMovementDrawer();
       if (state.contactsActive) refreshBiteContacts();
       if (state.overlayActive) setOverlayBlend(state.overlayBlend);
+      if (state.iprActive) {
+        refreshIprPanel();
+        renderIprOverlay();
+      }
       return;
     }
 
-    let upperGeometry = geomOutcome.ok ? geomOutcome.geometries.upper : undefined;
-    let lowerGeometry = geomOutcome.ok ? geomOutcome.geometries.lower : undefined;
+    let upperGeometry = geomOutcome.ok
+      ? (state.attachmentsVisible
+          ? geomOutcome.geometries.upper
+          : (geomOutcome.geometries.upperNoAttachments || geomOutcome.geometries.upper))
+      : undefined;
+    let lowerGeometry = geomOutcome.ok
+      ? (state.attachmentsVisible
+          ? geomOutcome.geometries.lower
+          : (geomOutcome.geometries.lowerNoAttachments || geomOutcome.geometries.lower))
+      : undefined;
     let upperStl: ArrayBuffer | undefined = undefined;
     let lowerStl: ArrayBuffer | undefined = undefined;
 
@@ -1127,37 +1280,46 @@ export function createTreatmentApp(
       prevUpperId = null;
       prevLowerId = null;
 
-      const upperOutcome = viewport.addLayer({
-        id: activeUpperId,
-        label: `${stage.label} - Upper`,
-        colour: UPPER_ARCH_COLOUR,
-        stl: upperStl,
-        geometry: upperGeometry,
-      });
+      const hasUpperModel = Boolean(upperGeometry || upperStl);
+      const hasLowerModel = Boolean(lowerGeometry || lowerStl);
 
-      const lowerOutcome = viewport.addLayer({
-        id: activeLowerId,
-        label: `${stage.label} - Lower`,
-        colour: LOWER_ARCH_COLOUR,
-        stl: lowerStl,
-        geometry: lowerGeometry,
-      });
+      if (hasUpperModel) {
+        const upperOutcome = viewport.addLayer({
+          id: activeUpperId,
+          label: `${stage.label} - Upper`,
+          colour: UPPER_ARCH_COLOUR,
+          stl: upperStl || undefined,
+          geometry: upperGeometry || undefined,
+        });
 
-      if (!upperOutcome.ok) {
-        state.error = `Upper jaw: ${upperOutcome.reason}`;
-        syncUI();
-        return;
-      }
-      if (!lowerOutcome.ok) {
-        state.error = `Lower jaw: ${lowerOutcome.reason}`;
-        syncUI();
-        return;
+        if (!upperOutcome.ok) {
+          state.error = `Upper jaw: ${upperOutcome.reason}`;
+          syncUI();
+          return;
+        }
+
+        viewport.setLayerVisible(activeUpperId, state.upperVisible);
+        viewport.setLayerOpacity(activeUpperId, 1);
       }
 
-      viewport.setLayerVisible(activeUpperId, state.upperVisible);
-      viewport.setLayerVisible(activeLowerId, state.lowerVisible);
-      viewport.setLayerOpacity(activeUpperId, 1);
-      viewport.setLayerOpacity(activeLowerId, 1);
+      if (hasLowerModel) {
+        const lowerOutcome = viewport.addLayer({
+          id: activeLowerId,
+          label: `${stage.label} - Lower`,
+          colour: LOWER_ARCH_COLOUR,
+          stl: lowerStl || undefined,
+          geometry: lowerGeometry || undefined,
+        });
+
+        if (!lowerOutcome.ok) {
+          state.error = `Lower jaw: ${lowerOutcome.reason}`;
+          syncUI();
+          return;
+        }
+
+        viewport.setLayerVisible(activeLowerId, state.lowerVisible);
+        viewport.setLayerOpacity(activeLowerId, 1);
+      }
 
       if (isFirstSuccessfulLoad) {
         viewport.setView("top");
@@ -1173,13 +1335,13 @@ export function createTreatmentApp(
           upperToothDisplacements = {};
           lowerToothDisplacements = {};
         } else {
-          if (stage1UpperCentroids) {
+          if (stage1UpperCentroids && geomOutcome.geometries.upperCentroids) {
             upperToothDisplacements = computeToothDisplacements(
               stage1UpperCentroids,
               geomOutcome.geometries.upperCentroids,
             );
           }
-          if (stage1LowerCentroids) {
+          if (stage1LowerCentroids && geomOutcome.geometries.lowerCentroids) {
             lowerToothDisplacements = computeToothDisplacements(
               stage1LowerCentroids,
               geomOutcome.geometries.lowerCentroids,
@@ -1187,8 +1349,8 @@ export function createTreatmentApp(
           }
         }
       } else {
-        const ug = viewport.getLayerGeometry?.(activeUpperId);
-        const lg = viewport.getLayerGeometry?.(activeLowerId);
+        const ug = hasUpperModel ? viewport.getLayerGeometry?.(activeUpperId) : null;
+        const lg = hasLowerModel ? viewport.getLayerGeometry?.(activeLowerId) : null;
         if (displayProgressionIndex === 0) {
           if (ug) stage1UpperCentroids = computeToothCentroids(ug, true);
           if (lg) stage1LowerCentroids = computeToothCentroids(lg, false);
@@ -1206,15 +1368,19 @@ export function createTreatmentApp(
         }
       }
 
-      if (state.contactsActive) refreshBiteContacts();
+      if (state.contactsActive && !isSingleArchUpper && !isSingleArchLower) refreshBiteContacts();
       if (state.overlayActive) setOverlayBlend(state.overlayBlend);
+      if (state.iprActive) {
+        refreshIprPanel();
+        renderIprOverlay();
+      }
     } else {
       // ── Smooth Simultaneous Cross-Dissolve Transition ─────────────────────
       if (transitionAnimId !== null) {
         cancelAnimationFrame(transitionAnimId);
         transitionAnimId = null;
-        if (prevUpperId) viewport.removeLayer(prevUpperId);
-        if (prevLowerId) viewport.removeLayer(prevLowerId);
+        if (prevUpperId && caseHasUpper) viewport.removeLayer(prevUpperId);
+        if (prevLowerId && caseHasLower) viewport.removeLayer(prevLowerId);
       }
 
       prevUpperId = activeUpperId;
@@ -1224,44 +1390,52 @@ export function createTreatmentApp(
       const nextUpperId = `${UPPER_ARCH_ID}-${layerCounter}`;
       const nextLowerId = `${LOWER_ARCH_ID}-${layerCounter}`;
 
-      const upperOutcome = viewport.addLayer({
-        id: nextUpperId,
-        label: `${stage.label} - Upper`,
-        colour: UPPER_ARCH_COLOUR,
-        stl: upperStl,
-        geometry: upperGeometry,
-      });
+      const hasUpperModel = Boolean(upperGeometry || upperStl);
+      const hasLowerModel = Boolean(lowerGeometry || lowerStl);
 
-      const lowerOutcome = viewport.addLayer({
-        id: nextLowerId,
-        label: `${stage.label} - Lower`,
-        colour: LOWER_ARCH_COLOUR,
-        stl: lowerStl,
-        geometry: lowerGeometry,
-      });
+      if (hasUpperModel) {
+        const upperOutcome = viewport.addLayer({
+          id: nextUpperId,
+          label: `${stage.label} - Upper`,
+          colour: UPPER_ARCH_COLOUR,
+          stl: upperStl || undefined,
+          geometry: upperGeometry || undefined,
+        });
 
-      if (!upperOutcome.ok) {
-        state.error = `Upper jaw: ${upperOutcome.reason}`;
-        syncUI();
-        return;
-      }
-      if (!lowerOutcome.ok) {
-        state.error = `Lower jaw: ${lowerOutcome.reason}`;
-        syncUI();
-        return;
+        if (!upperOutcome.ok) {
+          state.error = `Upper jaw: ${upperOutcome.reason}`;
+          syncUI();
+          return;
+        }
+
+        viewport.setLayerVisible(nextUpperId, state.upperVisible);
+        viewport.setLayerOpacity(nextUpperId, 0);
+        activeUpperId = nextUpperId;
       }
 
-      viewport.setLayerVisible(nextUpperId, state.upperVisible);
-      viewport.setLayerVisible(nextLowerId, state.lowerVisible);
-      viewport.setLayerOpacity(nextUpperId, 0);
-      viewport.setLayerOpacity(nextLowerId, 0);
+      if (hasLowerModel) {
+        const lowerOutcome = viewport.addLayer({
+          id: nextLowerId,
+          label: `${stage.label} - Lower`,
+          colour: LOWER_ARCH_COLOUR,
+          stl: lowerStl || undefined,
+          geometry: lowerGeometry || undefined,
+        });
 
-      activeUpperId = nextUpperId;
-      activeLowerId = nextLowerId;
+        if (!lowerOutcome.ok) {
+          state.error = `Lower jaw: ${lowerOutcome.reason}`;
+          syncUI();
+          return;
+        }
+
+        viewport.setLayerVisible(nextLowerId, state.lowerVisible);
+        viewport.setLayerOpacity(nextLowerId, 0);
+        activeLowerId = nextLowerId;
+      }
 
       // Update centroids and per-tooth displacements for the newly loaded stage
-      const ug = viewport.getLayerGeometry?.(nextUpperId);
-      const lg = viewport.getLayerGeometry?.(nextLowerId);
+      const ug = hasUpperModel ? viewport.getLayerGeometry?.(nextUpperId) : null;
+      const lg = hasLowerModel ? viewport.getLayerGeometry?.(nextLowerId) : null;
       if (displayProgressionIndex === 0) {
         if (ug) stage1UpperCentroids = computeToothCentroids(ug, true);
         if (lg) stage1LowerCentroids = computeToothCentroids(lg, false);
@@ -1288,23 +1462,35 @@ export function createTreatmentApp(
         const ease = progress * progress * (3 - 2 * progress); // smoothstep
 
         // Continuous simultaneous cross-fade: models never vanish at midpoint!
-        viewport.setLayerOpacity(pUpper, 1 - ease);
-        viewport.setLayerOpacity(pLower, 1 - ease);
-        viewport.setLayerOpacity(nextUpperId, ease);
-        viewport.setLayerOpacity(nextLowerId, ease);
+        if (hasUpperModel) {
+          if (pUpper) viewport.setLayerOpacity(pUpper, 1 - ease);
+          viewport.setLayerOpacity(nextUpperId, ease);
+        }
+        if (hasLowerModel) {
+          if (pLower) viewport.setLayerOpacity(pLower, 1 - ease);
+          viewport.setLayerOpacity(nextLowerId, ease);
+        }
 
         if (elapsed < transitionDuration) {
           transitionAnimId = requestAnimationFrame(animate);
         } else {
           transitionAnimId = null;
-          viewport.removeLayer(pUpper);
-          viewport.removeLayer(pLower);
-          viewport.setLayerOpacity(nextUpperId, 1);
-          viewport.setLayerOpacity(nextLowerId, 1);
+          if (hasUpperModel) {
+            if (pUpper) viewport.removeLayer(pUpper);
+            viewport.setLayerOpacity(nextUpperId, 1);
+          }
+          if (hasLowerModel) {
+            if (pLower) viewport.removeLayer(pLower);
+            viewport.setLayerOpacity(nextLowerId, 1);
+          }
           prevUpperId = null;
           prevLowerId = null;
-          if (state.contactsActive) refreshBiteContacts();
+          if (state.contactsActive && !isSingleArchUpper && !isSingleArchLower) refreshBiteContacts();
           if (state.overlayActive) setOverlayBlend(state.overlayBlend);
+          if (state.iprActive) {
+            refreshIprPanel();
+            renderIprOverlay();
+          }
         }
       };
 
@@ -1314,6 +1500,10 @@ export function createTreatmentApp(
     state.currentIndex = displayProgressionIndex;
     syncUI();
     refreshMovementDrawer();
+    if (state.iprActive) {
+      refreshIprPanel();
+      renderIprOverlay();
+    }
   }
 
   // ── Clinical Tooth Movements Drawer ─────────────────────────────────────────
@@ -1418,10 +1608,14 @@ export function createTreatmentApp(
       await loadAndDisplayOverlay();
     } else {
       overlayPanelEl.hidden = true;
-      viewport.removeLayer(GHOST_UPPER_ID);
-      viewport.removeLayer(GHOST_LOWER_ID);
-      viewport.setLayerOpacity(activeUpperId, 1);
-      viewport.setLayerOpacity(activeLowerId, 1);
+      if (caseHasUpper) {
+        viewport.removeLayer(GHOST_UPPER_ID);
+        viewport.setLayerOpacity(activeUpperId, 1);
+      }
+      if (caseHasLower) {
+        viewport.removeLayer(GHOST_LOWER_ID);
+        viewport.setLayerOpacity(activeLowerId, 1);
+      }
     }
   }
 
@@ -1431,10 +1625,14 @@ export function createTreatmentApp(
     // ratio 0 = 100% current stage, ratio 1 = 100% initial stage
     const ghostOpacity = (1 - ratio) * 0.7;
     const currentOpacity = Math.max(0.25, ratio);
-    viewport.setLayerOpacity(GHOST_UPPER_ID, ghostOpacity);
-    viewport.setLayerOpacity(GHOST_LOWER_ID, ghostOpacity);
-    viewport.setLayerOpacity(activeUpperId, currentOpacity);
-    viewport.setLayerOpacity(activeLowerId, currentOpacity);
+    if (caseHasUpper) {
+      viewport.setLayerOpacity(GHOST_UPPER_ID, ghostOpacity);
+      viewport.setLayerOpacity(activeUpperId, currentOpacity);
+    }
+    if (caseHasLower) {
+      viewport.setLayerOpacity(GHOST_LOWER_ID, ghostOpacity);
+      viewport.setLayerOpacity(activeLowerId, currentOpacity);
+    }
   }
 
   async function loadAndDisplayOverlay(): Promise<void> {
@@ -1447,25 +1645,310 @@ export function createTreatmentApp(
     ]);
     if (!outcome.ok) return;
 
-    viewport.addLayer({
-      id: GHOST_UPPER_ID,
-      label: "Initial Stage 1 - Upper Ghost",
-      colour: GHOST_COLOR,
-      stl: outcome.models.upperStl,
-      geometry: geom1.ok ? geom1.geometries.upper : undefined,
-    });
-    viewport.addLayer({
-      id: GHOST_LOWER_ID,
-      label: "Initial Stage 1 - Lower Ghost",
-      colour: GHOST_COLOR,
-      stl: outcome.models.lowerStl,
-      geometry: geom1.ok ? geom1.geometries.lower : undefined,
-    });
+    if (caseHasUpper && (outcome.models.upperStl || (geom1.ok && geom1.geometries.upper))) {
+      const gUpper = geom1.ok && geom1.geometries.upper
+        ? (state.attachmentsVisible ? geom1.geometries.upper : (geom1.geometries.upperNoAttachments || geom1.geometries.upper))
+        : undefined;
+      viewport.addLayer({
+        id: GHOST_UPPER_ID,
+        label: "Initial Stage 1 - Upper Ghost",
+        colour: GHOST_COLOR,
+        stl: outcome.models.upperStl || undefined,
+        geometry: gUpper,
+      });
+      viewport.setLayerVisible(GHOST_UPPER_ID, state.upperVisible);
+    }
 
-    viewport.setLayerVisible(GHOST_UPPER_ID, state.upperVisible);
-    viewport.setLayerVisible(GHOST_LOWER_ID, state.lowerVisible);
+    if (caseHasLower && (outcome.models.lowerStl || (geom1.ok && geom1.geometries.lower))) {
+      const gLower = geom1.ok && geom1.geometries.lower
+        ? (state.attachmentsVisible ? geom1.geometries.lower : (geom1.geometries.lowerNoAttachments || geom1.geometries.lower))
+        : undefined;
+      viewport.addLayer({
+        id: GHOST_LOWER_ID,
+        label: "Initial Stage 1 - Lower Ghost",
+        colour: GHOST_COLOR,
+        stl: outcome.models.lowerStl || undefined,
+        geometry: gLower,
+      });
+      viewport.setLayerVisible(GHOST_LOWER_ID, state.lowerVisible);
+    }
 
     setOverlayBlend(state.overlayBlend);
+  }
+
+  // ── Feature 10: Orthodontic Attachments Visibility Toggle ──────────────────
+
+  function toggleAttachments(): void {
+    setAttachmentsVisible(!state.attachmentsVisible);
+  }
+
+  function setAttachmentsVisible(visible: boolean): void {
+    state.attachmentsVisible = visible;
+    attachmentsBtn.classList.toggle("tv-dock-tool-btn--active", visible);
+    attachmentsBtn.classList.toggle("tv-ba-btn--active", visible);
+    attachmentsBtn.setAttribute("aria-pressed", String(visible));
+    refreshActiveStageGeometries();
+  }
+
+  function refreshActiveStageGeometries(): void {
+    if (state.currentIndex < 0 || state.currentIndex >= state.manifest.treatmentStages.length) return;
+    const stage = state.manifest.treatmentStages[state.currentIndex];
+    if (!stage) return;
+    const cached = getCachedStageGeometries(stage.id);
+    if (!cached) return;
+
+    const targetUpper = state.attachmentsVisible
+      ? cached.upper
+      : (cached.upperNoAttachments || cached.upper);
+    const targetLower = state.attachmentsVisible
+      ? cached.lower
+      : (cached.lowerNoAttachments || cached.lower);
+
+    if (targetUpper && activeUpperId && viewport.setLayerGeometry) {
+      viewport.setLayerGeometry(activeUpperId, targetUpper);
+      if (prevUpperId) viewport.setLayerGeometry(prevUpperId, targetUpper);
+    }
+    if (targetLower && activeLowerId && viewport.setLayerGeometry) {
+      viewport.setLayerGeometry(activeLowerId, targetLower);
+      if (prevLowerId) viewport.setLayerGeometry(prevLowerId, targetLower);
+    }
+
+    if (state.contactsActive) refreshBiteContacts();
+    if (state.overlayActive) {
+      const stage1 = state.manifest.treatmentStages[0];
+      if (stage1) {
+        const cached1 = getCachedStageGeometries(stage1.id);
+        if (cached1) {
+          const ghostUpper = state.attachmentsVisible
+            ? cached1.upper
+            : (cached1.upperNoAttachments || cached1.upper);
+          const ghostLower = state.attachmentsVisible
+            ? cached1.lower
+            : (cached1.lowerNoAttachments || cached1.lower);
+          if (ghostUpper && viewport.setLayerGeometry) viewport.setLayerGeometry(GHOST_UPPER_ID, ghostUpper);
+          if (ghostLower && viewport.setLayerGeometry) viewport.setLayerGeometry(GHOST_LOWER_ID, ghostLower);
+        }
+      }
+      setOverlayBlend(state.overlayBlend);
+    }
+  }
+
+  // ── Feature 11: Interproximal Reduction (IPR) Toggle & Display ────────────
+
+  let iprAnimFrameId: number | null = null;
+
+  function toggleIpr(): void {
+    setIprActive(!state.iprActive);
+  }
+
+  function setIprActive(active: boolean): void {
+    state.iprActive = active;
+    iprBtn.classList.toggle("tv-dock-tool-btn--active", active);
+    iprBtn.classList.toggle("tv-ba-btn--active", active);
+    iprBtn.setAttribute("aria-pressed", String(active));
+    iprLegendEl.hidden = !active;
+
+    if (active) {
+      refreshIprPanel();
+      startIprLoop();
+      renderIprOverlay();
+    } else {
+      stopIprLoop();
+    }
+  }
+
+  function refreshIprPanel(): void {
+    iprLegendBodyEl.replaceChildren();
+    const allIpr: readonly IprEntry[] = state.manifest.ipr || [];
+    if (allIpr.length === 0) {
+      const empty = div("tv-ipr-empty", [
+        span("", "No IPR prescribed for this treatment case."),
+      ]);
+      iprLegendBodyEl.appendChild(empty);
+      return;
+    }
+
+    const currentStageNum =
+      state.manifest.treatmentStages[state.currentIndex]?.stageNumber ??
+      (state.currentIndex + 1);
+    const totalMm = allIpr.reduce((sum, item) => sum + (item.amountMm || 0), 0);
+
+    const summaryEl = div("tv-ipr-legend__summary", [
+      span("tv-ipr-legend__count", `${allIpr.length} planned reductions`),
+      span("tv-ipr-legend__total", `Total: ${totalMm.toFixed(2)} mm`),
+    ]);
+    iprLegendBodyEl.appendChild(summaryEl);
+
+    const tableEl = document.createElement("table");
+    tableEl.className = "tv-ipr-table";
+    const tbody = document.createElement("tbody");
+
+    const sorted = [...allIpr].sort((a, b) => a.stage - b.stage || a.toothA - b.toothA);
+    for (const item of sorted) {
+      const isCurrentStage = item.stage === currentStageNum;
+      const tr = document.createElement("tr");
+      tr.className = `tv-ipr-row ${isCurrentStage ? "tv-ipr-row--current" : ""}`;
+      tr.title = `Click to navigate to Stage ${item.stage}`;
+      tr.addEventListener("click", () => {
+        const stageIdx = state.manifest.treatmentStages.findIndex(
+          (s) => (s.stageNumber ?? -1) === item.stage,
+        );
+        if (stageIdx !== -1) void navigate(stageIdx);
+        else if (item.stage <= state.manifest.treatmentStages.length) void navigate(item.stage - 1);
+      });
+
+      const tdStage = document.createElement("td");
+      tdStage.className = "tv-ipr-td-stage";
+      tdStage.textContent = item.stage === 1 ? "Stage 1 (Initial)" : `Stage ${item.stage}`;
+
+      const tdContact = document.createElement("td");
+      tdContact.className = "tv-ipr-td-contact";
+      tdContact.textContent = `${item.arch === "upper" ? "Upper" : "Lower"} ${item.contact}`;
+
+      const tdAmount = document.createElement("td");
+      tdAmount.className = "tv-ipr-td-amount";
+      tdAmount.textContent = `${item.amountMm.toFixed(2)} mm`;
+
+      tr.append(tdStage, tdContact, tdAmount);
+      tbody.appendChild(tr);
+    }
+    tableEl.appendChild(tbody);
+    iprLegendBodyEl.appendChild(tableEl);
+  }
+
+  function renderIprOverlay(): void {
+    iprSvgOverlay.replaceChildren();
+    if (!state.iprActive || !viewport.projectPoint) return;
+
+    const allIpr = state.manifest.ipr || [];
+    if (allIpr.length === 0) return;
+
+    const currentStageNum =
+      state.manifest.treatmentStages[state.currentIndex]?.stageNumber ??
+      (state.currentIndex + 1);
+    const activeItems = allIpr.filter((item) => item.stage === currentStageNum);
+    if (activeItems.length === 0) return;
+
+    const ug = activeUpperId ? viewport.getLayerGeometry?.(activeUpperId) : null;
+    const lg = activeLowerId ? viewport.getLayerGeometry?.(activeLowerId) : null;
+    const currentUpperCentroids = (ug ? computeToothCentroids(ug, true) : null) || stage1UpperCentroids;
+    const currentLowerCentroids = (lg ? computeToothCentroids(lg, false) : null) || stage1LowerCentroids;
+
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    iprSvgOverlay.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+    for (const item of activeItems) {
+      const isUpper = item.arch === "upper" || item.toothA < 30;
+      if (isUpper && !state.upperVisible) continue;
+      if (!isUpper && !state.lowerVisible) continue;
+
+      const pt = getContactPoint(
+        item.toothA,
+        item.toothB,
+        currentUpperCentroids || undefined,
+        currentLowerCentroids || undefined,
+      );
+      if (!pt) continue;
+
+      const proj = viewport.projectPoint({ x: pt[0], y: pt[1], z: pt[2] });
+      if (!proj || !proj.visible) continue;
+
+      const offsetY = isUpper ? -58 : 58;
+      const fanX = (pt[0] > 0 ? 1 : -1) * Math.min(22, Math.abs(pt[0]) * 0.35);
+
+      const bx = proj.x + fanX;
+      const by = proj.y + offsetY;
+
+      // Leader line
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", String(proj.x));
+      line.setAttribute("y1", String(proj.y));
+      line.setAttribute("x2", String(bx));
+      line.setAttribute("y2", String(by));
+      line.setAttribute("stroke", "rgba(255, 255, 255, 0.85)");
+      line.setAttribute("stroke-width", "1.5");
+      line.setAttribute("stroke-dasharray", "3,2");
+      iprSvgOverlay.appendChild(line);
+
+      // Contact point anchor
+      const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      dot.setAttribute("cx", String(proj.x));
+      dot.setAttribute("cy", String(proj.y));
+      dot.setAttribute("r", "2.8");
+      dot.setAttribute("fill", "#ffd166");
+      dot.setAttribute("stroke", "#0f172a");
+      dot.setAttribute("stroke-width", "1");
+      iprSvgOverlay.appendChild(dot);
+
+      // Diamond Badge
+      const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      g.setAttribute("transform", `translate(${bx}, ${by})`);
+      g.setAttribute("class", "tv-ipr-badge");
+      g.style.cursor = "pointer";
+      g.style.pointerEvents = "auto";
+
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("x", "-11");
+      rect.setAttribute("y", "-11");
+      rect.setAttribute("width", "22");
+      rect.setAttribute("height", "22");
+      rect.setAttribute("rx", "3.5");
+      rect.setAttribute("transform", "rotate(45)");
+      rect.setAttribute("fill", "#ffffff");
+      rect.setAttribute("stroke", "#0f172a");
+      rect.setAttribute("stroke-width", "1.5");
+      rect.setAttribute("filter", "drop-shadow(0 2px 4px rgba(0,0,0,0.35))");
+
+      const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      text.setAttribute("text-anchor", "middle");
+      text.setAttribute("dominant-baseline", "central");
+      text.setAttribute("font-family", "system-ui, -apple-system, sans-serif");
+      text.setAttribute("font-size", "11");
+      text.setAttribute("font-weight", "800");
+      text.setAttribute("fill", "#0f172a");
+      const valStr = item.amountMm.toFixed(1).replace(/^0/, "");
+      text.textContent = valStr;
+
+      g.append(rect, text);
+
+      g.addEventListener("mouseenter", () => {
+        tooltipBadgeEl.textContent = `IPR ${item.amountMm.toFixed(2)} mm`;
+        tooltipNotationEl.textContent = `Stage ${item.stage}`;
+        tooltipQuadrantEl.textContent = isUpper ? "Upper Arch (Maxilla)" : "Lower Arch (Mandible)";
+        tooltipNameEl.textContent = `Contact Tooth ${item.contact}`;
+        tooltipDeltaEl.textContent = `Reduction: ${item.amountMm.toFixed(2)} mm`;
+        toothTooltipEl.style.left = `${Math.max(10, Math.min(window.innerWidth - 250, bx - 120))}px`;
+        toothTooltipEl.style.top = `${by + (isUpper ? -75 : 25)}px`;
+        toothTooltipEl.hidden = false;
+      });
+      g.addEventListener("mouseleave", () => {
+        toothTooltipEl.hidden = true;
+      });
+
+      iprSvgOverlay.appendChild(g);
+    }
+  }
+
+  function startIprLoop(): void {
+    if (iprAnimFrameId !== null) return;
+    function step() {
+      if (!state.iprActive) {
+        iprAnimFrameId = null;
+        return;
+      }
+      renderIprOverlay();
+      iprAnimFrameId = requestAnimationFrame(step);
+    }
+    iprAnimFrameId = requestAnimationFrame(step);
+  }
+
+  function stopIprLoop(): void {
+    if (iprAnimFrameId !== null) {
+      cancelAnimationFrame(iprAnimFrameId);
+      iprAnimFrameId = null;
+    }
+    iprSvgOverlay.replaceChildren();
   }
 
   // ── Load a new Case Manifest ──────────────────────────────────────────────
@@ -1641,6 +2124,17 @@ export function createTreatmentApp(
     beforeBtn.classList.toggle("tv-ba-btn--active", isBefore);
     afterBtn.classList.toggle("tv-ba-btn--active", isAfter);
 
+    contactsBtn.classList.toggle("tv-dock-tool-btn--active", state.contactsActive);
+    contactsBtn.classList.toggle("tv-ba-btn--active", state.contactsActive);
+    overlayBtn.classList.toggle("tv-dock-tool-btn--active", state.overlayActive);
+    overlayBtn.classList.toggle("tv-ba-btn--active", state.overlayActive);
+    attachmentsBtn.classList.toggle("tv-dock-tool-btn--active", state.attachmentsVisible);
+    attachmentsBtn.classList.toggle("tv-ba-btn--active", state.attachmentsVisible);
+    attachmentsBtn.setAttribute("aria-pressed", String(state.attachmentsVisible));
+    iprBtn.classList.toggle("tv-dock-tool-btn--active", state.iprActive);
+    iprBtn.classList.toggle("tv-ba-btn--active", state.iprActive);
+    iprBtn.setAttribute("aria-pressed", String(state.iprActive));
+
     updateScrubberProgress();
     syncSidebarSelection();
     syncArchPillUI();
@@ -1652,7 +2146,7 @@ export function createTreatmentApp(
       statusEl.className = "tv-status tv-status--error";
       statusEl.hidden = false;
     } else if (state.loading) {
-      statusEl.textContent = "Loading models…";
+      statusEl.textContent = "Loading 3D Models…";
       statusEl.className = "tv-status";
       statusEl.hidden = false;
     } else {
@@ -1715,9 +2209,9 @@ export function createTreatmentApp(
         const item = div("tv-stage-grid__item tv-stage-grid__item--template", [
           div("tv-stage-grid__label", [tpl.label]),
           div("tv-stage-grid__files", [
-            `Upper: ${tpl.upper.filename}`,
+            tpl.upper ? `Upper: ${tpl.upper.filename}` : "Upper: None",
             document.createElement("br"),
-            `Lower: ${tpl.lower.filename}`,
+            tpl.lower ? `Lower: ${tpl.lower.filename}` : "Lower: None",
           ]),
           makeBtn(
             "Inspect in 3D (Doctor View)",
@@ -1752,9 +2246,9 @@ export function createTreatmentApp(
             : "",
         ]),
         div("tv-stage-grid__files", [
-          `Upper: ${stg.upper.filename}`,
+          stg.upper ? `Upper: ${stg.upper.filename}` : "Upper: None",
           document.createElement("br"),
-          `Lower: ${stg.lower.filename}`,
+          stg.lower ? `Lower: ${stg.lower.filename}` : "Lower: None",
         ]),
         makeBtn(
           "Jump to Stage",
@@ -1875,6 +2369,7 @@ export function createTreatmentApp(
   return {
     dispose: () => {
       stopPlay();
+      stopIprLoop();
       if (transitionAnimId !== null) {
         cancelAnimationFrame(transitionAnimId);
         transitionAnimId = null;
@@ -1895,6 +2390,10 @@ export function createTreatmentApp(
     toggleContacts,
     toggleOverlay,
     setOverlayBlend,
+    toggleAttachments,
+    setAttachmentsVisible,
+    toggleIpr,
+    setIprActive,
     getState: () => ({ ...state }),
   };
 }
@@ -1921,7 +2420,18 @@ function span(className: string, text: string): HTMLSpanElement {
 function heading(text: string): HTMLHeadingElement {
   const el = document.createElement("h1");
   el.className = "tv-brand";
-  el.textContent = text;
+  if (text === "3D Treatment Progression") {
+    const desktopSpan = document.createElement("span");
+    desktopSpan.className = "tv-brand-desktop";
+    desktopSpan.textContent = "3D Treatment Progression";
+    const mobileSpan = document.createElement("span");
+    mobileSpan.className = "tv-brand-mobile";
+    mobileSpan.textContent = "3D Progression";
+    el.appendChild(desktopSpan);
+    el.appendChild(mobileSpan);
+  } else {
+    el.textContent = text;
+  }
   return el;
 }
 

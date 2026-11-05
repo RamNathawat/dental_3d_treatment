@@ -21,9 +21,11 @@ import {
   Copy,
   Sun,
   Moon,
+  Scissors,
 } from "lucide-react";
 import { DentalCase } from "./page";
 import UploadCaseModal from "./UploadCaseModal";
+import EditIprModal from "./EditIprModal";
 
 interface DashboardClientProps {
   email: string;
@@ -41,6 +43,7 @@ export default function DashboardClient({
   const [activeFilter, setActiveFilter] = useState<"all" | "ready" | "processing">("all");
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [selectedIprCase, setSelectedIprCase] = useState<DentalCase | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isDark, setIsDark] = useState<boolean>(false);
 
@@ -375,6 +378,12 @@ export default function DashboardClient({
                 const minWeeks = Math.round((stages * 10) / 7);
                 const maxWeeks = Math.round((stages * 14) / 7);
 
+                const isUpperOnly = item.patient_name.includes("[Upper]");
+                const isLowerOnly = item.patient_name.includes("[Lower]");
+                const displayName = item.patient_name.replace(/\s*\[(Upper|Lower|Dual)\]/i, "").trim();
+                const archLabel = isUpperOnly ? "Upper Arch Only" : isLowerOnly ? "Lower Arch Only" : "Dual-Arch";
+                const stepperLabel = isUpperOnly ? "Upper Arch Alignment" : isLowerOnly ? "Lower Arch Alignment" : "Dual-Arch Alignment";
+
                 return (
                   <div
                     key={item.id}
@@ -390,7 +399,7 @@ export default function DashboardClient({
                           </div>
                           <div className="min-w-0">
                             <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white truncate tracking-tight group-hover:text-slate-700 dark:group-hover:text-[#ffd166] transition-colors">
-                              {item.patient_name}
+                              {displayName}
                             </h3>
                             <div className="flex items-center gap-2 mt-0.5">
                               <span className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">
@@ -401,7 +410,23 @@ export default function DashboardClient({
                         </div>
 
                         {/* Status & Delete */}
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1.5 border ${
+                              isUpperOnly
+                                ? "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-200/70 dark:border-sky-800/50"
+                                : isLowerOnly
+                                ? "bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200/70 dark:border-purple-800/50"
+                                : "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-[#ffd166] border-amber-200/70 dark:border-amber-800/50"
+                            }`}
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${
+                                isUpperOnly ? "bg-sky-500" : isLowerOnly ? "bg-purple-500" : "bg-amber-500"
+                              }`}
+                            />
+                            {archLabel}
+                          </span>
                           <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200/70 dark:border-emerald-800/50 inline-flex items-center gap-1.5">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                             Ready
@@ -420,7 +445,7 @@ export default function DashboardClient({
                       <div className="pt-2">
                         <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1.5">
                           <span>Stage 01 (Initial)</span>
-                          <span className="text-slate-400 dark:text-slate-500 font-normal">Dual-Arch Alignment</span>
+                          <span className="text-slate-400 dark:text-slate-500 font-normal">{stepperLabel}</span>
                           <span>Stage {String(item.total_stages).padStart(2, "0")} (Final)</span>
                         </div>
                         {/* Segmented Track */}
@@ -469,7 +494,7 @@ export default function DashboardClient({
                       {/* Secondary CTA: Share Link */}
                       <button
                         onClick={() => handleCopyShareLink(item.share_token)}
-                        className={`py-2.5 px-4 rounded-xl text-xs font-semibold border transition-all flex items-center justify-center gap-2 active:scale-98 ${
+                        className={`py-2.5 px-3.5 rounded-xl text-xs font-semibold border transition-all flex items-center justify-center gap-1.5 active:scale-98 ${
                           copiedToken === item.share_token
                             ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700"
                             : "bg-white dark:bg-[#1A2234] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-[#232D42] border-slate-200 dark:border-slate-700 shadow-2xs hover:dark:border-[#e0b457]/40"
@@ -487,6 +512,16 @@ export default function DashboardClient({
                           </>
                         )}
                       </button>
+
+                      {/* Tertiary CTA: IPR Plan */}
+                      <button
+                        onClick={() => setSelectedIprCase(item)}
+                        className="py-2.5 px-3 rounded-xl text-xs font-semibold border transition-all flex items-center justify-center gap-1.5 active:scale-98 bg-white dark:bg-[#1A2234] text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-950/30 border-slate-200 dark:border-slate-700 hover:border-amber-300 dark:hover:border-amber-700 hover:text-amber-800 dark:hover:text-[#ffd166] shadow-2xs"
+                        title="View and edit planned Interproximal Reduction (IPR) values"
+                      >
+                        <Scissors className="w-3.5 h-3.5 text-amber-600 dark:text-[#ffd166]" />
+                        <span>IPR</span>
+                      </button>
                     </div>
                   </div>
                 );
@@ -503,6 +538,20 @@ export default function DashboardClient({
         userId={userId}
         onCaseCreated={handleCaseCreated}
       />
+
+      {/* ─── Edit IPR Modal ───────────────────────────────────────────── */}
+      {selectedIprCase && (
+        <EditIprModal
+          isOpen={Boolean(selectedIprCase)}
+          onClose={() => setSelectedIprCase(null)}
+          caseItem={selectedIprCase}
+          onSaved={(cnt) =>
+            showToast(
+              `IPR prescription updated for ${selectedIprCase.patient_name} (${cnt} planned reductions)`,
+            )
+          }
+        />
+      )}
     </div>
   );
 }

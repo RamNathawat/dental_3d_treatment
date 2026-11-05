@@ -57,6 +57,35 @@ export const SOUMYA_SARATH_MANIFEST: CaseManifest = {
       },
     },
   ],
+  ipr: [
+    {
+      id: "ipr-1",
+      arch: "upper",
+      contact: "11-21",
+      toothA: 11,
+      toothB: 21,
+      stage: 1,
+      amountMm: 0.3,
+    },
+    {
+      id: "ipr-2",
+      arch: "lower",
+      contact: "41-31",
+      toothA: 41,
+      toothB: 31,
+      stage: 1,
+      amountMm: 0.2,
+    },
+    {
+      id: "ipr-3",
+      arch: "lower",
+      contact: "31-32",
+      toothA: 31,
+      toothB: 32,
+      stage: 2,
+      amountMm: 0.2,
+    },
+  ],
   ambiguities: [],
 };
 
@@ -132,8 +161,8 @@ export const TREATMENT_STAGES: readonly TreatmentStage[] =
   DEFAULT_CASE_MANIFEST.treatmentStages.map((s) => ({
     stage: s.stageNumber ?? 1,
     label: s.label,
-    upperUrl: s.upper.url ?? "",
-    lowerUrl: s.lower.url ?? "",
+    upperUrl: s.upper?.url ?? "",
+    lowerUrl: s.lower?.url ?? "",
   }));
 
 export const STAGE_COUNT = TREATMENT_STAGES.length;

@@ -106,8 +106,8 @@ interface RenderedLayer extends Omit<SurfaceLayer, "geometry"> {
   geometry: BufferGeometry;
   /** The layer's own colour, kept while a curvature ramp is the thing on screen. */
   colour: string;
-  readonly triangles: number;
-  readonly bounds: Bounds;
+  triangles: number;
+  bounds: Bounds;
   /** Distance along the occlusal axis at full separation, taken from the scan geometry. */
   separationOffset: number;
   /** The user's visibility setting; `isolate` overlays on top of it. */
@@ -414,11 +414,30 @@ class ThreeViewport implements Viewport {
     return this.layers.get(id)?.geometry ?? null;
   }
 
+  projectPoint(point: { x: number; y: number; z: number }): { x: number; y: number; visible: boolean } | null {
+    const width = this.lastSize?.width || this.renderer.domElement.clientWidth;
+    const height = this.lastSize?.height || this.renderer.domElement.clientHeight;
+    if (width <= 0 || height <= 0) return null;
+
+    const v = new Vector3(point.x, point.y, point.z);
+    v.project(this.camera);
+
+    const visible = v.z < 1.0;
+    const x = (v.x * 0.5 + 0.5) * width;
+    const y = (-v.y * 0.5 + 0.5) * height;
+
+    return { x, y, visible };
+  }
+
   setLayerGeometry(id: string, geometry: BufferGeometry): void {
     const layer = this.layers.get(id);
     if (!layer) return;
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    if (!geometry.boundingSphere) geometry.computeBoundingSphere();
     layer.geometry = geometry;
     layer.mesh.geometry = geometry;
+    layer.bounds = boundsOf(geometry);
+    layer.triangles = triangleCountOf(geometry);
     if (layer.colour === "anatomical") {
       if (!geometry.getAttribute("color")) {
         computeAnatomicalColors(geometry, layer.label);
@@ -426,6 +445,7 @@ class ThreeViewport implements Viewport {
       layer.material.vertexColors = Boolean(geometry.getAttribute("color"));
       layer.material.needsUpdate = true;
     }
+    this.refreshSeparation();
   }
 
   setLayerVisible(id: string, visible: boolean): void {

@@ -83,29 +83,63 @@ async function init() {
           return;
         }
 
+        const baseStorage = `${supabaseUrl}/storage/v1/object/public/treatment-models/${caseId}`;
+
+        // 1. First attempt to load stored manifest.json if present
+        try {
+          const manifestRes = await fetch(`${baseStorage}/manifest.json`);
+          if (manifestRes.ok) {
+            const storedManifest = await manifestRes.json();
+            if (
+              storedManifest &&
+              Array.isArray(storedManifest.treatmentStages) &&
+              storedManifest.treatmentStages.length > 0
+            ) {
+              createTreatmentApp(root!, { caseManifest: storedManifest });
+              return;
+            }
+          }
+        } catch (manifestErr) {
+          console.info("Using fallback dynamic manifest generator:", manifestErr);
+        }
+
+        // 2. Dynamic manifest fallback (supports Upper-only, Lower-only, or Dual-arch)
+        const isUpperOnly = patientName.includes("[Upper]");
+        const isLowerOnly = patientName.includes("[Lower]");
+        const hasUpper = !isLowerOnly;
+        const hasLower = !isUpperOnly;
+        const cleanPatientName = patientName.replace(/\s*\[(Upper|Lower|Dual)\]/i, "").trim();
+
         const dynamicManifest: CaseManifest = {
           caseId: caseId,
-          patientName: patientName,
+          patientName: cleanPatientName,
+          archType: isUpperOnly ? "upper" : isLowerOnly ? "lower" : "both",
+          hasUpper,
+          hasLower,
+          ipr: caseRecord.ipr || [],
           treatmentStages: Array.from({ length: totalStages }, (_, i) => {
             const stageNum = i + 1;
             const pad = String(stageNum).padStart(2, "0");
-            const upperFilename = `${patientName} Upper jaw - ${pad} - Model.glb`;
-            const lowerFilename = `${patientName} Lower jaw - ${pad} - Model.glb`;
-            const baseStorage = `${supabaseUrl}/storage/v1/object/public/treatment-models/${caseId}`;
+            const upperFilename = `${cleanPatientName} Upper jaw - ${pad} - Model.glb`;
+            const lowerFilename = `${cleanPatientName} Lower jaw - ${pad} - Model.glb`;
 
             return {
               id: `stage-${pad}`,
               stageNumber: stageNum,
               label: `Stage ${stageNum}`,
               doctorOnly: false,
-              upper: {
-                filename: upperFilename,
-                url: `${baseStorage}/${encodeURIComponent(upperFilename)}`,
-              },
-              lower: {
-                filename: lowerFilename,
-                url: `${baseStorage}/${encodeURIComponent(lowerFilename)}`,
-              },
+              upper: hasUpper
+                ? {
+                    filename: upperFilename,
+                    url: `${baseStorage}/${encodeURIComponent(upperFilename)}`,
+                  }
+                : undefined,
+              lower: hasLower
+                ? {
+                    filename: lowerFilename,
+                    url: `${baseStorage}/${encodeURIComponent(lowerFilename)}`,
+                  }
+                : undefined,
             };
           }),
           templateStages: [],

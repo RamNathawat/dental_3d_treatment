@@ -11,6 +11,7 @@
 
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import type { BufferGeometry, Mesh } from "three";
 import { get as idbGet, set as idbSet, createStore } from "idb-keyval";
 import { computeAnatomicalColors } from "../viewer/three-viewport";
@@ -47,8 +48,8 @@ export function setModelProgressCallback(
 export type ModelSource = string | ArchAsset | File | Blob;
 
 export interface LoadedModels {
-  readonly upperStl: ArrayBuffer;
-  readonly lowerStl: ArrayBuffer;
+  readonly upperStl: ArrayBuffer | null;
+  readonly lowerStl: ArrayBuffer | null;
 }
 
 export interface LoadResult {
@@ -67,32 +68,37 @@ export type LoadOutcome = LoadResult | LoadError;
 const stlLoader = new STLLoader();
 
 /**
- * Loads both STL models for a stage in parallel (from URLs, ArchAssets, or Files).
- * Returns an error if either load fails.
+ * Loads models for a stage in parallel (from URLs, ArchAssets, or Files).
+ * Supports dual-arch (both upper and lower) as well as single-arch (upper only or lower only).
+ * Returns an error if an arch is specified but fails to load, or if neither arch is specified.
  */
 export async function loadStageModels(
-  upper: ModelSource,
-  lower: ModelSource,
+  upper?: ModelSource | null,
+  lower?: ModelSource | null,
   signal?: AbortSignal,
 ): Promise<LoadOutcome> {
+  if (!upper && !lower) {
+    return { ok: false, reason: "Stage must contain at least an Upper or Lower model." };
+  }
+
   try {
     const [upperResult, lowerResult] = await Promise.all([
-      resolveStlBuffer(upper, "Upper jaw", signal),
-      resolveStlBuffer(lower, "Lower jaw", signal),
+      upper ? resolveStlBuffer(upper, "Upper jaw", signal) : Promise.resolve(null),
+      lower ? resolveStlBuffer(lower, "Lower jaw", signal) : Promise.resolve(null),
     ]);
 
-    if (!upperResult.ok) {
+    if (upper && upperResult && !upperResult.ok) {
       return { ok: false, reason: `Upper jaw: ${upperResult.reason}` };
     }
-    if (!lowerResult.ok) {
+    if (lower && lowerResult && !lowerResult.ok) {
       return { ok: false, reason: `Lower jaw: ${lowerResult.reason}` };
     }
 
     return {
       ok: true,
       models: {
-        upperStl: upperResult.buffer,
-        lowerStl: lowerResult.buffer,
+        upperStl: upperResult && upperResult.ok ? upperResult.buffer : null,
+        lowerStl: lowerResult && lowerResult.ok ? lowerResult.buffer : null,
       },
     };
   } catch (error) {
@@ -109,12 +115,15 @@ export async function loadStageModels(
 /**
  * Fire-and-forget pre-warm: begins fetching the given stage's STL files in the
  * background so they land in the in-memory cache before the user navigates to
- * them.  Errors are swallowed; a cache miss on the actual navigate just falls
+ * them. Errors are swallowed; a cache miss on the actual navigate just falls
  * through to a fresh fetch.
  */
-export function prefetchStageModels(upper: ModelSource, lower: ModelSource): void {
-  void resolveStlBuffer(upper, "Upper jaw (prefetch)");
-  void resolveStlBuffer(lower, "Lower jaw (prefetch)");
+export function prefetchStageModels(
+  upper?: ModelSource | null,
+  lower?: ModelSource | null,
+): void {
+  if (upper) void resolveStlBuffer(upper, "Upper jaw (prefetch)");
+  if (lower) void resolveStlBuffer(lower, "Lower jaw (prefetch)");
 }
 
 /**
@@ -122,7 +131,7 @@ export function prefetchStageModels(upper: ModelSource, lower: ModelSource): voi
  * intermediate stages load with 0ms latency during playback and scrubbing.
  */
 export function prewarmAllStages(
-  stages: readonly { upper: ModelSource; lower: ModelSource }[],
+  stages: readonly { upper?: ModelSource | null; lower?: ModelSource | null }[],
 ): void {
   for (const s of stages) {
     prefetchStageModels(s.upper, s.lower);
@@ -253,52 +262,119 @@ export function clearStlBufferCache(): void {
   clearStageGeometryCache();
 }
 
-/** Extracts native BufferGeometry directly from an in-memory GLB buffer in ~10ms */
-export async function extractGeometryFromGlb(glbBuffer: ArrayBuffer): Promise<BufferGeometry | null> {
+function calibrateGeometryColors(geom: BufferGeometry): void {
+  if (!geom.getAttribute("normal")) {
+    geom.computeVertexNormals();
+  }
+  geom.computeBoundingBox();
+  geom.computeBoundingSphere();
+
+  // Calibrate vertex colors for natural ClinCheck / 3Shape aesthetics:
+  // Upgrades previously uploaded cases with pale/chalky colors to clinical enamel & gingiva tones
+  const colorAttr = geom.getAttribute("color");
+  if (colorAttr) {
+    const arr = colorAttr.array as Float32Array;
+    for (let i = 0; i < arr.length; i += 3) {
+      const r = arr[i]!;
+      const g = arr[i + 1]!;
+      const b = arr[i + 2]!;
+      // 1. Preserve distinct green CAD labels or attachment markings (e.g., "NIYA 1", "NIYA 2")
+      if (g > 0.40 && g > r * 1.30) {
+        continue;
+      }
+      // 2. Gum / Gingiva: rich healthy vascular coral-rose (#CC5C6A in linear: 0.46, 0.085, 0.105)
+      if (r > 0.35 && (r - g) > 0.08) {
+        arr[i] = 0.46;
+        arr[i + 1] = 0.085;
+        arr[i + 2] = 0.105;
+      } else if (r > 0.60 && g > 0.55 && b > 0.50) {
+        // 3. Tooth Enamel: natural pearlescent enamel ivory (#E1E0DF in linear: 0.76, 0.74, 0.72)
+        arr[i] = 0.76;
+        arr[i + 1] = 0.74;
+        arr[i + 2] = 0.72;
+      }
+    }
+    colorAttr.needsUpdate = true;
+  }
+}
+
+export interface ExtractedGlbGeometries {
+  readonly full: BufferGeometry;
+  readonly noAttachments: BufferGeometry;
+  readonly hasAttachments: boolean;
+}
+
+/** Extracts native BufferGeometries directly from an in-memory GLB buffer in ~10ms.
+ * Safely preserves multi-mesh containers and separates distinct attachment submeshes. */
+export async function extractGeometriesFromGlb(
+  glbBuffer: ArrayBuffer,
+): Promise<ExtractedGlbGeometries | null> {
   const gltfLoader = new GLTFLoader();
   const gltf = await gltfLoader.parseAsync(glbBuffer, "");
-  let geom: BufferGeometry | null = null;
+  const baseGeoms: BufferGeometry[] = [];
+  const attGeoms: BufferGeometry[] = [];
+
+  gltf.scene.updateMatrixWorld(true);
   gltf.scene.traverse((child) => {
-    if ((child as Mesh).isMesh && !geom) {
-      geom = (child as Mesh).geometry;
+    if ((child as Mesh).isMesh) {
+      const m = child as Mesh;
+      const g = m.geometry.clone();
+      g.applyMatrix4(m.matrixWorld);
+      const name = (child.name || "").toLowerCase();
+      if (name.includes("attachment")) {
+        attGeoms.push(g);
+      } else {
+        baseGeoms.push(g);
+      }
     }
   });
-  if (geom) {
-    if (!(geom as BufferGeometry).getAttribute("normal")) {
-      (geom as BufferGeometry).computeVertexNormals();
-    }
 
-    // Calibrate vertex colors for natural ClinCheck / 3Shape aesthetics:
-    // Upgrades previously uploaded cases with pale/chalky colors to clinical enamel & gingiva tones
-    const colorAttr = (geom as BufferGeometry).getAttribute("color");
-    if (colorAttr) {
-      const arr = colorAttr.array as Float32Array;
-      for (let i = 0; i < arr.length; i += 3) {
-        const r = arr[i]!;
-        const g = arr[i + 1]!;
-        const b = arr[i + 2]!;
-        // 1. Preserve distinct green CAD labels or attachment markings (e.g., "NIYA 1", "NIYA 2")
-        if (g > 0.40 && g > r * 1.30) {
-          continue;
-        }
-        // 2. Gum / Gingiva: rich healthy vascular coral-rose (#CC5C6A in linear: 0.46, 0.085, 0.105)
-        if (r > 0.35 && (r - g) > 0.08) {
-          arr[i] = 0.46;
-          arr[i + 1] = 0.085;
-          arr[i + 2] = 0.105;
-        } else if (r > 0.60 && g > 0.55 && b > 0.50) {
-          // 3. Tooth Enamel: natural pearlescent enamel ivory (#E1E0DF in linear: 0.76, 0.74, 0.72)
-          arr[i] = 0.76;
-          arr[i + 1] = 0.74;
-          arr[i + 2] = 0.72;
-        }
-      }
-      colorAttr.needsUpdate = true;
-    }
+  if (baseGeoms.length === 0 && attGeoms.length === 0) return null;
 
-    return geom;
+  if (attGeoms.length > 0) {
+    const baseGeom =
+      baseGeoms.length === 1
+        ? baseGeoms[0]!
+        : mergeGeometries(baseGeoms, false) || baseGeoms[0]!;
+    const attGeom =
+      attGeoms.length === 1
+        ? attGeoms[0]!
+        : mergeGeometries(attGeoms, false) || attGeoms[0]!;
+
+    calibrateGeometryColors(baseGeom);
+    calibrateGeometryColors(attGeom);
+
+    const fullGeom =
+      mergeGeometries([baseGeom.clone(), attGeom.clone()], false) || baseGeom;
+    calibrateGeometryColors(fullGeom);
+
+    return {
+      full: fullGeom,
+      noAttachments: baseGeom,
+      hasAttachments: true,
+    };
   }
-  return null;
+
+  // If no separate attachment submeshes are present in the GLB,
+  // return the clean base geometry without altering or mutating any vertices.
+  const baseGeom =
+    baseGeoms.length === 1
+      ? baseGeoms[0]!
+      : mergeGeometries(baseGeoms, false) || baseGeoms[0]!;
+  calibrateGeometryColors(baseGeom);
+
+  return {
+    full: baseGeom,
+    noAttachments: baseGeom,
+    hasAttachments: false,
+  };
+}
+
+/** Extracts native BufferGeometry directly from an in-memory GLB buffer in ~10ms.
+ * Safely preserves multi-mesh containers (merging all arch submeshes). */
+export async function extractGeometryFromGlb(glbBuffer: ArrayBuffer): Promise<BufferGeometry | null> {
+  const result = await extractGeometriesFromGlb(glbBuffer);
+  return result ? result.full : null;
 }
 
 async function fetchStl(
@@ -422,8 +498,11 @@ async function fetchStl(
 export { stlLoader };
 
 export interface StageGeometries {
-  readonly upper: BufferGeometry;
-  readonly lower: BufferGeometry;
+  readonly upper: BufferGeometry | null;
+  readonly lower: BufferGeometry | null;
+  readonly upperNoAttachments?: BufferGeometry | null;
+  readonly lowerNoAttachments?: BufferGeometry | null;
+  readonly hasAttachments?: boolean;
   readonly upperCentroids: Record<number, [number, number, number]>;
   readonly lowerCentroids: Record<number, [number, number, number]>;
 }
@@ -449,7 +528,9 @@ export function clearStageGeometryCache(): void {
 
 /**
  * Loads, parses, and caches full Three.js geometries for a stage, including
- * pre-computed vertex normals, anatomical colors, and per-tooth spatial centroids.
+ * pre-computed vertex normals, anatomical colors, per-tooth spatial centroids,
+ * and distinct attachment/no-attachment configurations for visibility toggling.
+ * Supports dual-arch as well as single-arch (upper-only or lower-only).
  *
  * Subsequent requests for the same stage resolve with 0ms latency.
  */
@@ -478,7 +559,8 @@ export async function loadStageGeometries(
         return outcome;
       }
 
-      const getGlbBuffer = (source: ModelSource): ArrayBuffer | undefined => {
+      const getGlbBuffer = (source?: ModelSource | null): ArrayBuffer | undefined => {
+        if (!source) return undefined;
         if (typeof source === "object" && source !== null && "url" in source && source.url) {
           return rawGlbCache.get(source.url);
         }
@@ -488,67 +570,117 @@ export async function loadStageGeometries(
         return undefined;
       };
 
-      const upperGlb = getGlbBuffer(stage.upper);
-      const lowerGlb = getGlbBuffer(stage.lower);
-
       let upperGeom: BufferGeometry | null = null;
-      if (upperGlb) {
-        upperGeom = await extractGeometryFromGlb(upperGlb);
-      }
-      if (!upperGeom) {
-        const isModelGlb = isGlb(outcome.models.upperStl);
-        const rawUpper = isModelGlb
-          ? await extractGeometryFromGlb(outcome.models.upperStl)
-          : stlLoader.parse(outcome.models.upperStl);
-        if (rawUpper) {
-          upperGeom = isModelGlb ? rawUpper : capPlanarOpenings(rawUpper, true);
-          upperGeom.computeVertexNormals();
-          if (!upperGeom.getAttribute("color")) {
-            computeAnatomicalColors(
-              upperGeom,
-              stage.upper.filename || `${stage.label} - Upper`,
-            );
+      let upperNoAttGeom: BufferGeometry | null = null;
+      let upperHasAtts = false;
+
+      if (stage.upper && outcome.models.upperStl) {
+        const upperGlb = getGlbBuffer(stage.upper);
+        if (upperGlb) {
+          const res = await extractGeometriesFromGlb(upperGlb);
+          if (res) {
+            upperGeom = res.full;
+            upperNoAttGeom = res.noAttachments;
+            upperHasAtts = res.hasAttachments;
           }
         }
+        if (!upperGeom) {
+          const isModelGlb = isGlb(outcome.models.upperStl);
+          if (isModelGlb) {
+            const res = await extractGeometriesFromGlb(outcome.models.upperStl);
+            if (res) {
+              upperGeom = res.full;
+              upperNoAttGeom = res.noAttachments;
+              upperHasAtts = res.hasAttachments;
+            }
+          } else {
+            const rawUpper = stlLoader.parse(outcome.models.upperStl);
+            if (rawUpper) {
+              upperGeom = capPlanarOpenings(rawUpper, true);
+              upperGeom.computeVertexNormals();
+              if (!upperGeom.getAttribute("color")) {
+                computeAnatomicalColors(
+                  upperGeom,
+                  stage.upper.filename || `${stage.label} - Upper`,
+                );
+              }
+              upperHasAtts = false;
+              upperNoAttGeom = upperGeom;
+            }
+          }
+        }
+        if (upperGeom) {
+          upperGeom.computeBoundingBox();
+          upperGeom.computeBoundingSphere();
+        }
+        if (upperNoAttGeom) {
+          upperNoAttGeom.computeBoundingBox();
+          upperNoAttGeom.computeBoundingSphere();
+        }
       }
-      if (!upperGeom) {
-        return { ok: false, reason: "Could not parse Upper jaw geometry." };
-      }
-      upperGeom.computeBoundingBox();
-      upperGeom.computeBoundingSphere();
 
       let lowerGeom: BufferGeometry | null = null;
-      if (lowerGlb) {
-        lowerGeom = await extractGeometryFromGlb(lowerGlb);
-      }
-      if (!lowerGeom) {
-        const isModelGlb = isGlb(outcome.models.lowerStl);
-        const rawLower = isModelGlb
-          ? await extractGeometryFromGlb(outcome.models.lowerStl)
-          : stlLoader.parse(outcome.models.lowerStl);
-        if (rawLower) {
-          lowerGeom = isModelGlb ? rawLower : capPlanarOpenings(rawLower, false);
-          lowerGeom.computeVertexNormals();
-          if (!lowerGeom.getAttribute("color")) {
-            computeAnatomicalColors(
-              lowerGeom,
-              stage.lower.filename || `${stage.label} - Lower`,
-            );
+      let lowerNoAttGeom: BufferGeometry | null = null;
+      let lowerHasAtts = false;
+
+      if (stage.lower && outcome.models.lowerStl) {
+        const lowerGlb = getGlbBuffer(stage.lower);
+        if (lowerGlb) {
+          const res = await extractGeometriesFromGlb(lowerGlb);
+          if (res) {
+            lowerGeom = res.full;
+            lowerNoAttGeom = res.noAttachments;
+            lowerHasAtts = res.hasAttachments;
           }
         }
+        if (!lowerGeom) {
+          const isModelGlb = isGlb(outcome.models.lowerStl);
+          if (isModelGlb) {
+            const res = await extractGeometriesFromGlb(outcome.models.lowerStl);
+            if (res) {
+              lowerGeom = res.full;
+              lowerNoAttGeom = res.noAttachments;
+              lowerHasAtts = res.hasAttachments;
+            }
+          } else {
+            const rawLower = stlLoader.parse(outcome.models.lowerStl);
+            if (rawLower) {
+              lowerGeom = capPlanarOpenings(rawLower, false);
+              lowerGeom.computeVertexNormals();
+              if (!lowerGeom.getAttribute("color")) {
+                computeAnatomicalColors(
+                  lowerGeom,
+                  stage.lower.filename || `${stage.label} - Lower`,
+                );
+              }
+              lowerHasAtts = false;
+              lowerNoAttGeom = lowerGeom;
+            }
+          }
+        }
+        if (lowerGeom) {
+          lowerGeom.computeBoundingBox();
+          lowerGeom.computeBoundingSphere();
+        }
+        if (lowerNoAttGeom) {
+          lowerNoAttGeom.computeBoundingBox();
+          lowerNoAttGeom.computeBoundingSphere();
+        }
       }
-      if (!lowerGeom) {
-        return { ok: false, reason: "Could not parse Lower jaw geometry." };
-      }
-      lowerGeom.computeBoundingBox();
-      lowerGeom.computeBoundingSphere();
 
-      const upperCentroids = computeToothCentroids(upperGeom, true);
-      const lowerCentroids = computeToothCentroids(lowerGeom, false);
+      if (!upperGeom && !lowerGeom) {
+        return { ok: false, reason: "Could not parse geometry for either arch in this stage." };
+      }
+
+      const upperCentroids = upperGeom ? computeToothCentroids(upperGeom, true) : {};
+      const lowerCentroids = lowerGeom ? computeToothCentroids(lowerGeom, false) : {};
 
       const geometries: StageGeometries = {
         upper: upperGeom,
         lower: lowerGeom,
+        upperNoAttachments: upperNoAttGeom,
+        lowerNoAttachments: lowerNoAttGeom,
+        hasAttachments: upperHasAtts || lowerHasAtts,
         upperCentroids,
         lowerCentroids,
       };

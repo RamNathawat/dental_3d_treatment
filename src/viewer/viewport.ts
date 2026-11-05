@@ -86,6 +86,8 @@ export interface Viewport {
   removeLayer(id: string): void;
   getLayerGeometry?(id: string): import("three").BufferGeometry | null;
   setLayerGeometry?(id: string, geometry: import("three").BufferGeometry): void;
+  /** Projects a 3D coordinate in scan space to 2D canvas pixel coordinates. */
+  projectPoint?(point: { x: number; y: number; z: number }): { x: number; y: number; visible: boolean } | null;
 
   setLayerVisible(id: string, visible: boolean): void;
   /** `opacity` is 0 (invisible) to 1 (solid). */

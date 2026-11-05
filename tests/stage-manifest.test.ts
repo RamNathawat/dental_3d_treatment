@@ -108,6 +108,64 @@ describe("Stage Manifest Validation", () => {
       );
     }
   });
+
+  it("successfully validates single-arch treatment manifests (Upper only or Lower only)", () => {
+    const upperOnlyManifest = {
+      caseId: "case-upper-only",
+      patientName: "Patient Single Upper",
+      archType: "upper",
+      treatmentStages: [
+        {
+          id: "stage-01",
+          stageNumber: 1,
+          label: "Stage 1",
+          doctorOnly: false,
+          upper: { filename: "Patient_Upper_01.glb" },
+        },
+        {
+          id: "stage-02",
+          stageNumber: 2,
+          label: "Stage 2",
+          doctorOnly: false,
+          upper: { filename: "Patient_Upper_02.glb" },
+        },
+      ],
+    };
+
+    const upperResult = validateCaseManifest(upperOnlyManifest);
+    expect(upperResult.ok).toBe(true);
+    if (upperResult.ok) {
+      expect(upperResult.manifest.archType).toBe("upper");
+      expect(upperResult.manifest.hasUpper).toBe(true);
+      expect(upperResult.manifest.hasLower).toBe(false);
+      expect(upperResult.manifest.treatmentStages[0]?.upper?.filename).toBe("Patient_Upper_01.glb");
+      expect(upperResult.manifest.treatmentStages[0]?.lower).toBeUndefined();
+    }
+
+    const lowerOnlyManifest = {
+      caseId: "case-lower-only",
+      patientName: "Patient Single Lower",
+      archType: "lower",
+      treatmentStages: [
+        {
+          id: "stage-01",
+          stageNumber: 1,
+          label: "Stage 1",
+          doctorOnly: false,
+          lower: { filename: "Patient_Lower_01.glb" },
+        },
+      ],
+    };
+
+    const lowerResult = validateCaseManifest(lowerOnlyManifest);
+    expect(lowerResult.ok).toBe(true);
+    if (lowerResult.ok) {
+      expect(lowerResult.manifest.archType).toBe("lower");
+      expect(lowerResult.manifest.hasUpper).toBe(false);
+      expect(lowerResult.manifest.hasLower).toBe(true);
+      expect(lowerResult.manifest.treatmentStages[0]?.lower?.filename).toBe("Patient_Lower_01.glb");
+    }
+  });
 });
 
 describe("Dynamic Pairing & Ambiguity Detection", () => {
@@ -135,25 +193,25 @@ describe("Dynamic Pairing & Ambiguity Detection", () => {
     const s1 = paired.treatmentStages[0];
     expect(s1?.stageNumber).toBe(1);
     expect(s1?.label).toBe("Stage 1");
-    expect(s1?.upper.filename).toBe("Soumya Sarath Upper jaw - 01 - Model.stl");
-    expect(s1?.lower.filename).toBe("Soumya Sarath Lower jaw - 01 - Model.stl");
+    expect(s1?.upper?.filename).toBe("Soumya Sarath Upper jaw - 01 - Model.stl");
+    expect(s1?.lower?.filename).toBe("Soumya Sarath Lower jaw - 01 - Model.stl");
     expect(s1?.doctorOnly).toBe(false);
 
     // Stage 2 pairing
     const s2 = paired.treatmentStages[1];
     expect(s2?.stageNumber).toBe(2);
     expect(s2?.label).toBe("Stage 2");
-    expect(s2?.upper.filename).toBe("Soumya Sarath Upper jaw - 02 - Model.stl");
-    expect(s2?.lower.filename).toBe("Soumya Sarath Lower jaw - 02 - Model.stl");
+    expect(s2?.upper?.filename).toBe("Soumya Sarath Upper jaw - 02 - Model.stl");
+    expect(s2?.lower?.filename).toBe("Soumya Sarath Lower jaw - 02 - Model.stl");
     expect(s2?.doctorOnly).toBe(false);
 
     // Template doctor-only pairing
     const tmpl = paired.templateStages[0];
     expect(tmpl?.doctorOnly).toBe(true);
-    expect(tmpl?.upper.filename).toBe(
+    expect(tmpl?.upper?.filename).toBe(
       "Soumya Sarath Upper jaw - 01 - Template.stl",
     );
-    expect(tmpl?.lower.filename).toBe(
+    expect(tmpl?.lower?.filename).toBe(
       "Soumya Sarath Lower jaw - 01 - Template.stl",
     );
   });

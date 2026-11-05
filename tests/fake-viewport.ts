@@ -75,6 +75,10 @@ export class FakeViewport implements Viewport, ViewController {
     this.layerGeometries.set(id, geometry);
   }
 
+  projectPoint(_point: { x: number; y: number; z: number }): { x: number; y: number; visible: boolean } | null {
+    return { x: 100, y: 100, visible: true };
+  }
+
   setLayerVisible(id: string, visible: boolean): void {
     this.visibilityChanges.push({ id, visible });
   }

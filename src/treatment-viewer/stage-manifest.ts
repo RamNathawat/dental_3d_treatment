@@ -28,10 +28,29 @@ export interface StageDefinition {
   readonly label: string;
   /** Whether this stage is doctor-only (excluded from patient progression). */
   readonly doctorOnly: boolean;
-  /** Upper jaw (maxillary) model asset. */
-  readonly upper: ArchAsset;
-  /** Lower jaw (mandibular) model asset. */
-  readonly lower: ArchAsset;
+  /** Upper jaw (maxillary) model asset (optional for lower-only cases). */
+  readonly upper?: ArchAsset;
+  /** Lower jaw (mandibular) model asset (optional for upper-only cases). */
+  readonly lower?: ArchAsset;
+}
+
+export interface IprEntry {
+  /** Unique ID for the IPR item */
+  readonly id: string;
+  /** Arch: "upper" (maxillary) or "lower" (mandibular) */
+  readonly arch: "upper" | "lower";
+  /** Shorthand contact code (e.g. "11-21", "31-41") */
+  readonly contact: string;
+  /** FDI tooth notation code for first tooth (e.g. 11) */
+  readonly toothA: number;
+  /** FDI tooth notation code for second tooth (e.g. 21) */
+  readonly toothB: number;
+  /** Treatment stage number at which IPR is performed (defaults to 1) */
+  readonly stage: number;
+  /** Amount of interproximal reduction in millimeters (e.g. 0.2, 0.3) */
+  readonly amountMm: number;
+  /** Optional clinical note */
+  readonly note?: string;
 }
 
 export interface CaseManifest {
@@ -39,6 +58,14 @@ export interface CaseManifest {
   readonly caseId: string;
   /** Patient name if available. */
   readonly patientName?: string;
+  /** Treatment arch type: "both" (default), "upper", or "lower". */
+  readonly archType?: "both" | "upper" | "lower";
+  /** Whether upper arch assets exist in this case. */
+  readonly hasUpper?: boolean;
+  /** Whether lower arch assets exist in this case. */
+  readonly hasLower?: boolean;
+  /** Planned Interproximal Reduction (IPR) prescriptions */
+  readonly ipr?: readonly IprEntry[];
   /**
    * Patient-visible treatment stages in progression sequence.
    * Template stages MUST NOT be included here.
@@ -103,6 +130,16 @@ export function validateCaseManifest(raw: unknown): ManifestValidationResult {
   const patientName =
     typeof obj.patientName === "string" ? obj.patientName : undefined;
 
+  const archType =
+    typeof obj.archType === "string" && ["both", "upper", "lower"].includes(obj.archType)
+      ? (obj.archType as "both" | "upper" | "lower")
+      : undefined;
+
+  const allowSingleArch =
+    archType === "upper" ||
+    archType === "lower" ||
+    Boolean(obj.allowSingleArch);
+
   const rawTreatmentStages = Array.isArray(obj.treatmentStages)
     ? obj.treatmentStages
     : [];
@@ -118,7 +155,12 @@ export function validateCaseManifest(raw: unknown): ManifestValidationResult {
   const templateStages: StageDefinition[] = [];
 
   for (const [idx, item] of rawTreatmentStages.entries()) {
-    const stageRes = validateStageDefinition(item, `treatmentStages[${idx}]`);
+    const stageRes = validateStageDefinition(
+      item,
+      `treatmentStages[${idx}]`,
+      false,
+      allowSingleArch,
+    );
     if (stageRes.ok) {
       if (stageRes.stage.doctorOnly) {
         errors.push(
@@ -136,6 +178,7 @@ export function validateCaseManifest(raw: unknown): ManifestValidationResult {
       item,
       `templateStages[${idx}]`,
       true,
+      allowSingleArch,
     );
     if (stageRes.ok) {
       templateStages.push(stageRes.stage);
@@ -152,11 +195,17 @@ export function validateCaseManifest(raw: unknown): ManifestValidationResult {
     return { ok: false, errors };
   }
 
+  const hasUpper = treatmentStages.some((s) => Boolean(s.upper));
+  const hasLower = treatmentStages.some((s) => Boolean(s.lower));
+
   return {
     ok: true,
     manifest: {
       caseId,
       patientName,
+      archType: archType || (hasUpper && hasLower ? "both" : hasUpper ? "upper" : "lower"),
+      hasUpper,
+      hasLower,
       treatmentStages,
       templateStages,
       ambiguities: [],
@@ -168,6 +217,7 @@ function validateStageDefinition(
   raw: unknown,
   path: string,
   forceDoctorOnly = false,
+  allowSingleArch = false,
 ): { ok: true; stage: StageDefinition } | { ok: false; errors: string[] } {
   const errors: string[] = [];
   if (typeof raw !== "object" || raw === null) {
@@ -192,11 +242,20 @@ function validateStageDefinition(
 
   const doctorOnly = forceDoctorOnly || Boolean(s.doctorOnly);
 
-  const upper = validateArchAsset(s.upper, `${path}.upper`);
-  const lower = validateArchAsset(s.lower, `${path}.lower`);
+  const upper = s.upper ? validateArchAsset(s.upper, `${path}.upper`) : null;
+  const lower = s.lower ? validateArchAsset(s.lower, `${path}.lower`) : null;
 
-  if (!upper.ok) errors.push(...upper.errors);
-  if (!lower.ok) errors.push(...lower.errors);
+  if (s.upper && upper && !upper.ok) errors.push(...upper.errors);
+  if (s.lower && lower && !lower.ok) errors.push(...lower.errors);
+
+  if (!allowSingleArch) {
+    if (!s.upper) errors.push(`${path}.upper: missing required asset.`);
+    if (!s.lower) errors.push(`${path}.lower: missing required asset.`);
+  } else {
+    if (!s.upper && !s.lower) {
+      errors.push(`${path}: stage must have at least an upper or lower arch asset.`);
+    }
+  }
 
   if (errors.length > 0) {
     return { ok: false, errors };
@@ -209,8 +268,8 @@ function validateStageDefinition(
       stageNumber,
       label,
       doctorOnly,
-      upper: (upper as { ok: true; asset: ArchAsset }).asset,
-      lower: (lower as { ok: true; asset: ArchAsset }).asset,
+      upper: upper && upper.ok ? upper.asset : undefined,
+      lower: lower && lower.ok ? lower.asset : undefined,
     },
   };
 }

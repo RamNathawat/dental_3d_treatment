@@ -8,6 +8,7 @@ import {
 } from "../src/treatment-viewer/stage-config";
 import {
   clearStlBufferCache,
+  clearStageGeometryCache,
   loadStageModels,
   stlLoader,
 } from "../src/treatment-viewer/model-loader";
@@ -144,6 +145,7 @@ describe("Treatment Viewer Application", () => {
 
   beforeEach(() => {
     clearStlBufferCache();
+    clearStageGeometryCache();
     root = document.createElement("div");
     document.body.appendChild(root);
     fakeViewport = new FakeViewport();
@@ -160,6 +162,7 @@ describe("Treatment Viewer Application", () => {
 
   afterEach(() => {
     clearStlBufferCache();
+    clearStageGeometryCache();
     root.remove();
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
@@ -528,6 +531,97 @@ describe("Treatment Viewer Application", () => {
     app.dispose();
   });
 
+  it("defaults attachments toggle to off and propagates toggle across all stages and playback", async () => {
+    const app = createTreatmentApp(root, {
+      createViewport: () => fakeViewport,
+      autoLoad: true,
+      transitionDurationMs: 0,
+    });
+
+    const attachmentsBtn = Array.from(root.querySelectorAll<HTMLButtonElement>("button")).find(
+      (b) => b.textContent?.trim() === "Attachments",
+    );
+    expect(attachmentsBtn).toBeDefined();
+
+    // 1. When viewer loads, attachments option should be toggled OFF (no attachments visible)
+    expect(app.getState().attachmentsVisible).toBe(false);
+    expect(attachmentsBtn?.classList.contains("tv-dock-tool-btn--active")).toBe(false);
+
+    await vi.waitFor(() => {
+      expect(app.getState().currentIndex).toBe(0);
+    });
+
+    // 2. Click toggle ON: attachments become visible
+    attachmentsBtn?.click();
+    expect(app.getState().attachmentsVisible).toBe(true);
+    expect(attachmentsBtn?.classList.contains("tv-dock-tool-btn--active")).toBe(true);
+
+    // 3. Navigate across stages: attachments setting remains active across all stages
+    await app.navigate(1);
+    expect(app.getState().currentIndex).toBe(1);
+    expect(app.getState().attachmentsVisible).toBe(true);
+    expect(attachmentsBtn?.classList.contains("tv-dock-tool-btn--active")).toBe(true);
+
+    // 4. Midway toggle OFF: applies immediately to current model and across navigation
+    attachmentsBtn?.click();
+    expect(app.getState().attachmentsVisible).toBe(false);
+    expect(attachmentsBtn?.classList.contains("tv-dock-tool-btn--active")).toBe(false);
+
+    // Navigate back to stage 0: attachments setting remains OFF
+    await app.navigate(0);
+    expect(app.getState().currentIndex).toBe(0);
+    expect(app.getState().attachmentsVisible).toBe(false);
+
+    // 5. Programmatic API
+    app.toggleAttachments();
+    expect(app.getState().attachmentsVisible).toBe(true);
+    expect(attachmentsBtn?.classList.contains("tv-dock-tool-btn--active")).toBe(true);
+
+    app.setAttachmentsVisible(false);
+    expect(app.getState().attachmentsVisible).toBe(false);
+    expect(attachmentsBtn?.classList.contains("tv-dock-tool-btn--active")).toBe(false);
+
+    app.dispose();
+  });
+
+  it("preserves attachments OFF when scrubbing back and forth between cached stages", async () => {
+    const app = createTreatmentApp(root, {
+      createViewport: () => fakeViewport,
+      autoLoad: true,
+      transitionDurationMs: 0,
+    });
+
+    await vi.waitFor(() => {
+      expect(app.getState().currentIndex).toBe(0);
+    });
+
+    // Default state: attachmentsVisible is false
+    expect(app.getState().attachmentsVisible).toBe(false);
+
+    const slider = root.querySelector<HTMLInputElement>(".tv-slider")!;
+    expect(slider).toBeDefined();
+
+    // Scrub forward to Stage 2
+    slider.value = "2";
+    slider.dispatchEvent(new Event("input"));
+
+    await vi.waitFor(() => {
+      expect(app.getState().currentIndex).toBe(1);
+    });
+    expect(app.getState().attachmentsVisible).toBe(false);
+
+    // Scrub back to Stage 1
+    slider.value = "1";
+    slider.dispatchEvent(new Event("input"));
+
+    await vi.waitFor(() => {
+      expect(app.getState().currentIndex).toBe(0);
+    });
+    expect(app.getState().attachmentsVisible).toBe(false);
+
+    app.dispose();
+  });
+
   it("closes the sidebar when tapping the mobile sidebar backdrop", () => {
     const app = createTreatmentApp(root, {
       createViewport: () => fakeViewport,
@@ -649,6 +743,69 @@ describe("Treatment Viewer Application", () => {
       // Simulate moving cursor out
       capturedOptions.onToothHover(null);
       expect(tooltip.hidden).toBe(true);
+
+      app.dispose();
+    });
+
+    it("supports toggling Interproximal Reduction (IPR) legend panel and overlay", async () => {
+      const app = createTreatmentApp(root, {
+        createViewport: () => fakeViewport,
+        autoLoad: true,
+      });
+
+      await vi.waitFor(() => {
+        expect(app.getState().currentIndex).toBe(0);
+      });
+
+      expect(app.getState().iprActive).toBe(false);
+      const legend = root.querySelector(".tv-ipr-legend") as HTMLElement;
+      expect(legend).not.toBeNull();
+      expect(legend.hidden).toBe(true);
+
+      // Toggle IPR ON
+      app.toggleIpr();
+      expect(app.getState().iprActive).toBe(true);
+      expect(legend.hidden).toBe(false);
+
+      // Verify legend contains summary and planned items
+      expect(legend.textContent).toContain("3 planned reductions");
+      expect(legend.textContent).toContain("Total: 0.70 mm");
+      expect(legend.textContent).toContain("Upper 11-21");
+      expect(legend.textContent).toContain("0.30 mm");
+
+      // Stage 1 rows should be highlighted with current indicator
+      const currentRows = legend.querySelectorAll(".tv-ipr-row--current");
+      expect(currentRows.length).toBeGreaterThanOrEqual(1);
+
+      // Close IPR via close button
+      const closeBtn = legend.querySelector<HTMLButtonElement>("button");
+      closeBtn?.click();
+      expect(app.getState().iprActive).toBe(false);
+      expect(legend.hidden).toBe(true);
+
+      app.dispose();
+    });
+
+    it("defaults attachments to OFF and allows toggling on and off", async () => {
+      const app = createTreatmentApp(root, {
+        createViewport: () => fakeViewport,
+        autoLoad: true,
+      });
+
+      await vi.waitFor(() => {
+        expect(app.getState().currentIndex).toBe(0);
+      });
+
+      // Default should be false (no attachments visible)
+      expect(app.getState().attachmentsVisible).toBe(false);
+
+      // Toggle attachments ON
+      app.toggleAttachments();
+      expect(app.getState().attachmentsVisible).toBe(true);
+
+      // Toggle attachments OFF
+      app.toggleAttachments();
+      expect(app.getState().attachmentsVisible).toBe(false);
 
       app.dispose();
     });
