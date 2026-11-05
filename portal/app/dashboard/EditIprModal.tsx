@@ -44,7 +44,9 @@ export default function EditIprModal({
   const [arch, setArch] = useState<"upper" | "lower">("upper");
   const [contactCode, setContactCode] = useState<string>("11-21");
   const [stageNum, setStageNum] = useState<number>(1);
-  const [amountInput, setAmountInput] = useState<string>("0.20");
+  const [amountMm, setAmountMm] = useState<number>(0.2);
+
+  const supabase = createClient();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -53,20 +55,6 @@ export default function EditIprModal({
 
     async function fetchManifest() {
       try {
-        // First try the API route
-        const apiRes = await fetch(`/api/cases/${caseItem.id}/ipr?t=${Date.now()}`);
-        if (apiRes.ok) {
-          const apiData = await apiRes.json();
-          if (Array.isArray(apiData.ipr)) {
-            setIprList(apiData.ipr);
-          }
-          if (apiData.manifest) {
-            setManifestData(apiData.manifest);
-          }
-          return;
-        }
-
-        // Fallback to public storage URL
         const url = `https://yrjulcwnabnhgtqebrtn.supabase.co/storage/v1/object/public/treatment-models/${caseItem.id}/manifest.json?t=${Date.now()}`;
         const res = await fetch(url);
         if (res.ok) {
@@ -106,12 +94,6 @@ export default function EditIprModal({
     const contactDef = contactsForArch.find((c) => c.contact === contactCode);
     if (!contactDef) return;
 
-    const parsedMm = parseFloat(amountInput);
-    if (isNaN(parsedMm) || parsedMm <= 0) {
-      setErrorMsg("Please enter a valid reduction amount in mm (e.g. 0.20).");
-      return;
-    }
-
     // Check if this contact is already planned for the exact same stage
     const exists = iprList.some(
       (item) => item.contact === contactCode && item.stage === stageNum,
@@ -129,7 +111,7 @@ export default function EditIprModal({
       toothA: contactDef.toothA,
       toothB: contactDef.toothB,
       stage: Math.max(1, stageNum),
-      amountMm: parsedMm,
+      amountMm: Math.max(0.05, amountMm),
     };
 
     setIprList((prev) => [...prev, newItem]);
@@ -144,17 +126,27 @@ export default function EditIprModal({
     setErrorMsg("");
 
     try {
-      const res = await fetch(`/api/cases/${caseItem.id}/ipr`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ ipr: iprList }),
+      const updatedManifest = {
+        ...(manifestData || {}),
+        caseId: caseItem.id,
+        patientName: manifestData?.patientName || caseItem.patient_name,
+        ipr: iprList,
+      };
+
+      const blob = new Blob([JSON.stringify(updatedManifest, null, 2)], {
+        type: "application/json",
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Failed to save IPR prescription.");
+      const { error } = await supabase.storage
+        .from("treatment-models")
+        .upload(`${caseItem.id}/manifest.json`, blob, {
+          contentType: "application/json",
+          cacheControl: "0",
+          upsert: true,
+        });
+
+      if (error) {
+        throw error;
       }
 
       onSaved?.(iprList.length);
@@ -287,31 +279,30 @@ export default function EditIprModal({
                     </select>
                   </div>
 
-                  {/* Reduction amount input */}
+                  {/* Reduction amount select */}
                   <div className="space-y-1">
                     <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
                       Reduction (mm)
                     </label>
                     <div className="flex gap-1.5">
-                      <div className="relative w-full">
-                        <input
-                          type="number"
-                          step="0.05"
-                          min="0.05"
-                          max="1.5"
-                          value={amountInput}
-                          onChange={(e) => setAmountInput(e.target.value)}
-                          placeholder="0.20"
-                          className="w-full text-xs bg-white dark:bg-[#131A26] border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-2 pr-7 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-amber-400 font-semibold"
-                        />
-                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-semibold pointer-events-none">
-                          mm
-                        </span>
-                      </div>
+                      <select
+                        value={amountMm}
+                        onChange={(e) => setAmountMm(Number(e.target.value))}
+                        className="w-full text-xs bg-white dark:bg-[#131A26] border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-2 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-amber-400 font-semibold"
+                      >
+                        <option value={0.1}>0.10 mm</option>
+                        <option value={0.15}>0.15 mm</option>
+                        <option value={0.2}>0.20 mm</option>
+                        <option value={0.25}>0.25 mm</option>
+                        <option value={0.3}>0.30 mm</option>
+                        <option value={0.35}>0.35 mm</option>
+                        <option value={0.4}>0.40 mm</option>
+                        <option value={0.5}>0.50 mm</option>
+                      </select>
                       <button
                         type="button"
                         onClick={handleAddEntry}
-                        className="px-3 py-2 bg-slate-900 dark:bg-[#e0b457] hover:bg-slate-800 dark:hover:bg-[#f3c875] text-white dark:text-slate-950 font-bold rounded-lg text-xs flex items-center justify-center shrink-0 shadow-xs cursor-pointer"
+                        className="px-3 py-2 bg-slate-900 dark:bg-[#e0b457] hover:bg-slate-800 dark:hover:bg-[#f3c875] text-white dark:text-slate-950 font-bold rounded-lg text-xs flex items-center justify-center shrink-0 shadow-xs"
                         title="Add this IPR entry"
                       >
                         <Plus className="w-4 h-4" />
