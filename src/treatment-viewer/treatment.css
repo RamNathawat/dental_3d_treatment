@@ -59,6 +59,332 @@
   color-scheme: light;
 }
 
+/* ── Dark Mode Clinical Theme ────────────────────────────────────────────── */
+:root.dark,
+.tv-app--dark {
+  /* Surfaces & Canvas */
+  --tv-bg:             #0b0f17;
+  --tv-canvas-bg:      #0f141f;
+  --tv-surface-0:      rgba(19, 26, 38, 0.96);
+  --tv-surface-glass:  rgba(19, 26, 38, 0.88);
+  --tv-surface-hover:  rgba(27, 36, 52, 0.98);
+  --tv-surface-sunken: #090d14;
+
+  /* Borders */
+  --tv-border:         rgba(51, 65, 85, 0.65);
+  --tv-border-subtle:  rgba(51, 65, 85, 0.35);
+  --tv-border-gold:    #e0b457;
+  --tv-border-gold-subtle: rgba(224, 180, 87, 0.35);
+
+  /* Typography */
+  --tv-text:           #f1f5f9;
+  --tv-text-sub:       #94a3b8;
+  --tv-text-muted:     #64748b;
+
+  /* Luxury Champagne Gold Accents */
+  --tv-gold:           #e0b457;
+  --tv-gold-light:     rgba(224, 180, 87, 0.12);
+  --tv-gold-mid:       rgba(224, 180, 87, 0.22);
+  --tv-gold-dark:      #ffd166;
+  --tv-gold-gradient:  linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  --tv-gold-glow:      0 4px 20px rgba(224, 180, 87, 0.25);
+
+  /* Layered Shadows */
+  --tv-shadow-sm:      0 2px 6px rgba(0, 0, 0, 0.3);
+  --tv-shadow-md:      0 6px 20px rgba(0, 0, 0, 0.45);
+  --tv-shadow-lg:      0 16px 40px rgba(0, 0, 0, 0.6);
+  --tv-shadow-glass:   0 12px 36px rgba(0, 0, 0, 0.5);
+
+  color-scheme: dark;
+}
+
+/* ── Dark Mode Component Overrides ───────────────────────────────────────── */
+.tv-app--dark .tv-sidebar__card {
+  background: linear-gradient(135deg, #161f2e 0%, #121824 100%);
+  border-color: rgba(51, 65, 85, 0.8);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.tv-app--dark .tv-sidebar__avatar {
+  background: #1a2333;
+  border-color: rgba(224, 180, 87, 0.4);
+  color: #e0b457;
+}
+
+.tv-app--dark .tv-stage-item {
+  background: rgba(22, 31, 46, 0.6);
+  border-color: rgba(51, 65, 85, 0.4);
+}
+
+.tv-app--dark .tv-stage-card {
+  background: rgba(22, 31, 46, 0.7);
+  border-color: rgba(51, 65, 85, 0.5);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.tv-app--dark .tv-stage-card:hover {
+  background: rgba(30, 41, 59, 0.9);
+  border-color: rgba(224, 180, 87, 0.45);
+}
+
+.tv-app--dark .tv-stage-card--active {
+  background: rgba(224, 180, 87, 0.12) !important;
+  border-color: #e0b457 !important;
+  box-shadow: 0 4px 16px rgba(224, 180, 87, 0.2);
+}
+
+.tv-app--dark .tv-stage-card__thumb {
+  background: #161f2e;
+  border-color: rgba(51, 65, 85, 0.7);
+  color: #94a3b8;
+}
+
+.tv-app--dark .tv-stage-card--active .tv-stage-card__thumb {
+  background: #e0b457;
+  color: #0f141f;
+  border-color: #e0b457;
+}
+
+.tv-app--dark .tv-stage-card--active .tv-stage-card__label {
+  color: #e0b457;
+}
+
+.tv-app--dark .tv-stage-item:hover {
+  background: rgba(30, 41, 59, 0.8);
+  border-color: rgba(71, 85, 105, 0.6);
+}
+
+.tv-app--dark .tv-stage-item--active {
+  background: rgba(224, 180, 87, 0.12) !important;
+  border-color: #e0b457 !important;
+  box-shadow: 0 0 16px rgba(224, 180, 87, 0.18);
+}
+
+.tv-app--dark .tv-stage-item__num {
+  background: #161f2e;
+  border-color: rgba(51, 65, 85, 0.6);
+  color: #94a3b8;
+}
+
+.tv-app--dark .tv-stage-item--active .tv-stage-item__num {
+  background: #e0b457;
+  color: #0f141f;
+  border-color: #e0b457;
+}
+
+.tv-app--dark .tv-cam-toolbar,
+.tv-app--dark .tv-arch-selector,
+.tv-app--dark .tv-timeline-bar,
+.tv-app--dark .tv-view-modes {
+  background: rgba(19, 26, 38, 0.88);
+  border-color: rgba(51, 65, 85, 0.65);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.tv-app--dark .tv-loading-overlay {
+  background: rgba(11, 15, 23, 0.85);
+}
+
+.tv-app--dark .tv-loading-spinner {
+  border-color: rgba(224, 180, 87, 0.2);
+  border-top-color: #e0b457;
+}
+
+/* Studio Vignette 3D Stage in Dark Mode */
+.tv-app--dark .tv-stage {
+  background: radial-gradient(circle at 50% 45%, #182232 0%, #0d121c 65%, #080b11 100%);
+}
+
+.tv-app--dark .tv-header {
+  background: rgba(19, 26, 38, 0.96);
+  border-bottom-color: rgba(51, 65, 85, 0.65);
+}
+
+.tv-app--dark .tv-header__sub.tv-header__patient-chip {
+  background: #161f2e !important;
+  border-color: rgba(51, 65, 85, 0.75) !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.tv-app--dark .tv-header__patient-label {
+  color: #94a3b8 !important;
+}
+
+.tv-app--dark .tv-header__patient-name {
+  color: #f1f5f9 !important;
+}
+
+.tv-app--dark .tv-arch-pill {
+  background: rgba(19, 26, 38, 0.92);
+  border-color: rgba(51, 65, 85, 0.7);
+}
+
+.tv-app--dark .tv-arch-pill__btn {
+  color: #94a3b8;
+}
+
+.tv-app--dark .tv-arch-pill__btn:hover {
+  color: #f1f5f9;
+}
+
+.tv-app--dark .tv-arch-pill__btn--active {
+  background: #1e293b;
+  color: #e0b457;
+  border-color: rgba(224, 180, 87, 0.4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.tv-app--dark .tv-cam-btn {
+  color: #94a3b8;
+}
+
+.tv-app--dark .tv-cam-btn:hover {
+  background: rgba(51, 65, 85, 0.5);
+  color: #f1f5f9;
+}
+
+.tv-app--dark .tv-cam-btn--active {
+  background: rgba(224, 180, 87, 0.15);
+  color: #e0b457;
+}
+
+.tv-app--dark .tv-btn--tool {
+  background: rgba(19, 26, 38, 0.85);
+  border-color: rgba(51, 65, 85, 0.65);
+  color: #cbd5e1;
+}
+
+.tv-app--dark .tv-btn--tool:hover {
+  background: rgba(30, 41, 59, 0.95);
+  border-color: rgba(71, 85, 105, 0.8);
+  color: #ffffff;
+}
+
+.tv-app--dark .tv-btn--tool.tv-btn--active {
+  border-color: #e0b457;
+  background: rgba(224, 180, 87, 0.16);
+  color: #ffd166;
+  box-shadow: 0 0 12px rgba(224, 180, 87, 0.25);
+}
+
+.tv-app--dark .tv-btn--theme-toggle {
+  background: rgba(30, 41, 59, 0.85);
+  border-color: rgba(224, 180, 87, 0.35);
+  color: #e0b457;
+}
+
+.tv-app--dark .tv-btn--theme-toggle:hover {
+  background: rgba(45, 59, 85, 0.95);
+  border-color: #e0b457;
+}
+
+.tv-app--dark .tv-stepper-btn {
+  background: #161f2e;
+  border-color: rgba(51, 65, 85, 0.8);
+  color: #94a3b8;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.tv-app--dark .tv-stepper-btn:hover:not(:disabled) {
+  background: rgba(224, 180, 87, 0.15);
+  border-color: #e0b457;
+  color: #e0b457;
+}
+
+.tv-app--dark .tv-stepper-btn:disabled {
+  opacity: 0.3;
+  background: #111722;
+  border-color: rgba(51, 65, 85, 0.4);
+  color: #475569;
+}
+
+.tv-app--dark .tv-scrubber-track {
+  background: rgba(51, 65, 85, 0.6);
+}
+
+.tv-app--dark .tv-scrubber-dot {
+  background: #1e293b;
+  border: 1.5px solid rgba(100, 116, 139, 0.7);
+}
+
+.tv-app--dark .tv-scrubber-dot:hover {
+  border-color: #e0b457;
+  background: #334155;
+}
+
+.tv-app--dark .tv-scrubber-dot--passed {
+  background: #e0b457;
+  border-color: #e0b457;
+}
+
+.tv-app--dark .tv-scrubber-dot--active {
+  background: #e0b457;
+  border: 2px solid #0f141f;
+  box-shadow: 0 0 0 2px #e0b457, 0 0 16px rgba(224, 180, 87, 0.4);
+}
+
+.tv-app--dark .tv-btn--play-circle {
+  background: linear-gradient(135deg, #1e293b 0%, #161f2e 100%);
+  border: 2px solid #e0b457;
+  color: #e0b457;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 0 12px rgba(224, 180, 87, 0.2);
+}
+
+.tv-app--dark .tv-btn--play-circle:hover:not(:disabled) {
+  background: linear-gradient(135deg, #27354a 0%, #1a2436 100%);
+  border-color: #ffd166;
+  color: #ffd166;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5), 0 0 18px rgba(224, 180, 87, 0.35);
+}
+
+.tv-app--dark .tv-btn--play-circle.tv-btn--active {
+  background: var(--tv-gold-gradient);
+  border-color: transparent;
+  color: #0f141f;
+}
+
+/* Before / After & Dock Tool Buttons in Dark Mode */
+.tv-app--dark .tv-ba-pill {
+  background: rgba(14, 20, 30, 0.95);
+  border: 1px solid rgba(51, 65, 85, 0.7);
+}
+
+.tv-app--dark .tv-ba-btn {
+  color: #94a3b8;
+  background: transparent;
+}
+
+.tv-app--dark .tv-ba-btn:hover:not(.tv-ba-btn--active):not(.tv-dock-tool-btn--active) {
+  color: #f1f5f9;
+  background: rgba(51, 65, 85, 0.4);
+}
+
+.tv-app--dark .tv-ba-btn--active,
+.tv-app--dark .tv-dock-tool-btn.tv-ba-btn--active,
+.tv-app--dark .tv-dock-tool-btn.tv-dock-tool-btn--active {
+  background: #1e293b !important;
+  border: 1.5px solid #e0b457 !important;
+  color: #e0b457 !important;
+  font-weight: 750 !important;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5), 0 0 12px rgba(224, 180, 87, 0.25) !important;
+}
+
+.tv-app--dark .tv-dock-tool-btn {
+  background: rgba(14, 20, 30, 0.9);
+  border: 1px solid rgba(51, 65, 85, 0.7);
+  color: #94a3b8;
+}
+
+.tv-app--dark .tv-dock-tool-btn:hover:not(.tv-dock-tool-btn--active):not(.tv-ba-btn--active) {
+  color: #f1f5f9;
+  background: rgba(30, 41, 59, 0.9);
+  border-color: rgba(71, 85, 105, 0.8);
+}
+
+.tv-app--dark .tv-hud {
+  color: #64748b;
+}
+
 /* ── Reset ────────────────────────────────────────────────────────────────── */
 *,
 *::before,
@@ -1669,6 +1995,27 @@ body {
   height: 1.5px;
   background: rgba(37, 99, 235, 0.35);
   transform: translateY(-50%);
+}
+
+/* Dark Mode: Crisp luminous slate millimeter graph paper across the clinical background */
+.tv-app--dark .tv-graph-grid {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(to right, rgba(148, 163, 184, 0.22) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.22) 1px, transparent 1px);
+}
+
+/* Clinical Facial Midline reference (vertical center rose-red in dark mode) */
+.tv-app--dark .tv-graph-grid::before {
+  background: rgba(244, 63, 94, 0.85);
+  box-shadow: 0 0 8px rgba(244, 63, 94, 0.5);
+}
+
+/* Clinical Occlusal Plane reference (horizontal center medical sky-cyan in dark mode) */
+.tv-app--dark .tv-graph-grid::after {
+  background: rgba(56, 189, 248, 0.85);
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────

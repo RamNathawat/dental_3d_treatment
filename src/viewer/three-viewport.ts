@@ -162,6 +162,7 @@ class ThreeViewport implements Viewport {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.0;
 
     this.camera = new PerspectiveCamera(45, 1, 0.1, 10_000);
     this.camera.up.set(0, 0, 1);
@@ -191,6 +192,20 @@ class ThreeViewport implements Viewport {
     );
     this.grid.rotation.x = Math.PI / 2; // the helper is built in XZ; scans are XY
     this.scene.add(this.grid);
+
+    // Initialise grid colors based on user theme
+    const savedTheme =
+      typeof localStorage !== "undefined"
+        ? localStorage.getItem("dental_theme")
+        : null;
+    const isDark =
+      savedTheme === "dark" ||
+      (!savedTheme &&
+        typeof window !== "undefined" &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches);
+    if (isDark) {
+      this.setGridTheme(true);
+    }
 
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
@@ -305,8 +320,9 @@ class ThreeViewport implements Viewport {
 
     const material = new MeshStandardMaterial({
       color: new Color(baseColor),
-      roughness: 0.36,   // refined micro-sheen: preserves vivid gingival color without blown-out white glare
-      metalness: 0.01,
+      roughness: 0.22,   // moist clinical mucosal / enamel specularity (matches reference model)
+      metalness: 0.02,
+      envMapIntensity: 0.30, // subtle realistic environment reflection without diffuse washing
       vertexColors: isAnatomical && Boolean(geometry.getAttribute("color")),
       side: DoubleSide,
     });
@@ -518,6 +534,39 @@ class ThreeViewport implements Viewport {
     this.grid.visible = visible;
   }
 
+  setGridTheme(isDark: boolean): void {
+    const axisColor = new Color(isDark ? 0x38bdf8 : GRID_COLOUR_AXIS); // luminous medical cyan in dark mode
+    const lineColor = new Color(isDark ? 0x27354a : GRID_COLOUR_LINES); // crisp visible slate lines in dark mode
+    const colors = this.grid.geometry.attributes.color;
+    const positions = this.grid.geometry.attributes.position;
+    if (!colors || !positions) return;
+
+    for (let i = 0; i < colors.count; i += 2) {
+      const x1 = positions.getX(i);
+      const z1 = positions.getZ(i);
+      const x2 = positions.getX(i + 1);
+      const z2 = positions.getZ(i + 1);
+      const isCenter =
+        (Math.abs(x1) < 0.001 && Math.abs(x2) < 0.001) ||
+        (Math.abs(z1) < 0.001 && Math.abs(z2) < 0.001);
+      const col = isCenter ? axisColor : lineColor;
+      colors.setXYZ(i, col.r, col.g, col.b);
+      colors.setXYZ(i + 1, col.r, col.g, col.b);
+    }
+    colors.needsUpdate = true;
+  }
+
+  setBackgroundColor(color: number | string): void {
+    const c = new Color(color);
+    if (this.scene.background instanceof Color) {
+      this.scene.background.copy(c);
+    } else {
+      this.scene.background = c.clone();
+    }
+    const luminance = 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
+    this.setGridTheme(luminance < 0.5);
+  }
+
   setOrbitCentreAt(point: ScreenPoint): boolean {
     const canvas = this.renderer.domElement;
     const { left, top, width, height } = canvas.getBoundingClientRect();
@@ -628,23 +677,29 @@ class ThreeViewport implements Viewport {
   }
 
   private addLights(): void {
-    // Soft ambient hemisphere light so crevices and occlusal anatomy maintain depth.
-    this.scene.add(new HemisphereLight(0xfffaf5, 0xd4cfc5, 0.45));
+    // Balanced studio lighting calibrated for clinical CAD models:
+    // Prevents color bleaching/blowout so healthy gingiva and natural enamel maintain rich depth and contrast.
+    this.scene.add(new HemisphereLight(0xffffff, 0x1e2638, 0.25));
 
-    // Primary key: balanced studio key light providing clear specular form without highlight blowout.
-    const key = new DirectionalLight(0xffffff, 1.25);
-    key.position.set(50, -90, 100);
+    // Primary key light: crisp form, depth, and specular contour
+    const key = new DirectionalLight(0xffffff, 1.0);
+    key.position.set(45, -75, 90);
     this.scene.add(key);
 
-    // Soft fill from side-below lifts lower jaw details.
-    const fill = new DirectionalLight(0xf5eedd, 0.45);
-    fill.position.set(-80, -60, 40);
+    // Daylight fill light: lifts contralateral shadows while preserving occlusal grooves
+    const fill = new DirectionalLight(0xf0f5ff, 0.35);
+    fill.position.set(-65, -55, 40);
     this.scene.add(fill);
 
-    // Rim / contour accent from behind to sharply separate model silhouette from canvas background.
-    const rim = new DirectionalLight(0xffffff, 0.75);
-    rim.position.set(0, 110, 70);
+    // Incisal rim light: highlights incisal crowns and silhouettes against dark/light canvas
+    const rim = new DirectionalLight(0xffffff, 0.65);
+    rim.position.set(0, 95, 65);
     this.scene.add(rim);
+
+    // Subtle upward bounce: prevents lingual undercuts from turning pitch black
+    const bounce = new DirectionalLight(0xf8fafc, 0.15);
+    bounce.position.set(0, -50, -60);
+    this.scene.add(bounce);
   }
 
   private layerFor(id: string): RenderedLayer {

@@ -59,16 +59,16 @@ export function computeAnatomicalColors(
   const norm = geometry.getAttribute("normal");
 
   // ── Realistic Clinical Palette ─────────────────────────────────────────────
-  // Tooth enamel: polychromatic ceramic depth (Vita shade A1/B1).
-  const tipR = 0.96, tipG = 0.95, tipB = 0.93; // Incisal edge & cusp tips (#f5f2ed)
-  const midR = 0.93, midG = 0.90, midB = 0.84; // Mid-crown body (#ede6d6)
-  const nckR = 0.88, nckG = 0.83, nckB = 0.74; // Cervical neck warmth (#e0d4bd)
-  const shdR = 0.84, shdG = 0.79, shdB = 0.70; // Interproximal shadow (#d6c9b3)
+  // Tooth enamel: polychromatic ceramic depth (natural enamel ivory).
+  const tipR = 0.95, tipG = 0.93, tipB = 0.91; // Incisal edge & cusp tips (#f2eeea)
+  const midR = 0.91, midG = 0.88, midB = 0.82; // Mid-crown body (#e8e0d1)
+  const nckR = 0.86, nckG = 0.80, nckB = 0.70; // Cervical neck warmth (#dcccae)
+  const shdR = 0.82, shdG = 0.75, shdB = 0.65; // Interproximal shadow (#d1bf9f)
 
-  // Gingival tissue: natural vascular coral-rose with depth gradient.
-  const gumMarginR = 0.78, gumMarginG = 0.36, gumMarginB = 0.44; // Free gingival margin (#c75c70)
-  const gumAttachR = 0.74, gumAttachG = 0.30, gumAttachB = 0.38; // Attached gingiva (#bd4d61)
-  const gumDeepR = 0.62, gumDeepG = 0.22, gumDeepB = 0.30;   // Deep alveolar mucosa (#9e384d)
+  // Gingival tissue: natural vascular coral-rose (matches reference ClinCheck / 3Shape standard).
+  const gumMarginR = 0.76, gumMarginG = 0.22, gumMarginB = 0.30; // Free gingival margin
+  const gumAttachR = 0.70, gumAttachG = 0.18, gumAttachB = 0.26; // Attached gingiva
+  const gumDeepR   = 0.62, gumDeepG   = 0.14, gumDeepB   = 0.20; // Deep alveolar mucosa
 
   // ── Step 1: Compute Arch Extents and Center in (X, Z) ──────────────────────
   let minX = Infinity, maxX = -Infinity;

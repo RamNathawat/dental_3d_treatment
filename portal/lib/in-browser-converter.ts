@@ -383,7 +383,8 @@ export async function processDentalZipInBrowser(
             if (!(child as THREE.Mesh).isMesh) continue;
             let geom = (child as THREE.Mesh).geometry;
             geom = capPlanarOpenings(geom, arch === "Upper");
-            mergeGeometry(geom, 0.792, 0.565, 0.565, vertexMap, positions, colors, indices);
+            // ClinCheck / 3Shape natural healthy vascular coral-rose gingiva (#CC5C6A in linear)
+            mergeGeometry(geom, 0.46, 0.085, 0.105, vertexMap, positions, colors, indices);
           }
         }
 
@@ -394,7 +395,8 @@ export async function processDentalZipInBrowser(
           for (const child of parsed.children) {
             if (!(child as THREE.Mesh).isMesh) continue;
             const geom = (child as THREE.Mesh).geometry;
-            mergeGeometry(geom, 1.0, 1.0, 1.0, vertexMap, positions, colors, indices);
+            // Pristine natural pearlescent enamel (#E1E0DF in linear)
+            mergeGeometry(geom, 0.76, 0.74, 0.72, vertexMap, positions, colors, indices);
           }
         }
 
@@ -406,7 +408,7 @@ export async function processDentalZipInBrowser(
 
         const mat = new THREE.MeshStandardMaterial({
           vertexColors: true,
-          roughness: 0.35,
+          roughness: 0.26,
           metalness: 0.02,
         });
         const mesh = new THREE.Mesh(mergedGeom, mat);
@@ -477,7 +479,16 @@ function mergeGeometry(
       positions.push(x, y, z);
 
       if (col && i < col.count) {
-        colors.push(col.getX(i), col.getY(i), col.getZ(i));
+        const cr = col.getX(i);
+        const cg = col.getY(i);
+        const cb = col.getZ(i);
+        // Preserve distinct green CAD labels or attachment markings (e.g., "NIYA 1", "NIYA 2")
+        if (cg > 0.40 && cg > cr * 1.30) {
+          colors.push(cr, cg, cb);
+        } else {
+          // Standardize all gums & teeth to calibrated ClinCheck / 3Shape aesthetics
+          colors.push(defaultR, defaultG, defaultB);
+        }
       } else {
         colors.push(defaultR, defaultG, defaultB);
       }

@@ -33,6 +33,7 @@ import {
   loadStageGeometries,
   prewarmAllStageGeometries,
   getCachedStageGeometries,
+  setModelProgressCallback,
 } from "./model-loader";
 import { applyBiteContacts } from "./bite-contacts";
 import {
@@ -333,19 +334,55 @@ export function createTreatmentApp(
   const recenterBtn = makeBtn(
     "Recenter",
     () => {
-      viewport.setView("front");
+      viewport.setView("top");
       viewport.fitAll();
     },
     "tv-btn--tool",
   );
-  recenterBtn.title = "Reset and frame dental models in center";
+  recenterBtn.title = "Reset and frame dental models in frontal smile position";
 
-  const caseSelectorBtn = makeBtn(
-    "Cases",
-    () => openStageSelector(),
-    "tv-btn--tool tv-btn--accent",
+  // Dark / Light Mode Theme Toggle Button (replaces Cases button per requirement)
+  let isDarkMode = false;
+  const savedTheme =
+    typeof localStorage !== "undefined"
+      ? localStorage.getItem("dental_theme")
+      : null;
+  if (
+    savedTheme === "dark" ||
+    (!savedTheme &&
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches)
+  ) {
+    isDarkMode = true;
+  }
+
+  const themeToggleBtn = makeBtn(
+    isDarkMode ? "☀️ Light" : "🌙 Dark",
+    () => {
+      isDarkMode = !isDarkMode;
+      if (isDarkMode) {
+        appEl.classList.add("tv-app--dark");
+        themeToggleBtn.textContent = "☀️ Light";
+        themeToggleBtn.title = "Switch to Light Mode";
+        try {
+          localStorage.setItem("dental_theme", "dark");
+        } catch {}
+        viewport.setBackgroundColor?.(0x0f141f);
+      } else {
+        appEl.classList.remove("tv-app--dark");
+        themeToggleBtn.textContent = "🌙 Dark";
+        themeToggleBtn.title = "Switch to Dark Mode";
+        try {
+          localStorage.setItem("dental_theme", "light");
+        } catch {}
+        viewport.setBackgroundColor?.(0xebe7e0);
+      }
+    },
+    "tv-btn--tool tv-btn--theme-toggle",
   );
-  caseSelectorBtn.title = "Inspect stages, doctor template, or load case files";
+  themeToggleBtn.title = isDarkMode
+    ? "Switch to Light Mode"
+    : "Switch to Dark Mode";
 
   const toggleSidebarBtn = makeBtn(
     "Stages",
@@ -589,11 +626,23 @@ export function createTreatmentApp(
   ambiguityBannerEl.hidden = true;
 
   // Loading overlay
+  const loadingTextEl = span("tv-loading__text", "Loading 3D models…");
   const loadingEl = div("tv-loading", [
     div("tv-loading__spinner", []),
-    span("tv-loading__text", "Loading models…"),
+    loadingTextEl,
   ]);
   loadingEl.hidden = true;
+
+  // Stream live download progress to the doctor
+  setModelProgressCallback((loaded, total, percent) => {
+    if (total > 0) {
+      const loadedMb = (loaded / (1024 * 1024)).toFixed(1);
+      const totalMb = (total / (1024 * 1024)).toFixed(1);
+      loadingTextEl.textContent = `Loading 3D Models: ${percent}% (${loadedMb} / ${totalMb} MB)`;
+    } else {
+      loadingTextEl.textContent = "Loading 3D Models…";
+    }
+  });
 
   // HUD (triangle/fps counter in corner)
   const hudEl = div("tv-hud", []);
@@ -682,7 +731,7 @@ export function createTreatmentApp(
     div("tv-stage__top-bar", [
       div("tv-stage__top-left", [toggleSidebarBtn]),
       div("tv-stage__top-center", [archPillEl]),
-      div("tv-stage__top-right", [gridBtn, recenterBtn, caseSelectorBtn]),
+      div("tv-stage__top-right", [gridBtn, recenterBtn, themeToggleBtn]),
     ]),
     templateNoticeEl,
     contactsLegendEl,
@@ -718,7 +767,7 @@ export function createTreatmentApp(
       div("tv-header__actions", [
         gridBtn,
         recenterBtn,
-        caseSelectorBtn,
+        themeToggleBtn,
       ]),
     ]),
     div("tv-main-container", [
@@ -727,6 +776,11 @@ export function createTreatmentApp(
       stageEl,
     ]),
   ]);
+
+  if (isDarkMode) {
+    appEl.classList.add("tv-app--dark");
+    viewport.setBackgroundColor?.(0x0f141f);
+  }
 
   sidebarBackdrop.addEventListener("click", () => {
     appEl.classList.remove("tv-app--sidebar-open");
@@ -1041,21 +1095,21 @@ export function createTreatmentApp(
       return;
     }
 
-    const outcome = await loadStageModels(
-      stage.upper,
-      stage.lower,
-      controller.signal,
-    );
+    let upperGeometry = geomOutcome.ok ? geomOutcome.geometries.upper : undefined;
+    let lowerGeometry = geomOutcome.ok ? geomOutcome.geometries.lower : undefined;
+    let upperStl: ArrayBuffer | undefined = undefined;
+    let lowerStl: ArrayBuffer | undefined = undefined;
 
-    if (controller.signal.aborted) return;
-    state.abortController = null;
-    state.loading = false;
-
-    if (!outcome.ok) {
-      state.error = outcome.reason;
+    if (!geomOutcome.ok) {
+      state.abortController = null;
+      state.loading = false;
+      state.error = geomOutcome.reason;
       syncUI();
       return;
     }
+
+    state.abortController = null;
+    state.loading = false;
 
     if (isFirstSuccessfulLoad || transitionDuration <= 0) {
       if (transitionAnimId !== null) {
@@ -1077,16 +1131,16 @@ export function createTreatmentApp(
         id: activeUpperId,
         label: `${stage.label} - Upper`,
         colour: UPPER_ARCH_COLOUR,
-        stl: outcome.models.upperStl,
-        geometry: geomOutcome.ok ? geomOutcome.geometries.upper : undefined,
+        stl: upperStl,
+        geometry: upperGeometry,
       });
 
       const lowerOutcome = viewport.addLayer({
         id: activeLowerId,
         label: `${stage.label} - Lower`,
         colour: LOWER_ARCH_COLOUR,
-        stl: outcome.models.lowerStl,
-        geometry: geomOutcome.ok ? geomOutcome.geometries.lower : undefined,
+        stl: lowerStl,
+        geometry: lowerGeometry,
       });
 
       if (!upperOutcome.ok) {
@@ -1174,16 +1228,16 @@ export function createTreatmentApp(
         id: nextUpperId,
         label: `${stage.label} - Upper`,
         colour: UPPER_ARCH_COLOUR,
-        stl: outcome.models.upperStl,
-        geometry: geomOutcome.ok ? geomOutcome.geometries.upper : undefined,
+        stl: upperStl,
+        geometry: upperGeometry,
       });
 
       const lowerOutcome = viewport.addLayer({
         id: nextLowerId,
         label: `${stage.label} - Lower`,
         colour: LOWER_ARCH_COLOUR,
-        stl: outcome.models.lowerStl,
-        geometry: geomOutcome.ok ? geomOutcome.geometries.lower : undefined,
+        stl: lowerStl,
+        geometry: lowerGeometry,
       });
 
       if (!upperOutcome.ok) {

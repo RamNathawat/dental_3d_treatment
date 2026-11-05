@@ -120,6 +120,8 @@ export interface Viewport {
   setOrbitCentreAt(point: ScreenPoint): boolean;
   setView(view: StandardView): void;
   setGridVisible(visible: boolean): void;
+  setGridTheme?(isDark: boolean): void;
+  setBackgroundColor?(color: number | string): void;
 
   /** Where the camera is now, for remembering a session. */
   getCamera(): CameraView;

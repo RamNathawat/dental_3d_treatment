@@ -128,12 +128,22 @@ for (const jaw of jaws) {
             vertexMap.set(key, idx);
             newPositions.push(x, y, z);
             if (col && i < col.count) {
-              newColors.push(col.getX(i), col.getY(i), col.getZ(i));
+              const cr = col.getX(i);
+              const cg = col.getY(i);
+              const cb = col.getZ(i);
+              // Preserve distinct green CAD labels or attachment markings (e.g., "NIYA 1", "NIYA 2")
+              if (cg > 0.40 && cg > cr * 1.30) {
+                newColors.push(cr, cg, cb);
+              } else if (f === "gum.obj") {
+                newColors.push(0.46, 0.085, 0.105);
+              } else {
+                newColors.push(0.76, 0.74, 0.72);
+              }
             } else {
               if (f === "gum.obj") {
-                newColors.push(0.79215693, 0.56470591, 0.56470591);
+                newColors.push(0.46, 0.085, 0.105);
               } else {
-                newColors.push(1, 1, 1);
+                newColors.push(0.76, 0.74, 0.72);
               }
             }
           }

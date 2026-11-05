@@ -12,10 +12,37 @@
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type { BufferGeometry, Mesh } from "three";
+import { get as idbGet, set as idbSet, createStore } from "idb-keyval";
 import { computeAnatomicalColors } from "../viewer/three-viewport";
 import { capPlanarOpenings } from "../viewer/cap-planar";
 import { computeToothCentroids } from "./tooth-data";
 import type { ArchAsset, StageDefinition } from "./stage-manifest";
+
+const isTestEnv =
+  (typeof process !== "undefined" &&
+    (process.env.NODE_ENV === "test" || process.env.VITEST === "true")) ||
+  (typeof window !== "undefined" && "__VITEST__" in window);
+
+const modelStore =
+  !isTestEnv &&
+  typeof window !== "undefined" &&
+  typeof indexedDB !== "undefined"
+    ? createStore("dental-models-db-v3", "glb-cache")
+    : null;
+
+export type ModelProgressCallback = (
+  loadedBytes: number,
+  totalBytes: number,
+  percent: number,
+) => void;
+
+let globalProgressCallback: ModelProgressCallback | null = null;
+
+export function setModelProgressCallback(
+  cb: ModelProgressCallback | null,
+): void {
+  globalProgressCallback = cb;
+}
 
 export type ModelSource = string | ArchAsset | File | Blob;
 
@@ -126,8 +153,7 @@ async function resolveStlBuffer(
   if (source instanceof Blob) {
     try {
       const buffer = await source.arrayBuffer();
-      const finalBuffer = isGlb(buffer) ? await convertGlbToStlBuffer(buffer) : buffer;
-      return { ok: true, buffer: finalBuffer };
+      return { ok: true, buffer };
     } catch (err) {
       return {
         ok: false,
@@ -224,6 +250,7 @@ export function clearStlBufferCache(): void {
   bufferCache.clear();
   rawGlbCache.clear();
   inFlightFetches.clear();
+  clearStageGeometryCache();
 }
 
 /** Extracts native BufferGeometry directly from an in-memory GLB buffer in ~10ms */
@@ -240,6 +267,35 @@ export async function extractGeometryFromGlb(glbBuffer: ArrayBuffer): Promise<Bu
     if (!(geom as BufferGeometry).getAttribute("normal")) {
       (geom as BufferGeometry).computeVertexNormals();
     }
+
+    // Calibrate vertex colors for natural ClinCheck / 3Shape aesthetics:
+    // Upgrades previously uploaded cases with pale/chalky colors to clinical enamel & gingiva tones
+    const colorAttr = (geom as BufferGeometry).getAttribute("color");
+    if (colorAttr) {
+      const arr = colorAttr.array as Float32Array;
+      for (let i = 0; i < arr.length; i += 3) {
+        const r = arr[i]!;
+        const g = arr[i + 1]!;
+        const b = arr[i + 2]!;
+        // 1. Preserve distinct green CAD labels or attachment markings (e.g., "NIYA 1", "NIYA 2")
+        if (g > 0.40 && g > r * 1.30) {
+          continue;
+        }
+        // 2. Gum / Gingiva: rich healthy vascular coral-rose (#CC5C6A in linear: 0.46, 0.085, 0.105)
+        if (r > 0.35 && (r - g) > 0.08) {
+          arr[i] = 0.46;
+          arr[i + 1] = 0.085;
+          arr[i + 2] = 0.105;
+        } else if (r > 0.60 && g > 0.55 && b > 0.50) {
+          // 3. Tooth Enamel: natural pearlescent enamel ivory (#E1E0DF in linear: 0.76, 0.74, 0.72)
+          arr[i] = 0.76;
+          arr[i + 1] = 0.74;
+          arr[i + 2] = 0.72;
+        }
+      }
+      colorAttr.needsUpdate = true;
+    }
+
     return geom;
   }
   return null;
@@ -255,6 +311,7 @@ async function fetchStl(
     throw err;
   }
 
+  // 1. In-memory RAM cache check
   const cached = bufferCache.get(url);
   if (cached) {
     return { ok: true, buffer: cached };
@@ -266,6 +323,25 @@ async function fetchStl(
   }
 
   const promise = (async (): Promise<BufferOutcome> => {
+    // 2. Persistent IndexedDB cache check (<5ms instant)
+    if (modelStore) {
+      try {
+        const idbCached = await idbGet<ArrayBuffer>(url, modelStore);
+        if (idbCached && idbCached.byteLength > 0) {
+          bufferCache.set(url, idbCached);
+          if (isGlb(idbCached)) {
+            rawGlbCache.set(url, idbCached);
+          }
+          if (globalProgressCallback) {
+            globalProgressCallback(idbCached.byteLength, idbCached.byteLength, 100);
+          }
+          return { ok: true, buffer: idbCached };
+        }
+      } catch {
+        // Fall through to network fetch if IndexedDB read fails
+      }
+    }
+
     try {
       const response = await fetch(url, { signal });
       if (!response.ok) {
@@ -274,11 +350,59 @@ async function fetchStl(
           reason: `HTTP ${response.status} fetching "${url}"`,
         };
       }
-      const buffer = await response.arrayBuffer();
+
+      let buffer: ArrayBuffer;
+      const contentLength = response.headers?.get
+        ? response.headers.get("content-length")
+        : null;
+      const total = contentLength ? parseInt(contentLength, 10) : 0;
+
+      // 3. Streaming download with live byte progress
+      if (
+        response.body &&
+        typeof response.body.getReader === "function" &&
+        total > 0
+      ) {
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let loaded = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            chunks.push(value);
+            loaded += value.length;
+            if (globalProgressCallback) {
+              globalProgressCallback(loaded, total, Math.round((loaded / total) * 100));
+            }
+          }
+        }
+        const merged = new Uint8Array(loaded);
+        let offset = 0;
+        for (const chunk of chunks) {
+          merged.set(chunk, offset);
+          offset += chunk.length;
+        }
+        buffer = merged.buffer;
+      } else {
+        buffer = await response.arrayBuffer();
+        if (globalProgressCallback && buffer.byteLength > 0) {
+          globalProgressCallback(buffer.byteLength, buffer.byteLength, 100);
+        }
+      }
+
       if (isGlb(buffer)) {
         rawGlbCache.set(url, buffer);
       }
       bufferCache.set(url, buffer);
+
+      // Save to IndexedDB persistently for subsequent instant loads
+      if (modelStore) {
+        idbSet(url, buffer, modelStore).catch((e) => {
+          console.warn("Could not cache model in IndexedDB:", e);
+        });
+      }
+
       return { ok: true, buffer };
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") throw error;
@@ -372,16 +496,19 @@ export async function loadStageGeometries(
         upperGeom = await extractGeometryFromGlb(upperGlb);
       }
       if (!upperGeom) {
-        const rawUpper = isGlb(outcome.models.upperStl)
+        const isModelGlb = isGlb(outcome.models.upperStl);
+        const rawUpper = isModelGlb
           ? await extractGeometryFromGlb(outcome.models.upperStl)
           : stlLoader.parse(outcome.models.upperStl);
         if (rawUpper) {
-          upperGeom = capPlanarOpenings(rawUpper, true);
+          upperGeom = isModelGlb ? rawUpper : capPlanarOpenings(rawUpper, true);
           upperGeom.computeVertexNormals();
-          computeAnatomicalColors(
-            upperGeom,
-            stage.upper.filename || `${stage.label} - Upper`,
-          );
+          if (!upperGeom.getAttribute("color")) {
+            computeAnatomicalColors(
+              upperGeom,
+              stage.upper.filename || `${stage.label} - Upper`,
+            );
+          }
         }
       }
       if (!upperGeom) {
@@ -395,16 +522,19 @@ export async function loadStageGeometries(
         lowerGeom = await extractGeometryFromGlb(lowerGlb);
       }
       if (!lowerGeom) {
-        const rawLower = isGlb(outcome.models.lowerStl)
+        const isModelGlb = isGlb(outcome.models.lowerStl);
+        const rawLower = isModelGlb
           ? await extractGeometryFromGlb(outcome.models.lowerStl)
           : stlLoader.parse(outcome.models.lowerStl);
         if (rawLower) {
-          lowerGeom = capPlanarOpenings(rawLower, false);
+          lowerGeom = isModelGlb ? rawLower : capPlanarOpenings(rawLower, false);
           lowerGeom.computeVertexNormals();
-          computeAnatomicalColors(
-            lowerGeom,
-            stage.lower.filename || `${stage.label} - Lower`,
-          );
+          if (!lowerGeom.getAttribute("color")) {
+            computeAnatomicalColors(
+              lowerGeom,
+              stage.lower.filename || `${stage.label} - Lower`,
+            );
+          }
         }
       }
       if (!lowerGeom) {

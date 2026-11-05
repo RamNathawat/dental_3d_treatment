@@ -13,7 +13,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
-  themeColor: "#d97706",
+  themeColor: "#e0b457",
 };
 
 export const metadata: Metadata = {
@@ -35,8 +35,30 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={inter.variable}>
-      <body className="font-sans antialiased bg-slate-50 text-slate-900 selection:bg-amber-100 selection:text-amber-900">
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  var saved = localStorage.getItem("dental_theme");
+                  var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+                  var isDark = saved === "dark" || (!saved && prefersDark);
+                  if (isDark) {
+                    document.documentElement.classList.add("dark");
+                    document.documentElement.setAttribute("data-theme", "dark");
+                  } else {
+                    document.documentElement.classList.remove("dark");
+                    document.documentElement.setAttribute("data-theme", "light");
+                  }
+                } catch (e) {}
+              })();
+            `,
+          }}
+        />
+      </head>
+      <body className="font-sans antialiased bg-slate-50 dark:bg-[#0B0F17] text-slate-900 dark:text-slate-100 selection:bg-[#e0b457]/30 selection:text-slate-900 dark:selection:text-[#ffd166]">
         <div id="main-content">{children}</div>
       </body>
     </html>
