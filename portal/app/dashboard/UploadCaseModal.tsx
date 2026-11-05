@@ -71,7 +71,7 @@ export default function UploadCaseModal({
   const [draftArch, setDraftArch] = useState<"upper" | "lower">("upper");
   const [draftContact, setDraftContact] = useState<string>("11-21");
   const [draftStage, setDraftStage] = useState<number>(1);
-  const [draftAmountMm, setDraftAmountMm] = useState<number>(0.2);
+  const [draftAmountInput, setDraftAmountInput] = useState<string>("0.20");
 
   const upperInputRef = useRef<HTMLInputElement>(null);
   const lowerInputRef = useRef<HTMLInputElement>(null);
@@ -612,29 +612,32 @@ export default function UploadCaseModal({
 
                   <div className="space-y-1">
                     <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
-                      Reduction
+                      Reduction (mm)
                     </label>
                     <div className="flex gap-1.5">
-                      <select
-                        value={draftAmountMm}
-                        onChange={(e) => setDraftAmountMm(Number(e.target.value))}
-                        className="w-full text-xs bg-white dark:bg-[#131A26] border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-800 dark:text-slate-200 font-semibold"
-                      >
-                        <option value={0.1}>0.10 mm</option>
-                        <option value={0.15}>0.15 mm</option>
-                        <option value={0.2}>0.20 mm</option>
-                        <option value={0.25}>0.25 mm</option>
-                        <option value={0.3}>0.30 mm</option>
-                        <option value={0.35}>0.35 mm</option>
-                        <option value={0.4}>0.40 mm</option>
-                        <option value={0.5}>0.50 mm</option>
-                      </select>
+                      <div className="relative w-full">
+                        <input
+                          type="number"
+                          step="0.05"
+                          min="0.05"
+                          max="1.5"
+                          value={draftAmountInput}
+                          onChange={(e) => setDraftAmountInput(e.target.value)}
+                          placeholder="0.20"
+                          className="w-full text-xs bg-white dark:bg-[#131A26] border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 pr-7 text-slate-800 dark:text-slate-200 font-semibold focus:outline-none focus:ring-1 focus:ring-amber-400"
+                        />
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-semibold pointer-events-none">
+                          mm
+                        </span>
+                      </div>
                       <button
                         type="button"
                         onClick={() => {
                           const contactList = draftArch === "upper" ? UPPER_DENTAL_CONTACTS : LOWER_DENTAL_CONTACTS;
                           const found = contactList.find((c) => c.contact === draftContact);
                           if (!found) return;
+                          const parsed = parseFloat(draftAmountInput);
+                          const finalAmount = isNaN(parsed) || parsed <= 0 ? 0.2 : parsed;
                           setIprList((prev) => [
                             ...prev.filter((item) => !(item.contact === draftContact && item.stage === draftStage)),
                             {
@@ -644,11 +647,11 @@ export default function UploadCaseModal({
                               toothA: found.toothA,
                               toothB: found.toothB,
                               stage: draftStage,
-                              amountMm: draftAmountMm,
+                              amountMm: finalAmount,
                             },
                           ]);
                         }}
-                        className="px-2.5 py-1.5 bg-slate-900 dark:bg-[#e0b457] text-white dark:text-slate-950 font-bold rounded-lg text-xs"
+                        className="px-2.5 py-1.5 bg-slate-900 dark:bg-[#e0b457] hover:bg-slate-800 dark:hover:bg-[#f3c875] text-white dark:text-slate-950 font-bold rounded-lg text-xs cursor-pointer flex items-center justify-center shrink-0"
                         title="Add IPR"
                       >
                         <Plus className="w-3.5 h-3.5" />
