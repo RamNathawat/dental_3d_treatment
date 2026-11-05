@@ -454,7 +454,7 @@ export default function DashboardClient({
 
                     {/* Bottom Actions Row */}
                     <div className="pt-4 border-t border-slate-100/90 dark:border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-                      {/* Primary CTA: Launch 3D Progression */}
+                      {/* Primary CTA: Launch Undercut Blocking */}
                       <a
                         href={`/treatment?case=${item.share_token}`}
                         target="_blank"
@@ -462,7 +462,7 @@ export default function DashboardClient({
                         className="flex-1 py-2.5 px-4 rounded-xl text-xs font-semibold text-white dark:text-slate-950 bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:via-[#f3c875] dark:to-[#c49a45] hover:bg-slate-800 dark:hover:brightness-105 shadow-sm dark:shadow-[0_4px_16px_rgba(224,180,87,0.25)] transition-all flex items-center justify-center gap-2 active:scale-98"
                       >
                         <Eye className="w-4 h-4 text-white dark:text-slate-950" />
-                        <span>3D Progression</span>
+                        <span>Undercut Blocking</span>
                         <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 dark:text-slate-900" />
                       </a>
 
