@@ -85,9 +85,11 @@ async function init() {
 
         const baseStorage = `${supabaseUrl}/storage/v1/object/public/treatment-models/${caseId}`;
 
-        // 1. First attempt to load stored manifest.json if present
+        // 1. First attempt to load stored manifest.json if present (with zero-cache buster)
         try {
-          const manifestRes = await fetch(`${baseStorage}/manifest.json`);
+          const manifestRes = await fetch(`${baseStorage}/manifest.json?t=${Date.now()}`, {
+            cache: "no-store",
+          });
           if (manifestRes.ok) {
             const storedManifest = await manifestRes.json();
             if (
@@ -95,6 +97,34 @@ async function init() {
               Array.isArray(storedManifest.treatmentStages) &&
               storedManifest.treatmentStages.length > 0
             ) {
+              // Merge in database records if manifest is missing any recent fields
+              if ((!storedManifest.ipr || storedManifest.ipr.length === 0) && Array.isArray(caseRecord.ipr) && caseRecord.ipr.length > 0) {
+                storedManifest.ipr = caseRecord.ipr;
+              }
+              const dbNotes = caseRecord.doctor_notes || caseRecord.doctorNotes;
+              const storedHasNotes = Boolean(
+                storedManifest.doctorNotes &&
+                (storedManifest.doctorNotes.general ||
+                 storedManifest.doctorNotes.doctorName ||
+                 storedManifest.doctorNotes.clinicName ||
+                 (Array.isArray(storedManifest.doctorNotes.stageRemarks) && storedManifest.doctorNotes.stageRemarks.length > 0))
+              );
+              if (dbNotes && (!storedHasNotes || !storedManifest.doctorNotes)) {
+                storedManifest.doctorNotes = dbNotes;
+              }
+              if (!storedManifest.patientId && caseRecord.patient_id) {
+                storedManifest.patientId = caseRecord.patient_id;
+              }
+              if (!storedManifest.clinicName && caseRecord.clinic_name) {
+                storedManifest.clinicName = caseRecord.clinic_name;
+              }
+              if (storedManifest.patientAge == null && caseRecord.patient_age != null) {
+                storedManifest.patientAge = Number(caseRecord.patient_age);
+              }
+              if (!storedManifest.patientSex && caseRecord.patient_sex) {
+                storedManifest.patientSex = caseRecord.patient_sex;
+              }
+
               createTreatmentApp(root!, { caseManifest: storedManifest });
               return;
             }
@@ -113,10 +143,15 @@ async function init() {
         const dynamicManifest: CaseManifest = {
           caseId: caseId,
           patientName: cleanPatientName,
+          patientId: caseRecord.patient_id || undefined,
+          patientAge: caseRecord.patient_age != null ? Number(caseRecord.patient_age) : undefined,
+          patientSex: caseRecord.patient_sex || undefined,
+          clinicName: caseRecord.clinic_name || undefined,
           archType: isUpperOnly ? "upper" : isLowerOnly ? "lower" : "both",
           hasUpper,
           hasLower,
-          ipr: caseRecord.ipr || [],
+          ipr: (Array.isArray(caseRecord.ipr) ? caseRecord.ipr : []) as any,
+          doctorNotes: caseRecord.doctor_notes || caseRecord.doctorNotes || undefined,
           treatmentStages: Array.from({ length: totalStages }, (_, i) => {
             const stageNum = i + 1;
             const pad = String(stageNum).padStart(2, "0");

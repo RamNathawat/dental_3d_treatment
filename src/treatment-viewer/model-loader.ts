@@ -278,8 +278,12 @@ function calibrateGeometryColors(geom: BufferGeometry): void {
       const r = arr[i]!;
       const g = arr[i + 1]!;
       const b = arr[i + 2]!;
-      // 1. Preserve distinct green CAD labels or attachment markings (e.g., "NIYA 1", "NIYA 2")
-      if (g > 0.40 && g > r * 1.30) {
+      // 1. Remove green CAD labels (e.g., "NIYA 1", "NIYA 2") from the models:
+      // Paint over green CAD label markings with surrounding natural gingiva color so the model is clean and seamless
+      if (g > 0.35 && g > r * 1.25) {
+        arr[i] = 0.46;
+        arr[i + 1] = 0.085;
+        arr[i + 2] = 0.105;
         continue;
       }
       // 2. Gum / Gingiva: rich healthy vascular coral-rose (#CC5C6A in linear: 0.46, 0.085, 0.105)
@@ -287,11 +291,12 @@ function calibrateGeometryColors(geom: BufferGeometry): void {
         arr[i] = 0.46;
         arr[i + 1] = 0.085;
         arr[i + 2] = 0.105;
-      } else if (r > 0.60 && g > 0.55 && b > 0.50) {
-        // 3. Tooth Enamel: natural pearlescent enamel ivory (#E1E0DF in linear: 0.76, 0.74, 0.72)
-        arr[i] = 0.76;
-        arr[i + 1] = 0.74;
-        arr[i + 2] = 0.72;
+      } else if (r > 0.50 && g > 0.45 && b > 0.40) {
+        // 3. Tooth Enamel: warm natural ivory / beige tooth shade (Vita A1/A2 aesthetic)
+        // Eliminates harsh chalky pearl-white blowout and enhances occlusal fissure details
+        arr[i] = 0.82;
+        arr[i + 1] = 0.76;
+        arr[i + 2] = 0.68;
       }
     }
     colorAttr.needsUpdate = true;

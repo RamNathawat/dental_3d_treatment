@@ -761,6 +761,20 @@ body {
   text-overflow: ellipsis;
 }
 
+.tv-sidebar__patient-demographics {
+  font-size: 0.72rem;
+  font-weight: 550;
+  color: var(--tv-text-muted);
+  margin-top: 0.15rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tv-app--dark .tv-sidebar__patient-demographics {
+  color: #94a3b8;
+}
+
 .tv-sidebar__status-row {
   display: flex;
   align-items: center;
@@ -2013,6 +2027,35 @@ body {
     padding: 0.50rem 0.75rem;
   }
 
+  .tv-movement-drawer,
+  .tv-notes-drawer {
+    top: 3.5rem;
+    left: 0.5rem;
+    right: 0.5rem;
+    bottom: 5.6rem;
+    width: auto;
+    max-width: calc(100vw - 1rem);
+    z-index: 85;
+  }
+
+  .tv-app--dark .tv-movement-drawer,
+  .tv-app--dark .tv-notes-drawer {
+    background: rgba(15, 20, 31, 0.98);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75);
+  }
+
+  .tv-app:not(.tv-app--dark) .tv-movement-drawer,
+  .tv-app:not(.tv-app--dark) .tv-notes-drawer {
+    background: rgba(255, 255, 255, 0.98);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+    border: 1px solid rgba(206, 198, 182, 0.85);
+    box-shadow: 0 16px 48px rgba(45, 38, 28, 0.22);
+  }
+
   /* Bottom Dock on Mobile */
   .tv-bottom-dock {
     display: grid;
@@ -2182,26 +2225,43 @@ body {
   .tv-dock-tools {
     grid-area: tools;
     display: flex;
-    justify-content: center;
-    gap: 0.30rem;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.25rem;
     width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 0.1rem 0.1rem 0.25rem;
+    box-sizing: border-box;
+  }
+
+  .tv-dock-tools::-webkit-scrollbar {
+    display: none;
   }
 
   .tv-ba-pill {
+    flex-shrink: 0;
     padding: 2px;
   }
 
   .tv-ba-btn {
-    padding: 0.30rem 0.60rem;
-    font-size: 0.70rem;
-    min-height: 28px;
+    flex-shrink: 0;
+    padding: 0.24rem 0.50rem;
+    font-size: 0.68rem;
+    min-height: 26px;
+    white-space: nowrap;
   }
 
   .tv-dock-tool-btn {
-    padding: 0.30rem 0.60rem;
-    font-size: 0.70rem;
-    min-height: 28px;
+    flex-shrink: 0;
+    padding: 0.24rem 0.50rem;
+    font-size: 0.68rem;
+    min-height: 26px;
+    white-space: nowrap;
   }
+
 
   .tv-scrubber-wrap {
     grid-area: scrubber;
@@ -2828,6 +2888,395 @@ body {
   color: var(--tv-text-muted);
   padding: 0.6rem 0.2rem;
   text-align: center;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Feature 12: Doctor's Notes & Remarks Drawer (Right Slide-In Panel)
+   ───────────────────────────────────────────────────────────────────────────── */
+.tv-notes-drawer {
+  position: absolute;
+  top: 60px;
+  right: 16px;
+  bottom: 96px;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  background: var(--tv-surface-glass);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--tv-border);
+  border-radius: 16px;
+  box-shadow: var(--tv-shadow-glass);
+  z-index: 26;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: tvSlideInRight 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tv-app--dark .tv-notes-drawer {
+  background: rgba(18, 24, 38, 0.94);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.tv-notes-drawer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--tv-border-subtle);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.tv-app--dark .tv-notes-drawer__header {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tv-notes-drawer__title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tv-notes-drawer__title-wrap h3 {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 750;
+  color: var(--tv-text);
+  letter-spacing: -0.01em;
+}
+
+.tv-notes-drawer__sub {
+  font-size: 0.70rem;
+  font-weight: 600;
+  color: var(--tv-text-muted);
+}
+
+.tv-notes-drawer__close {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: var(--tv-text-muted);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  transition: all 0.15s ease;
+}
+
+.tv-notes-drawer__close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--tv-text);
+}
+
+.tv-notes-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* Doctor Meta Card */
+.tv-notes-meta-card {
+  padding: 9px 12px;
+  background: rgba(224, 180, 87, 0.10);
+  border: 1px solid rgba(224, 180, 87, 0.25);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.tv-notes-doctor-name {
+  font-size: 0.82rem;
+  font-weight: 750;
+  color: var(--tv-text);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.tv-app--dark .tv-notes-doctor-name {
+  color: #ffd166;
+}
+
+.tv-notes-clinic-name {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--tv-text-muted);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.tv-notes-patient-id {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--tv-text-muted);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.tv-notes-demographics {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--tv-text-muted);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.tv-app--dark .tv-notes-demographics {
+  color: #cbd5e1;
+}
+
+.tv-header__patient-demo {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--tv-text-muted);
+  background: rgba(0, 0, 0, 0.05);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
+.tv-app--dark .tv-header__patient-demo {
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tv-notes-date {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--tv-text-muted);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Guidelines Chips */
+.tv-notes-guidelines-wrap {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.tv-notes-guideline-chip {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid var(--tv-border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.tv-app--dark .tv-notes-guideline-chip {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.tv-notes-guideline-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--tv-text-muted);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tv-notes-guideline-val {
+  font-size: 0.76rem;
+  font-weight: 750;
+  color: var(--tv-text);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.tv-app--dark .tv-notes-guideline-val {
+  color: #f1f5f9;
+}
+
+/* Instructions Card */
+.tv-notes-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid var(--tv-border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.tv-app--dark .tv-notes-card {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.tv-notes-card__title {
+  font-size: 0.72rem;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--tv-text-muted);
+}
+
+.tv-notes-card__text {
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--tv-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
+/* Stage-specific Remarks */
+.tv-notes-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.tv-notes-section__title {
+  font-size: 0.70rem;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--tv-text-muted);
+}
+
+.tv-notes-stage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.tv-notes-stage-item {
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid var(--tv-border-subtle);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: all 0.15s ease;
+  user-select: none;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.tv-app--dark .tv-notes-stage-item {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.tv-notes-stage-item:hover {
+  background: rgba(224, 180, 87, 0.08);
+  border-color: rgba(224, 180, 87, 0.35);
+}
+
+.tv-notes-stage-item--current {
+  background: rgba(224, 180, 87, 0.16) !important;
+  border-color: var(--tv-gold) !important;
+  box-shadow: 0 0 0 1px var(--tv-gold);
+}
+
+.tv-notes-stage-item__badge {
+  font-size: 0.68rem;
+  font-weight: 750;
+  color: #b45309;
+}
+
+.tv-app--dark .tv-notes-stage-item__badge {
+  color: #ffd166;
+}
+
+.tv-notes-stage-item__text {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--tv-text);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
+/* Empty states */
+.tv-notes-empty {
+  padding: 24px 12px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.tv-notes-empty__icon {
+  font-size: 1.6rem;
+}
+
+.tv-notes-empty__title {
+  font-size: 0.80rem;
+  font-weight: 700;
+  color: var(--tv-text);
+}
+
+.tv-notes-empty__sub {
+  font-size: 0.72rem;
+  color: var(--tv-text-muted);
+  max-width: 220px;
+}
+
+.tv-notes-stage-empty {
+  font-size: 0.72rem;
+  color: var(--tv-text-muted);
+  padding: 8px 4px;
+  font-style: italic;
+}
+
+/* Button indicator badge (dot) when remarks are present */
+.tv-btn--has-notes::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f59e0b;
+  margin-left: 5px;
+  vertical-align: middle;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.8);
 }
 
 

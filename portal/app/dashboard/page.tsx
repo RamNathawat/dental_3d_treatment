@@ -8,6 +8,12 @@ export interface DentalCase {
   id: string;
   dentist_id: string;
   patient_name: string;
+  clinic_name?: string | null;
+  patient_id?: string | null;
+  patient_age?: number | null;
+  patient_sex?: string | null;
+  ipr?: any[] | null;
+  doctor_notes?: any | null;
   total_stages: number;
   share_token: string;
   status: "ready" | "processing" | "archived";

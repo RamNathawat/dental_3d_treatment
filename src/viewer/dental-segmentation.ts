@@ -59,11 +59,11 @@ export function computeAnatomicalColors(
   const norm = geometry.getAttribute("normal");
 
   // ── Realistic Clinical Palette ─────────────────────────────────────────────
-  // Tooth enamel: polychromatic ceramic depth (natural enamel ivory).
-  const tipR = 0.95, tipG = 0.93, tipB = 0.91; // Incisal edge & cusp tips (#f2eeea)
-  const midR = 0.91, midG = 0.88, midB = 0.82; // Mid-crown body (#e8e0d1)
-  const nckR = 0.86, nckG = 0.80, nckB = 0.70; // Cervical neck warmth (#dcccae)
-  const shdR = 0.82, shdG = 0.75, shdB = 0.65; // Interproximal shadow (#d1bf9f)
+  // Tooth enamel: polychromatic ceramic depth (natural warm ivory / beige tooth enamel).
+  const tipR = 0.88, tipG = 0.84, tipB = 0.76; // Incisal edge & cusp tips (warm ivory highlight)
+  const midR = 0.83, midG = 0.77, midB = 0.68; // Mid-crown body (natural warm ivory/beige enamel)
+  const nckR = 0.78, nckG = 0.70, nckB = 0.58; // Cervical neck warmth (natural dentin depth)
+  const shdR = 0.73, shdG = 0.65, shdB = 0.53; // Interproximal shadow / fissure depth
 
   // Gingival tissue: natural vascular coral-rose (matches reference ClinCheck / 3Shape standard).
   const gumMarginR = 0.76, gumMarginG = 0.22, gumMarginB = 0.30; // Free gingival margin

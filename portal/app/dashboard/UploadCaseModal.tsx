@@ -13,6 +13,10 @@ import {
   Scissors,
   Plus,
   Trash2,
+  Building2,
+  Hash,
+  Calendar,
+  User,
 } from "lucide-react";
 import {
   processDentalZipInBrowser,
@@ -50,6 +54,10 @@ export default function UploadCaseModal({
   onCaseCreated,
 }: UploadCaseModalProps) {
   const [patientName, setPatientName] = useState("");
+  const [patientId, setPatientId] = useState("");
+  const [patientAge, setPatientAge] = useState("");
+  const [patientSex, setPatientSex] = useState("");
+  const [clinicName, setClinicName] = useState("");
   const [upperFile, setUpperFile] = useState<File | null>(null);
   const [lowerFile, setLowerFile] = useState<File | null>(null);
   const [upperMeta, setUpperMeta] = useState<DentalZipMetadata | null>(null);
@@ -146,6 +154,10 @@ export default function UploadCaseModal({
     setUpperFile(null);
     setUpperMeta(null);
     if (!lowerFile) setPatientName("");
+    if (lowerFile) {
+      setDraftArch("lower");
+      setDraftContact("41-31");
+    }
     setErrorMsg("");
   }
 
@@ -153,7 +165,31 @@ export default function UploadCaseModal({
     setLowerFile(null);
     setLowerMeta(null);
     if (!upperFile) setPatientName("");
+    if (upperFile) {
+      setDraftArch("upper");
+      setDraftContact("11-21");
+    }
     setErrorMsg("");
+  }
+
+  function handleAddDraftIpr() {
+    const contactList = draftArch === "upper" ? UPPER_DENTAL_CONTACTS : LOWER_DENTAL_CONTACTS;
+    const found = contactList.find((c) => c.contact === draftContact);
+    if (!found) return;
+    const parsed = parseFloat(draftAmountInput);
+    const finalAmount = isNaN(parsed) || parsed <= 0 ? 0.2 : parsed;
+    setIprList((prev) => [
+      ...prev.filter((item) => !(item.contact === draftContact && item.stage === draftStage)),
+      {
+        id: `ipr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        arch: draftArch,
+        contact: found.contact,
+        toothA: found.toothA,
+        toothB: found.toothB,
+        stage: draftStage,
+        amountMm: finalAmount,
+      },
+    ]);
   }
 
   async function handleUploadAndProcess() {
@@ -171,6 +207,13 @@ export default function UploadCaseModal({
     setProgressMsg("Initializing in-browser CAD engine...");
     setProgressPct(5);
 
+    const resolvedPatientId =
+      patientId.trim() || `PT-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const parsedAge = parseInt(patientAge.trim(), 10);
+    const resolvedAge = !isNaN(parsedAge) && parsedAge > 0 && parsedAge <= 120 ? parsedAge : undefined;
+    const resolvedSex = patientSex.trim() || undefined;
+
     const result: IngestResult = await processDentalZipInBrowser(
       {
         upperZip: upperFile,
@@ -183,6 +226,11 @@ export default function UploadCaseModal({
         setProgressPct(pct);
       },
       iprList,
+      undefined,
+      resolvedPatientId,
+      clinicName.trim() || undefined,
+      resolvedAge,
+      resolvedSex,
     );
 
     if (result.ok && result.caseId) {
@@ -199,6 +247,10 @@ export default function UploadCaseModal({
         id: result.caseId,
         dentist_id: userId,
         patient_name: dbName,
+        clinic_name: clinicName.trim() || null,
+        patient_id: result.patientId || resolvedPatientId,
+        patient_age: resolvedAge ?? null,
+        patient_sex: resolvedSex ?? null,
         total_stages: result.totalStages || Math.max(upperMeta?.totalStages || 1, lowerMeta?.totalStages || 1),
         share_token: result.shareToken || "",
         status: "ready",
@@ -505,33 +557,116 @@ export default function UploadCaseModal({
             </div>
           )}
 
-          {/* Step 2: Patient / Case Name */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200">
-                Patient / Case Name
-              </label>
-              {(upperMeta || lowerMeta) && (
-                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
-                  Auto-populated from archive
-                </span>
-              )}
+          {/* Step 2: Patient & Clinic Identification */}
+          <div className="space-y-3">
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  Patient / Case Name <span className="text-amber-500">*</span>
+                </label>
+                {(upperMeta || lowerMeta) && (
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                    Auto-populated from archive
+                  </span>
+                )}
+              </div>
+              <input
+                type="text"
+                disabled={isProcessing}
+                value={patientName}
+                onChange={(e) => setPatientName(e.target.value)}
+                placeholder={
+                  hasFiles
+                    ? "Enter patient or case name (e.g. Niya)"
+                    : "Drop ZIP above to auto-populate patient name"
+                }
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:focus:ring-[#e0b457]/20 focus:border-slate-900 dark:focus:border-[#e0b457] transition-all disabled:bg-slate-50 dark:disabled:bg-slate-900"
+              />
             </div>
-            <input
-              type="text"
-              disabled={isProcessing}
-              value={patientName}
-              onChange={(e) => setPatientName(e.target.value)}
-              placeholder={
-                hasFiles
-                  ? "Enter patient or case name"
-                  : "Drop ZIP above to auto-populate patient name"
-              }
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:focus:ring-[#e0b457]/20 focus:border-slate-900 dark:focus:border-[#e0b457] transition-all disabled:bg-slate-50 dark:disabled:bg-slate-900"
-            />
-            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-              Extracted from your CAD export. You can edit or customize this name.
-            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5 flex items-center gap-1.5">
+                  <Hash className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
+                  <span>Patient ID</span>
+                  <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500">(Optional)</span>
+                </label>
+                <input
+                  type="text"
+                  disabled={isProcessing}
+                  value={patientId}
+                  onChange={(e) => setPatientId(e.target.value)}
+                  placeholder="e.g. PT-1049 (Auto-generated if blank)"
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:focus:ring-[#e0b457]/20 focus:border-slate-900 dark:focus:border-[#e0b457] transition-all disabled:bg-slate-50 dark:disabled:bg-slate-900"
+                />
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+                  Auto-assigned if left blank (e.g. <span className="whitespace-nowrap font-mono font-medium text-slate-500 dark:text-slate-400">PT&#8209;4821</span>).
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5 flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
+                  <span>Clinic / Practice Name</span>
+                  <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500">(Optional)</span>
+                </label>
+                <input
+                  type="text"
+                  disabled={isProcessing}
+                  value={clinicName}
+                  onChange={(e) => setClinicName(e.target.value)}
+                  placeholder="e.g. Smile Dental Clinic"
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:focus:ring-[#e0b457]/20 focus:border-slate-900 dark:focus:border-[#e0b457] transition-all disabled:bg-slate-50 dark:disabled:bg-slate-900"
+                />
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+                  Associates the case with a clinic branch.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
+                  <span>Age</span>
+                  <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500">(Years, Optional)</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="1"
+                    max="120"
+                    disabled={isProcessing}
+                    value={patientAge}
+                    onChange={(e) => setPatientAge(e.target.value)}
+                    placeholder="e.g. 24"
+                    className="w-full px-3.5 py-2 pr-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:focus:ring-[#e0b457]/20 focus:border-slate-900 dark:focus:border-[#e0b457] transition-all disabled:bg-slate-50 dark:disabled:bg-slate-900"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400 font-medium pointer-events-none">
+                    yrs
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5 flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
+                  <span>Sex</span>
+                  <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500">(Optional)</span>
+                </label>
+                <select
+                  disabled={isProcessing}
+                  value={patientSex}
+                  onChange={(e) => setPatientSex(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:focus:ring-[#e0b457]/20 focus:border-slate-900 dark:focus:border-[#e0b457] transition-all disabled:bg-slate-50 dark:disabled:bg-slate-900 cursor-pointer"
+                >
+                  <option value="">Not Specified</option>
+                  <option value="Female">Female</option>
+                  <option value="Male">Male</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+            </div>
           </div>
 
           {/* Optional Step 3: Interproximal Reduction (IPR) Plan */}
@@ -559,63 +694,94 @@ export default function UploadCaseModal({
             </button>
 
             {showIprSection && (
-              <div className="p-4 pt-1 border-t border-slate-200/60 dark:border-slate-800/80 space-y-3">
-                {/* Form row */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
-                      Arch & Contact
-                    </label>
-                    <div className="flex gap-1">
-                      <select
-                        value={draftArch}
-                        onChange={(e) => {
-                          const a = e.target.value as "upper" | "lower";
-                          setDraftArch(a);
-                          setDraftContact(a === "upper" ? "11-21" : "41-31");
-                        }}
-                        className="text-xs bg-white dark:bg-[#131A26] border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5 text-slate-800 dark:text-slate-200"
-                      >
-                        <option value="upper">Upper</option>
-                        <option value="lower">Lower</option>
-                      </select>
-                      <select
-                        value={draftContact}
-                        onChange={(e) => setDraftContact(e.target.value)}
-                        className="flex-1 text-xs bg-white dark:bg-[#131A26] border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5 text-slate-800 dark:text-slate-200"
-                      >
-                        {(draftArch === "upper" ? UPPER_DENTAL_CONTACTS : LOWER_DENTAL_CONTACTS).map((c) => (
-                          <option key={c.contact} value={c.contact}>
-                            {c.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+              <div className="p-4 pt-2 border-t border-slate-200/60 dark:border-slate-800/80 space-y-3.5">
+                {/* Arch Selector Bar */}
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Prescribe Enamel Reduction
+                  </span>
+                  <div className="flex items-center gap-1 p-0.5 bg-slate-200/70 dark:bg-slate-800/90 rounded-lg border border-slate-300/40 dark:border-slate-700/60">
+                    <button
+                      type="button"
+                      disabled={isLowerOnly}
+                      onClick={() => {
+                        setDraftArch("upper");
+                        setDraftContact("11-21");
+                      }}
+                      className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                        draftArch === "upper"
+                          ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-[#ffd166] shadow-xs"
+                          : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+                      } ${isLowerOnly ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
+                    >
+                      Upper Jaw
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isUpperOnly}
+                      onClick={() => {
+                        setDraftArch("lower");
+                        setDraftContact("41-31");
+                      }}
+                      className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                        draftArch === "lower"
+                          ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-[#ffd166] shadow-xs"
+                          : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+                      } ${isUpperOnly ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
+                    >
+                      Lower Jaw
+                    </button>
                   </div>
+                </div>
 
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
-                      At Stage
+                {/* Form Inputs Grid: 12-column layout with generous contact width */}
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+                  {/* Tooth Contact Point: 6 of 12 cols (50% width) */}
+                  <div className="sm:col-span-6 space-y-1">
+                    <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                      Tooth Contact Point
                     </label>
                     <select
-                      value={draftStage}
-                      onChange={(e) => setDraftStage(Number(e.target.value))}
-                      className="w-full text-xs bg-white dark:bg-[#131A26] border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-800 dark:text-slate-200"
+                      value={draftContact}
+                      onChange={(e) => setDraftContact(e.target.value)}
+                      className="w-full text-xs bg-white dark:bg-[#131A26] border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#e0b457]/30 focus:border-[#e0b457] transition-all"
                     >
-                      {Array.from({ length: Math.max(upperMeta?.totalStages || lowerMeta?.totalStages || 1, 10) }, (_, i) => i + 1).map((s) => (
-                        <option key={s} value={s}>
-                          {s === 1 ? "Stage 1 (Initial / Template)" : `Stage ${s}`}
+                      {(draftArch === "upper" ? UPPER_DENTAL_CONTACTS : LOWER_DENTAL_CONTACTS).map((c) => (
+                        <option key={c.contact} value={c.contact}>
+                          {c.label}
                         </option>
                       ))}
                     </select>
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
-                      Reduction (mm)
+                  {/* Stage: 3 of 12 cols (25% width) */}
+                  <div className="sm:col-span-3 space-y-1">
+                    <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                      At Stage
                     </label>
-                    <div className="flex gap-1.5">
-                      <div className="relative w-full">
+                    <select
+                      value={draftStage}
+                      onChange={(e) => setDraftStage(Number(e.target.value))}
+                      className="w-full text-xs bg-white dark:bg-[#131A26] border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-2 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#e0b457]/30 focus:border-[#e0b457] transition-all"
+                    >
+                      {Array.from(
+                        { length: Math.max(upperMeta?.totalStages || lowerMeta?.totalStages || 1, 10) },
+                        (_, i) => i + 1,
+                      ).map((s) => (
+                        <option key={s} value={s}>
+                          Stage {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Reduction Amount + Add Button: 3 of 12 cols (25% width) */}
+                  <div className="sm:col-span-3 space-y-1">
+                    <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                      Amount
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      <div className="relative flex-1 min-w-0">
                         <input
                           type="number"
                           step="0.05"
@@ -624,7 +790,7 @@ export default function UploadCaseModal({
                           value={draftAmountInput}
                           onChange={(e) => setDraftAmountInput(e.target.value)}
                           placeholder="0.20"
-                          className="w-full text-xs bg-white dark:bg-[#131A26] border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 pr-7 text-slate-800 dark:text-slate-200 font-semibold focus:outline-none focus:ring-1 focus:ring-amber-400"
+                          className="w-full text-xs bg-white dark:bg-[#131A26] border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-2 pr-6 text-slate-800 dark:text-slate-200 font-semibold focus:outline-none focus:ring-2 focus:ring-[#e0b457]/30 focus:border-[#e0b457] transition-all"
                         />
                         <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-semibold pointer-events-none">
                           mm
@@ -632,29 +798,11 @@ export default function UploadCaseModal({
                       </div>
                       <button
                         type="button"
-                        onClick={() => {
-                          const contactList = draftArch === "upper" ? UPPER_DENTAL_CONTACTS : LOWER_DENTAL_CONTACTS;
-                          const found = contactList.find((c) => c.contact === draftContact);
-                          if (!found) return;
-                          const parsed = parseFloat(draftAmountInput);
-                          const finalAmount = isNaN(parsed) || parsed <= 0 ? 0.2 : parsed;
-                          setIprList((prev) => [
-                            ...prev.filter((item) => !(item.contact === draftContact && item.stage === draftStage)),
-                            {
-                              id: `ipr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-                              arch: draftArch,
-                              contact: found.contact,
-                              toothA: found.toothA,
-                              toothB: found.toothB,
-                              stage: draftStage,
-                              amountMm: finalAmount,
-                            },
-                          ]);
-                        }}
-                        className="px-2.5 py-1.5 bg-slate-900 dark:bg-[#e0b457] hover:bg-slate-800 dark:hover:bg-[#f3c875] text-white dark:text-slate-950 font-bold rounded-lg text-xs cursor-pointer flex items-center justify-center shrink-0"
+                        onClick={handleAddDraftIpr}
+                        className="px-3 py-2 bg-slate-900 dark:bg-[#e0b457] hover:bg-slate-800 dark:hover:bg-[#f3c875] text-white dark:text-slate-950 font-bold rounded-xl text-xs cursor-pointer flex items-center justify-center shrink-0 transition-all shadow-xs"
                         title="Add IPR"
                       >
-                        <Plus className="w-3.5 h-3.5" />
+                        <Plus className="w-4 h-4" />
                       </button>
                     </div>
                   </div>

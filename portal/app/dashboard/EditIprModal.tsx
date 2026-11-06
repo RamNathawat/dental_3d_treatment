@@ -1,13 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { X, Plus, Trash2, Scissors, Check, AlertCircle, Loader2 } from "lucide-react";
 import { DentalCase } from "./page";
 import {
   UPPER_DENTAL_CONTACTS,
   LOWER_DENTAL_CONTACTS,
-  DentalContactDefinition,
 } from "@/lib/dental-contacts";
 
 export interface IprItem {
@@ -44,9 +42,8 @@ export default function EditIprModal({
   const [arch, setArch] = useState<"upper" | "lower">("upper");
   const [contactCode, setContactCode] = useState<string>("11-21");
   const [stageNum, setStageNum] = useState<number>(1);
-  const [amountMm, setAmountMm] = useState<number>(0.2);
-
-  const supabase = createClient();
+  const [amountInput, setAmountInput] = useState<string>("0.20");
+  const [initialIprJson, setInitialIprJson] = useState<string>("[]");
 
   useEffect(() => {
     if (!isOpen) return;
@@ -55,6 +52,21 @@ export default function EditIprModal({
 
     async function fetchManifest() {
       try {
+        // First try the API route
+        const apiRes = await fetch(`/api/cases/${caseItem.id}/ipr?t=${Date.now()}`);
+        if (apiRes.ok) {
+          const apiData = await apiRes.json();
+          if (Array.isArray(apiData.ipr)) {
+            setIprList(apiData.ipr);
+            setInitialIprJson(JSON.stringify(apiData.ipr));
+          }
+          if (apiData.manifest) {
+            setManifestData(apiData.manifest);
+          }
+          return;
+        }
+
+        // Fallback to public storage URL
         const url = `https://yrjulcwnabnhgtqebrtn.supabase.co/storage/v1/object/public/treatment-models/${caseItem.id}/manifest.json?t=${Date.now()}`;
         const res = await fetch(url);
         if (res.ok) {
@@ -62,16 +74,20 @@ export default function EditIprModal({
           setManifestData(data);
           if (Array.isArray(data.ipr)) {
             setIprList(data.ipr);
+            setInitialIprJson(JSON.stringify(data.ipr));
           } else {
             setIprList([]);
+            setInitialIprJson("[]");
           }
         } else {
           setIprList([]);
+          setInitialIprJson("[]");
           setManifestData({});
         }
       } catch (err) {
         console.warn("Could not fetch manifest for IPR editing:", err);
         setIprList([]);
+        setInitialIprJson("[]");
       } finally {
         setLoading(false);
       }
@@ -94,6 +110,12 @@ export default function EditIprModal({
     const contactDef = contactsForArch.find((c) => c.contact === contactCode);
     if (!contactDef) return;
 
+    const parsedMm = parseFloat(amountInput);
+    if (isNaN(parsedMm) || parsedMm <= 0) {
+      setErrorMsg("Please enter a valid reduction amount in mm (e.g. 0.20).");
+      return;
+    }
+
     // Check if this contact is already planned for the exact same stage
     const exists = iprList.some(
       (item) => item.contact === contactCode && item.stage === stageNum,
@@ -111,7 +133,7 @@ export default function EditIprModal({
       toothA: contactDef.toothA,
       toothB: contactDef.toothB,
       stage: Math.max(1, stageNum),
-      amountMm: Math.max(0.05, amountMm),
+      amountMm: parsedMm,
     };
 
     setIprList((prev) => [...prev, newItem]);
@@ -126,28 +148,33 @@ export default function EditIprModal({
     setErrorMsg("");
 
     try {
-      const updatedManifest = {
-        ...(manifestData || {}),
-        caseId: caseItem.id,
-        patientName: manifestData?.patientName || caseItem.patient_name,
-        ipr: iprList,
-      };
-
-      const blob = new Blob([JSON.stringify(updatedManifest, null, 2)], {
-        type: "application/json",
+      const res = await fetch(`/api/cases/${caseItem.id}/ipr`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ipr: iprList }),
       });
 
-      const { error } = await supabase.storage
-        .from("treatment-models")
-        .upload(`${caseItem.id}/manifest.json`, blob, {
-          contentType: "application/json",
-          cacheControl: "0",
-          upsert: true,
-        });
-
-      if (error) {
-        throw error;
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to save IPR prescription.");
       }
+
+      setInitialIprJson(JSON.stringify(iprList));
+
+      // Broadcast update to any open viewer tabs
+      try {
+        localStorage.setItem(
+          "dental_viewer_sync",
+          JSON.stringify({
+            caseId: caseItem.id,
+            type: "ipr",
+            count: iprList.length,
+            timestamp: Date.now(),
+          })
+        );
+      } catch {}
 
       onSaved?.(iprList.length);
       onClose();
@@ -177,7 +204,10 @@ export default function EditIprModal({
               <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <span>Interproximal Reduction (IPR)</span>
                 <span className="text-[11px] font-normal text-slate-400">
-                  • {caseItem.patient_name}
+                  • {caseItem.patient_name} {caseItem.patient_id ? `(#${caseItem.patient_id})` : ""}{" "}
+                  {[caseItem.patient_sex, caseItem.patient_age != null ? `${caseItem.patient_age} yrs` : null].filter(Boolean).length > 0
+                    ? `• ${[caseItem.patient_sex, caseItem.patient_age != null ? `${caseItem.patient_age} yrs` : null].filter(Boolean).join(", ")}`
+                    : ""}
                 </span>
               </h2>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -241,10 +271,10 @@ export default function EditIprModal({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  {/* Contact pair select */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+                  {/* Contact pair select: 6 of 12 columns (50% width) */}
+                  <div className="sm:col-span-6 space-y-1">
+                    <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400">
                       Tooth Contact Point
                     </label>
                     <select
@@ -260,11 +290,11 @@ export default function EditIprModal({
                     </select>
                   </div>
 
-                  {/* Stage input */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400 flex items-center justify-between">
+                  {/* Stage input: 3 of 12 columns (25% width) */}
+                  <div className="sm:col-span-3 space-y-1">
+                    <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 flex items-center justify-between">
                       <span>At Stage</span>
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500">Default: 1</span>
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500">Def: 1</span>
                     </label>
                     <select
                       value={stageNum}
@@ -279,30 +309,31 @@ export default function EditIprModal({
                     </select>
                   </div>
 
-                  {/* Reduction amount select */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                  {/* Reduction amount input: 3 of 12 columns (25% width) */}
+                  <div className="sm:col-span-3 space-y-1">
+                    <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400">
                       Reduction (mm)
                     </label>
                     <div className="flex gap-1.5">
-                      <select
-                        value={amountMm}
-                        onChange={(e) => setAmountMm(Number(e.target.value))}
-                        className="w-full text-xs bg-white dark:bg-[#131A26] border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-2 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-amber-400 font-semibold"
-                      >
-                        <option value={0.1}>0.10 mm</option>
-                        <option value={0.15}>0.15 mm</option>
-                        <option value={0.2}>0.20 mm</option>
-                        <option value={0.25}>0.25 mm</option>
-                        <option value={0.3}>0.30 mm</option>
-                        <option value={0.35}>0.35 mm</option>
-                        <option value={0.4}>0.40 mm</option>
-                        <option value={0.5}>0.50 mm</option>
-                      </select>
+                      <div className="relative flex-1 min-w-0">
+                        <input
+                          type="number"
+                          step="0.05"
+                          min="0.05"
+                          max="1.5"
+                          value={amountInput}
+                          onChange={(e) => setAmountInput(e.target.value)}
+                          placeholder="0.20"
+                          className="w-full text-xs bg-white dark:bg-[#131A26] border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-2 pr-7 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-amber-400 font-semibold"
+                        />
+                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-semibold pointer-events-none">
+                          mm
+                        </span>
+                      </div>
                       <button
                         type="button"
                         onClick={handleAddEntry}
-                        className="px-3 py-2 bg-slate-900 dark:bg-[#e0b457] hover:bg-slate-800 dark:hover:bg-[#f3c875] text-white dark:text-slate-950 font-bold rounded-lg text-xs flex items-center justify-center shrink-0 shadow-xs"
+                        className="px-3 py-2 bg-slate-900 dark:bg-[#e0b457] hover:bg-slate-800 dark:hover:bg-[#f3c875] text-white dark:text-slate-950 font-bold rounded-lg text-xs flex items-center justify-center shrink-0 shadow-xs cursor-pointer"
                         title="Add this IPR entry"
                       >
                         <Plus className="w-4 h-4" />
@@ -379,36 +410,49 @@ export default function EditIprModal({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-end gap-2.5 bg-slate-50/40 dark:bg-[#0f141f]/60">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={saving}
-            className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving || loading}
-            className="px-5 py-2 rounded-xl text-xs font-bold text-white dark:text-slate-950 bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:via-[#f3c875] dark:to-[#c49a45] hover:bg-slate-800 dark:hover:brightness-105 shadow-sm transition-all flex items-center gap-2 disabled:opacity-50"
-          >
-            {saving ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>Saving...</span>
-              </>
-            ) : (
-              <>
-                <Check className="w-3.5 h-3.5" />
-                <span>Save IPR Prescription</span>
-              </>
+        <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-2.5 bg-slate-50/40 dark:bg-[#0f141f]/60">
+          <div>
+            {JSON.stringify(iprList) !== initialIprJson && (
+              <span className="text-[11px] font-semibold text-amber-600 dark:text-[#ffd166] flex items-center gap-1.5 animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-[#ffd166]" />
+                <span>Unsaved changes — click &quot;Save IPR Prescription&quot; to apply</span>
+              </span>
             )}
-          </button>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || loading}
+              className={`px-5 py-2 rounded-xl text-xs font-bold text-white dark:text-slate-950 transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer ${
+                JSON.stringify(iprList) !== initialIprJson
+                  ? "bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:via-[#f3c875] dark:to-[#c49a45] shadow-md ring-2 ring-amber-400/40 dark:ring-[#ffd166]/50"
+                  : "bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:via-[#f3c875] dark:to-[#c49a45] shadow-sm"
+              }`}
+            >
+              {saving ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Save IPR Prescription</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
-

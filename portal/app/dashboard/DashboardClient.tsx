@@ -22,10 +22,14 @@ import {
   Sun,
   Moon,
   Scissors,
+  FileText,
+  Building2,
+  Hash,
 } from "lucide-react";
 import { DentalCase } from "./page";
 import UploadCaseModal from "./UploadCaseModal";
 import EditIprModal from "./EditIprModal";
+import EditNotesModal from "./EditNotesModal";
 
 interface DashboardClientProps {
   email: string;
@@ -44,6 +48,7 @@ export default function DashboardClient({
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [selectedIprCase, setSelectedIprCase] = useState<DentalCase | null>(null);
+  const [selectedNotesCase, setSelectedNotesCase] = useState<DentalCase | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isDark, setIsDark] = useState<boolean>(false);
 
@@ -125,7 +130,14 @@ export default function DashboardClient({
   }
 
   const filteredCases = cases.filter((c) => {
-    const matchesSearch = c.patient_name.toLowerCase().includes(searchQuery.toLowerCase());
+    const q = searchQuery.toLowerCase().trim();
+    const matchesSearch =
+      !q ||
+      c.patient_name.toLowerCase().includes(q) ||
+      Boolean(c.patient_id && c.patient_id.toLowerCase().includes(q)) ||
+      Boolean(c.clinic_name && c.clinic_name.toLowerCase().includes(q)) ||
+      Boolean(c.patient_sex && c.patient_sex.toLowerCase().includes(q)) ||
+      Boolean(c.patient_age && String(c.patient_age).includes(q));
     if (activeFilter === "all") return matchesSearch;
     return matchesSearch && c.status === activeFilter;
   });
@@ -306,7 +318,7 @@ export default function DashboardClient({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search patient records by name..."
+                placeholder="Search by patient name, ID, or clinic..."
                 className="w-full pl-10 pr-4 py-2 rounded-xl text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 bg-transparent focus:outline-none focus:bg-slate-50 dark:focus:bg-[#1A2234] transition-all"
               />
             </div>
@@ -398,13 +410,40 @@ export default function DashboardClient({
                             3D
                           </div>
                           <div className="min-w-0">
-                            <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white truncate tracking-tight group-hover:text-slate-700 dark:group-hover:text-[#ffd166] transition-colors">
-                              {displayName}
-                            </h3>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <span className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">
-                                Created {dateStr}
-                              </span>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white truncate tracking-tight group-hover:text-slate-700 dark:group-hover:text-[#ffd166] transition-colors">
+                                {displayName}
+                              </h3>
+                              {item.patient_id && (
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-100 dark:bg-[#1A2234] text-slate-700 dark:text-[#ffd166] border border-slate-200 dark:border-slate-700/80 inline-flex items-center gap-1">
+                                  <Hash className="w-2.5 h-2.5 text-slate-400 dark:text-[#ffd166]" />
+                                  <span>{item.patient_id}</span>
+                                </span>
+                              )}
+                              {(item.patient_sex || item.patient_age != null) && (
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-100/90 dark:bg-[#151D2A] text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700/60 inline-flex items-center gap-1">
+                                  <span>
+                                    {[
+                                      item.patient_sex,
+                                      item.patient_age != null ? `${item.patient_age} yrs` : null,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" · ")}
+                                  </span>
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                              {item.clinic_name && (
+                                <>
+                                  <span className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-300">
+                                    <Building2 className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
+                                    <span>{item.clinic_name}</span>
+                                  </span>
+                                  <span className="text-slate-300 dark:text-slate-700">•</span>
+                                </>
+                              )}
+                              <span>Created {dateStr}</span>
                             </div>
                           </div>
                         </div>
@@ -479,7 +518,7 @@ export default function DashboardClient({
 
                     {/* Bottom Actions Row */}
                     <div className="pt-4 border-t border-slate-100/90 dark:border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-                      {/* Primary CTA: Launch Undercut Blocking */}
+                      {/* Primary CTA: Launch 3D Progression Viewer */}
                       <a
                         href={`/treatment?case=${item.share_token}`}
                         target="_blank"
@@ -487,7 +526,7 @@ export default function DashboardClient({
                         className="flex-1 py-2.5 px-4 rounded-xl text-xs font-semibold text-white dark:text-slate-950 bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:via-[#f3c875] dark:to-[#c49a45] hover:bg-slate-800 dark:hover:brightness-105 shadow-sm dark:shadow-[0_4px_16px_rgba(224,180,87,0.25)] transition-all flex items-center justify-center gap-2 active:scale-98"
                       >
                         <Eye className="w-4 h-4 text-white dark:text-slate-950" />
-                        <span>Undercut Blocking</span>
+                        <span>View 3D Progression</span>
                         <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 dark:text-slate-900" />
                       </a>
 
@@ -522,6 +561,16 @@ export default function DashboardClient({
                         <Scissors className="w-3.5 h-3.5 text-amber-600 dark:text-[#ffd166]" />
                         <span>IPR</span>
                       </button>
+
+                      {/* Quaternary CTA: Doctor's Remarks / Notes */}
+                      <button
+                        onClick={() => setSelectedNotesCase(item)}
+                        className="py-2.5 px-3 rounded-xl text-xs font-semibold border transition-all flex items-center justify-center gap-1.5 active:scale-98 bg-white dark:bg-[#1A2234] text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-950/30 border-slate-200 dark:border-slate-700 hover:border-amber-300 dark:hover:border-amber-700 hover:text-amber-800 dark:hover:text-[#ffd166] shadow-2xs"
+                        title="Doctor's notes, instructions & case remarks"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-amber-500 dark:text-[#ffd166]" />
+                        <span>Notes</span>
+                      </button>
                     </div>
                   </div>
                 );
@@ -548,6 +597,21 @@ export default function DashboardClient({
           onSaved={(cnt) =>
             showToast(
               `IPR prescription updated for ${selectedIprCase.patient_name} (${cnt} planned reductions)`,
+            )
+          }
+        />
+      )}
+
+      {/* ─── Edit Doctor Notes Modal ─────────────────────────────────────── */}
+      {selectedNotesCase && (
+        <EditNotesModal
+          isOpen={Boolean(selectedNotesCase)}
+          onClose={() => setSelectedNotesCase(null)}
+          caseItem={selectedNotesCase}
+          doctorDefaultName={email !== "Doctor" ? email.split("@")[0] : undefined}
+          onSaved={() =>
+            showToast(
+              `Doctor remarks updated for ${selectedNotesCase.patient_name}`,
             )
           }
         />

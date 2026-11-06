@@ -22,6 +22,10 @@ export interface IngestResult {
   archType?: "both" | "upper" | "lower";
   hasUpper?: boolean;
   hasLower?: boolean;
+  patientId?: string;
+  patientAge?: number;
+  patientSex?: string;
+  clinicName?: string;
   error?: string;
 }
 
@@ -522,6 +526,11 @@ export async function processDentalZipInBrowser(
   userId: string,
   onProgress: ProgressCallback,
   ipr?: any[],
+  doctorNotes?: any,
+  patientId?: string,
+  clinicName?: string,
+  patientAge?: number,
+  patientSex?: string,
 ): Promise<IngestResult> {
   const supabase = createClient();
   const objLoader = new OBJLoader();
@@ -701,25 +710,56 @@ export async function processDentalZipInBrowser(
         ? `${cleanPatientName} [Lower]`
         : cleanPatientName;
 
-    // Create case row in database
+    // Create case row in database with optional clinic_name & patient_id
     const shareToken = Array.from(crypto.getRandomValues(new Uint8Array(16)))
       .map((b) => b.toString(16).padStart(2, "0"))
       .join("");
 
-    const { data: caseRow, error: caseErr } = await supabase
+    // Patient ID resolution: use provided ID or auto-generate unique PT-XXXX ID
+    const effectivePatientId =
+      patientId?.trim() || `PT-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const insertPayload: Record<string, unknown> = {
+      dentist_id: userId,
+      patient_name: dbPatientName,
+      total_stages: totalStages,
+      share_token: shareToken,
+      status: "ready",
+      patient_id: effectivePatientId,
+    };
+    if (clinicName?.trim()) insertPayload.clinic_name = clinicName.trim();
+    if (patientAge != null && !isNaN(patientAge) && patientAge > 0) {
+      insertPayload.patient_age = Math.round(patientAge);
+    }
+    if (patientSex?.trim()) insertPayload.patient_sex = patientSex.trim();
+    if (Array.isArray(ipr) && ipr.length > 0) insertPayload.ipr = ipr;
+    if (doctorNotes) insertPayload.doctor_notes = doctorNotes;
+
+    let caseRow: any = null;
+    let { data: insertedData, error: caseErr } = await supabase
       .from("cases")
-      .insert({
+      .insert(insertPayload)
+      .select()
+      .single();
+
+    if (caseErr && (caseErr.message?.includes("column") || caseErr.code === "PGRST204" || caseErr.code === "42703")) {
+      // Fallback: If DB migration has not run yet in Supabase, retry without extra columns
+      const fallbackPayload = {
         dentist_id: userId,
         patient_name: dbPatientName,
         total_stages: totalStages,
         share_token: shareToken,
         status: "ready",
-      })
-      .select()
-      .single();
-
-    if (caseErr || !caseRow) {
+      };
+      const retry = await supabase.from("cases").insert(fallbackPayload).select().single();
+      if (retry.error || !retry.data) {
+        throw new Error(`Failed to create case in database: ${retry.error?.message || "Unknown error"}`);
+      }
+      caseRow = retry.data;
+    } else if (caseErr || !insertedData) {
       throw new Error(`Failed to create case in database: ${caseErr?.message || "Unknown error"}`);
+    } else {
+      caseRow = insertedData;
     }
 
     const caseId = caseRow.id;
@@ -772,24 +812,12 @@ export async function processDentalZipInBrowser(
           for (const child of parsed.children) {
             if (!(child as THREE.Mesh).isMesh) continue;
             const geom = (child as THREE.Mesh).geometry;
-            // Pearlescent enamel (#E1E0DF in linear)
-            mergeGeometry(geom, 0.76, 0.74, 0.72, vertexMap, positions, colors, indices);
+            // Warm natural ivory / beige enamel (#E8DEC8 in linear: 0.82, 0.76, 0.68)
+            mergeGeometry(geom, 0.82, 0.76, 0.68, vertexMap, positions, colors, indices);
           }
         }
 
-        // 3. Process CAD Labels (e.g. label_01.obj)
-        if (stageData.labels) {
-          for (const labelBytes of stageData.labels) {
-            const text = new TextDecoder().decode(labelBytes);
-            const parsed = objLoader.parse(text);
-            for (const child of parsed.children) {
-              if (!(child as THREE.Mesh).isMesh) continue;
-              const geom = (child as THREE.Mesh).geometry;
-              // Distinct CAD markings (#2ECC71 green in linear)
-              mergeGeometry(geom, 0.18, 0.80, 0.44, vertexMap, positions, colors, indices);
-            }
-          }
-        }
+        // 3. Skip CAD Labels (e.g. label_01.obj, "NIYA 1", "NIYA 2") to keep models clean and aesthetic
 
         // 4. Process Solid / Combined Model if unsegmented
         if (stageData.combined && !stageData.gum && stageData.teeth.length === 0) {
@@ -814,7 +842,7 @@ export async function processDentalZipInBrowser(
                   if (col) {
                     colors.push(col.getX(i), col.getY(i), col.getZ(i));
                   } else {
-                    colors.push(0.76, 0.74, 0.72);
+                    colors.push(0.82, 0.76, 0.68);
                   }
                 }
                 indices.push(idx);
@@ -836,8 +864,8 @@ export async function processDentalZipInBrowser(
             for (const child of parsed.children) {
               if (!(child as THREE.Mesh).isMesh) continue;
               const geom = (child as THREE.Mesh).geometry;
-              // Orthodontic composite resin (#E1E0DF in linear)
-              mergeGeometry(geom, 0.76, 0.74, 0.72, attVertexMap, attPositions, attColors, attIndices);
+              // Orthodontic composite resin (warm ivory matching teeth: 0.82, 0.76, 0.68)
+              mergeGeometry(geom, 0.82, 0.76, 0.68, attVertexMap, attPositions, attColors, attIndices);
             }
           }
         }
@@ -914,10 +942,15 @@ export async function processDentalZipInBrowser(
     const manifestData = {
       caseId,
       patientName: cleanPatientName,
+      patientId: effectivePatientId,
+      patientAge: patientAge != null && !isNaN(patientAge) && patientAge > 0 ? Math.round(patientAge) : undefined,
+      patientSex: patientSex?.trim() || undefined,
+      clinicName: clinicName?.trim() || undefined,
       archType,
       hasUpper,
       hasLower,
       ipr: Array.isArray(ipr) ? ipr : [],
+      doctorNotes: doctorNotes || undefined,
       treatmentStages: availableStages.map((stageNum) => {
         const pad = String(stageNum).padStart(2, "0");
         const upperFilename = `${cleanPatientName} Upper jaw - ${pad} - Model.glb`;
@@ -954,7 +987,7 @@ export async function processDentalZipInBrowser(
       .from("treatment-models")
       .upload(`${caseId}/manifest.json`, manifestBlob, {
         contentType: "application/json",
-        cacheControl: "3600",
+        cacheControl: "0",
         upsert: true,
       });
 
@@ -967,6 +1000,10 @@ export async function processDentalZipInBrowser(
       archType,
       hasUpper,
       hasLower,
+      patientId: effectivePatientId,
+      patientAge: patientAge != null && !isNaN(patientAge) && patientAge > 0 ? Math.round(patientAge) : undefined,
+      patientSex: patientSex?.trim() || undefined,
+      clinicName: clinicName?.trim() || undefined,
     };
   } catch (err) {
     console.error("In-browser ingestion error:", err);
@@ -1007,13 +1044,8 @@ function mergeGeometry(
         const cr = col.getX(i);
         const cg = col.getY(i);
         const cb = col.getZ(i);
-        // Preserve distinct green CAD labels or attachment markings (e.g., "NIYA 1", "NIYA 2")
-        if (cg > 0.40 && cg > cr * 1.30) {
-          colors.push(cr, cg, cb);
-        } else {
-          // Standardize all gums & teeth to calibrated ClinCheck / 3Shape aesthetics
-          colors.push(defaultR, defaultG, defaultB);
-        }
+        // Paint over any green CAD label markings (e.g. "NIYA 1", "NIYA 2") so gingiva is clean
+        colors.push(defaultR, defaultG, defaultB);
       } else {
         colors.push(defaultR, defaultG, defaultB);
       }

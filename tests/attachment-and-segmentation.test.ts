@@ -168,8 +168,8 @@ describe("computeAnatomicalColors", () => {
       const b = color.getZ(i);
 
       if (y >= 1.5) {
-        // Crown tip: enamel white
-        if (r > 0.9 && g > 0.85 && b > 0.8) {
+        // Crown tip: natural warm ivory / beige enamel
+        if (r > 0.8 && g > 0.75 && b > 0.7) {
           foundWhiteCrown = true;
         }
       } else if (y <= -6.0) {

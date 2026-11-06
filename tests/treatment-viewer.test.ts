@@ -809,5 +809,49 @@ describe("Treatment Viewer Application", () => {
 
       app.dispose();
     });
+
+    it("supports toggling Doctor's Notes & Remarks drawer with stage remarks and guidelines", async () => {
+      const app = createTreatmentApp(root, {
+        createViewport: () => fakeViewport,
+        autoLoad: true,
+      });
+
+      await vi.waitFor(() => {
+        expect(app.getState().currentIndex).toBe(0);
+      });
+
+      // Default should be closed
+      expect(app.getState().notesOpen).toBe(false);
+      const drawer = root.querySelector(".tv-notes-drawer") as HTMLElement;
+      expect(drawer).not.toBeNull();
+      expect(drawer.hidden).toBe(true);
+
+      // Open notes drawer
+      app.toggleNotes();
+      expect(app.getState().notesOpen).toBe(true);
+      expect(drawer.hidden).toBe(false);
+
+      // Verify content populated from manifest
+      expect(drawer.textContent).toContain("Doctor's Notes & Remarks");
+      expect(drawer.textContent).toContain("Dr. Sarath Kumar");
+      expect(drawer.textContent).toContain("22 hrs / day");
+      expect(drawer.textContent).toContain("Treatment Instructions");
+      expect(drawer.textContent).toContain("Wear aligners for a minimum of 20 to 22 hours per day");
+      expect(drawer.textContent).toContain("Stage 1");
+      expect(drawer.textContent).toContain("Stage 2");
+
+      // Stage 1 remark should have current active highlight class
+      const currentStageItem = drawer.querySelector(".tv-notes-stage-item--current");
+      expect(currentStageItem).not.toBeNull();
+      expect(currentStageItem?.textContent).toContain("Stage 1");
+
+      // Close drawer via close button
+      const closeBtn = drawer.querySelector<HTMLButtonElement>(".tv-notes-drawer__close");
+      closeBtn?.click();
+      expect(app.getState().notesOpen).toBe(false);
+      expect(drawer.hidden).toBe(true);
+
+      app.dispose();
+    });
   });
 });

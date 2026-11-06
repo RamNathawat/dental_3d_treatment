@@ -86,6 +86,33 @@ export const SOUMYA_SARATH_MANIFEST: CaseManifest = {
       amountMm: 0.2,
     },
   ],
+  doctorNotes: {
+    doctorName: "Dr. Sarath Kumar",
+    clinicName: "Elite Orthodontics",
+    wearHoursPerDay: 22,
+    daysPerStage: 10,
+    general:
+      "Wear aligners for a minimum of 20 to 22 hours per day. Only remove aligners when eating, drinking hot beverages, or brushing. Use chewies for 5 minutes after inserting aligners to seat them properly.",
+    stageRemarks: [
+      {
+        stage: 1,
+        note: "Initial attachment template bonding in clinic. Begin wearing aligner tray 1.",
+      },
+      {
+        stage: 2,
+        note: "Perform 0.20 mm IPR at contact 31-32 before wearing aligner 2.",
+      },
+      {
+        stage: 5,
+        note: "Mid-treatment progress evaluation. Verify tracking of anterior rotations.",
+      },
+      {
+        stage: 10,
+        note: "Final stage review. Prepare for post-treatment retention scan.",
+      },
+    ],
+    updatedAt: "Nov 5, 2026",
+  },
   ambiguities: [],
 };
 

@@ -441,7 +441,7 @@ export function createApp(root: HTMLElement, options: AppOptions): App {
         class: "treatment-cta",
         attrs: { href: "./treatment.html" },
         title: "Open 3D Dental Treatment Progression Viewer",
-        text: "🦷 3D Treatment Progression →",
+        text: "3D Treatment Progression →",
       }),
       actions,
       status,

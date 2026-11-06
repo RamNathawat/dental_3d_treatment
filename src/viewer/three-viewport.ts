@@ -320,9 +320,9 @@ class ThreeViewport implements Viewport {
 
     const material = new MeshStandardMaterial({
       color: new Color(baseColor),
-      roughness: 0.22,   // moist clinical mucosal / enamel specularity (matches reference model)
+      roughness: 0.32,   // realistic natural enamel satin sheen (prevents harsh specular blowout, reveals occlusal anatomy)
       metalness: 0.02,
-      envMapIntensity: 0.30, // subtle realistic environment reflection without diffuse washing
+      envMapIntensity: 0.25, // subtle realistic environment reflection without diffuse washing
       vertexColors: isAnatomical && Boolean(geometry.getAttribute("color")),
       side: DoubleSide,
     });
@@ -701,8 +701,8 @@ class ThreeViewport implements Viewport {
     // Prevents color bleaching/blowout so healthy gingiva and natural enamel maintain rich depth and contrast.
     this.scene.add(new HemisphereLight(0xffffff, 0x1e2638, 0.25));
 
-    // Primary key light: crisp form, depth, and specular contour
-    const key = new DirectionalLight(0xffffff, 1.0);
+    // Primary key light: crisp form, depth, and specular contour (subtle warm tone to avoid stark white blowout)
+    const key = new DirectionalLight(0xfffbf5, 0.90);
     key.position.set(45, -75, 90);
     this.scene.add(key);
 
@@ -712,7 +712,7 @@ class ThreeViewport implements Viewport {
     this.scene.add(fill);
 
     // Incisal rim light: highlights incisal crowns and silhouettes against dark/light canvas
-    const rim = new DirectionalLight(0xffffff, 0.65);
+    const rim = new DirectionalLight(0xffffff, 0.52);
     rim.position.set(0, 95, 65);
     this.scene.add(rim);
 

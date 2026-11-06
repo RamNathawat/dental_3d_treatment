@@ -86,6 +86,8 @@ export interface AppState {
   overlayBlend: number;
   /** Whether Interproximal Reduction (IPR) values and contact callouts are active. */
   iprActive: boolean;
+  /** Whether the doctor's notes and clinical remarks drawer is open. */
+  notesOpen: boolean;
   /** AbortController for the in-flight fetch, cancelled on new navigation. */
   abortController: AbortController | null;
   /** Whether the clinical tooth movements panel is open. */
@@ -129,6 +131,8 @@ export interface TreatmentAppHandle {
   readonly setAttachmentsVisible: (visible: boolean) => void;
   readonly toggleIpr: () => void;
   readonly setIprActive: (active: boolean) => void;
+  readonly toggleNotes: () => void;
+  readonly setNotesOpen: (open: boolean) => void;
   readonly getState: () => Readonly<AppState>;
 }
 
@@ -162,6 +166,7 @@ export function createTreatmentApp(
     overlayActive: false,
     overlayBlend: 0.5,
     iprActive: false,
+    notesOpen: false,
     abortController: null,
     metricsPanelOpen: false,
   };
@@ -335,6 +340,46 @@ export function createTreatmentApp(
   ]);
   movementDrawerEl.hidden = true;
 
+  // ── Doctor's Notes & Remarks Drawer ───────────────────────────────────────
+  const notesDrawerDoctorMetaEl = div("tv-notes-meta");
+  const notesDrawerGuidelinesEl = div("tv-notes-guidelines");
+  const notesDrawerGeneralEl = div("tv-notes-general");
+  const notesDrawerStageListEl = div("tv-notes-stage-list");
+
+  const notesDrawerEl = div("tv-notes-drawer", [
+    div("tv-notes-drawer__header", [
+      div("tv-notes-drawer__title-wrap", [
+        (() => {
+          const h3 = document.createElement("h3");
+          h3.textContent = "Doctor's Notes & Remarks";
+          return h3;
+        })(),
+        span("tv-notes-drawer__sub", "Treating Orthodontist Guidance"),
+      ]),
+      makeBtn("✕", () => toggleNotesDrawer(), "tv-notes-drawer__close"),
+    ]),
+    div("tv-notes-content", [
+      notesDrawerDoctorMetaEl,
+      notesDrawerGuidelinesEl,
+      notesDrawerGeneralEl,
+      div("tv-notes-section", [
+        div("tv-notes-section__header", [
+          span("tv-notes-section__title", "Stage-Specific Remarks"),
+        ]),
+        notesDrawerStageListEl,
+      ]),
+    ]),
+  ]);
+  notesDrawerEl.hidden = true;
+
+  // Doctor's Notes button in header
+  const notesHeaderBtn = makeBtn(
+    "Notes",
+    () => toggleNotesDrawer(),
+    "tv-btn--tool tv-btn--notes",
+  );
+  notesHeaderBtn.title = "View treating doctor's instructions & case remarks";
+
   // Quick tools in top bar
   let isGridVisible = false;
   const gridBtn = makeBtn(
@@ -375,7 +420,7 @@ export function createTreatmentApp(
   }
 
   const themeToggleBtn = makeBtn(
-    isDarkMode ? "☀️ Light" : "🌙 Dark",
+    isDarkMode ? "Light" : "Dark",
     () => {
       isDarkMode = !isDarkMode;
       if (isDarkMode) {
@@ -384,7 +429,7 @@ export function createTreatmentApp(
           document.documentElement.classList.add("dark");
           document.documentElement.setAttribute("data-theme", "dark");
         }
-        themeToggleBtn.textContent = "☀️ Light";
+        themeToggleBtn.textContent = "Light";
         themeToggleBtn.title = "Switch to Light Mode";
         try {
           localStorage.setItem("dental_theme", "dark");
@@ -396,7 +441,7 @@ export function createTreatmentApp(
           document.documentElement.classList.remove("dark");
           document.documentElement.setAttribute("data-theme", "light");
         }
-        themeToggleBtn.textContent = "🌙 Dark";
+        themeToggleBtn.textContent = "Dark";
         themeToggleBtn.title = "Switch to Dark Mode";
         try {
           localStorage.setItem("dental_theme", "light");
@@ -712,6 +757,7 @@ export function createTreatmentApp(
 
   // Left Collapsible Case Drawer / Sidebar
   const sidebarPatientNameEl = div("tv-sidebar__patient-name", ["Patient Case"]);
+  const sidebarPatientDemographicsEl = div("tv-sidebar__patient-demographics");
   const sidebarStageCountEl = span("tv-sidebar__badge", "10 Stages");
   const sidebarStatusDotEl = span("tv-sidebar__status-dot", "");
   const sidebarListEl = div("tv-sidebar__list");
@@ -744,6 +790,7 @@ export function createTreatmentApp(
       div("tv-sidebar__avatar", [avatarSvg]),
       div("tv-sidebar__patient-info", [
         sidebarPatientNameEl,
+        sidebarPatientDemographicsEl,
         div("tv-sidebar__status-row", [
           sidebarStatusDotEl,
           sidebarStageCountEl,
@@ -802,6 +849,7 @@ export function createTreatmentApp(
     iprLegendEl,
     overlayPanelEl,
     movementDrawerEl,
+    notesDrawerEl,
     cameraDockEl,
     bottomDockEl,
     loadingEl,
@@ -825,11 +873,24 @@ export function createTreatmentApp(
           span("tv-header__patient-label", "Patient"),
           span(
             "tv-header__patient-name",
-            state.manifest.patientName ?? state.manifest.caseId,
+            state.manifest.patientId
+              ? `${state.manifest.patientName ?? state.manifest.caseId} (#${state.manifest.patientId})`
+              : (state.manifest.patientName ?? state.manifest.caseId),
           ),
+          ...((state.manifest.patientSex || state.manifest.patientAge != null)
+            ? [
+                span(
+                  "tv-header__patient-demo",
+                  [state.manifest.patientSex, state.manifest.patientAge != null ? `${state.manifest.patientAge}y` : null]
+                    .filter(Boolean)
+                    .join(" · "),
+                ),
+              ]
+            : []),
         ]),
       ]),
       div("tv-header__actions", [
+        notesHeaderBtn,
         gridBtn,
         recenterBtn,
         themeToggleBtn,
@@ -1152,6 +1213,7 @@ export function createTreatmentApp(
           refreshIprPanel();
           renderIprOverlay();
         }
+        if (state.notesOpen) refreshNotesDrawer();
         return;
       }
     }
@@ -1237,6 +1299,7 @@ export function createTreatmentApp(
         refreshIprPanel();
         renderIprOverlay();
       }
+      if (state.notesOpen) refreshNotesDrawer();
       return;
     }
 
@@ -1504,6 +1567,7 @@ export function createTreatmentApp(
       refreshIprPanel();
       renderIprOverlay();
     }
+    if (state.notesOpen) refreshNotesDrawer();
   }
 
   // ── Clinical Tooth Movements Drawer ─────────────────────────────────────────
@@ -1512,6 +1576,9 @@ export function createTreatmentApp(
     state.metricsPanelOpen = !state.metricsPanelOpen;
     movementDrawerEl.hidden = !state.metricsPanelOpen;
     if (state.metricsPanelOpen) {
+      if (state.notesOpen) {
+        setNotesOpen(false);
+      }
       refreshMovementDrawer();
     }
   }
@@ -1545,6 +1612,154 @@ export function createTreatmentApp(
     movementLowerListEl.replaceChildren(
       ...lowerItems.map(item => buildMovementRow(item.fdi, item.fullLabel, item.displacementMm)),
     );
+  }
+
+  // ── Feature 12: Doctor's Notes & Remarks Drawer ───────────────────────────
+
+  function toggleNotesDrawer(): void {
+    setNotesOpen(!state.notesOpen);
+  }
+
+  function setNotesOpen(open: boolean): void {
+    state.notesOpen = open;
+    notesDrawerEl.hidden = !open;
+    notesHeaderBtn.classList.toggle("tv-btn--active", open);
+
+    if (open) {
+      if (state.metricsPanelOpen) {
+        state.metricsPanelOpen = false;
+        movementDrawerEl.hidden = true;
+      }
+      refreshNotesDrawer();
+      const dn = state.manifest.doctorNotes;
+      const hasContent = Boolean(
+        dn &&
+          (dn.general ||
+            dn.doctorName ||
+            dn.clinicName ||
+            (Array.isArray(dn.stageRemarks) && dn.stageRemarks.length > 0)),
+      );
+      if (!hasContent) {
+        void checkFreshNotes();
+      }
+    }
+  }
+
+  function refreshNotesDrawer(): void {
+    if (!state.notesOpen) return;
+    const notes = state.manifest.doctorNotes;
+    const stages = state.manifest.treatmentStages;
+    const currentIdx = state.currentIndex;
+    const currentStageNum = stages[currentIdx]?.stageNumber ?? (currentIdx + 1);
+
+    // 1. Doctor & Clinic Meta
+    notesDrawerDoctorMetaEl.replaceChildren();
+    const clinicDisplay = notes?.clinicName || state.manifest.clinicName;
+    const demographics = [
+      state.manifest.patientSex,
+      state.manifest.patientAge != null ? `${state.manifest.patientAge} yrs` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    if (notes?.doctorName || clinicDisplay || notes?.updatedAt || state.manifest.patientId || demographics) {
+      const metaRows: HTMLElement[] = [];
+      const leftCol = div("tv-notes-meta-left");
+      if (notes?.doctorName) {
+        leftCol.appendChild(span("tv-notes-doctor-name", notes.doctorName));
+      }
+      if (clinicDisplay) {
+        leftCol.appendChild(span("tv-notes-clinic-name", clinicDisplay));
+      }
+      if (state.manifest.patientId) {
+        leftCol.appendChild(span("tv-notes-patient-id", `Patient ID: ${state.manifest.patientId}`));
+      }
+      if (demographics) {
+        leftCol.appendChild(span("tv-notes-demographics", `Patient: ${demographics}`));
+      }
+      metaRows.push(leftCol);
+
+      if (notes?.updatedAt) {
+        metaRows.push(span("tv-notes-date", `Updated: ${notes.updatedAt}`));
+      }
+      const card = div("tv-notes-meta-card", metaRows);
+      notesDrawerDoctorMetaEl.appendChild(card);
+    }
+
+    // 2. Wear guidelines
+    notesDrawerGuidelinesEl.replaceChildren();
+    if (notes?.wearHoursPerDay || notes?.daysPerStage) {
+      const chips: HTMLElement[] = [];
+      if (notes.wearHoursPerDay) {
+        chips.push(
+          div("tv-notes-guideline-chip", [
+            span("tv-notes-guideline-label", "Daily Wear"),
+            span("tv-notes-guideline-val", `${notes.wearHoursPerDay} hrs / day`),
+          ]),
+        );
+      }
+      if (notes.daysPerStage) {
+        chips.push(
+          div("tv-notes-guideline-chip", [
+            span("tv-notes-guideline-label", "Tray Duration"),
+            span("tv-notes-guideline-val", `${notes.daysPerStage} days / tray`),
+          ]),
+        );
+      }
+      notesDrawerGuidelinesEl.appendChild(div("tv-notes-guidelines-wrap", chips));
+    }
+
+    // 3. General Treatment Instructions
+    notesDrawerGeneralEl.replaceChildren();
+    if (notes?.general) {
+      const gCard = div("tv-notes-card", [
+        div("tv-notes-card__title", ["Treatment Instructions"]),
+        div("tv-notes-card__text", [notes.general]),
+      ]);
+      notesDrawerGeneralEl.appendChild(gCard);
+    } else if (!notes?.stageRemarks || notes.stageRemarks.length === 0) {
+      const emptyIconEl = document.createElement("div");
+      emptyIconEl.className = "tv-notes-empty__icon";
+      emptyIconEl.innerHTML = `<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>`;
+
+      const empty = div("tv-notes-empty", [
+        emptyIconEl,
+        div("tv-notes-empty__title", ["No Doctor Remarks Yet"]),
+        div("tv-notes-empty__sub", [
+          "The treating doctor has not posted specific remarks for this case.",
+        ]),
+      ]);
+      notesDrawerGeneralEl.appendChild(empty);
+    }
+
+    // 4. Stage Remarks
+    notesDrawerStageListEl.replaceChildren();
+    const remarks = notes?.stageRemarks || [];
+    if (remarks.length > 0) {
+      const sorted = [...remarks].sort((a, b) => a.stage - b.stage);
+      sorted.forEach((r) => {
+        const isCurrent = r.stage === currentStageNum;
+        const item = div(
+          `tv-notes-stage-item ${isCurrent ? "tv-notes-stage-item--current" : ""}`,
+          [
+            div("tv-notes-stage-item__badge", [`Stage ${r.stage}`]),
+            div("tv-notes-stage-item__text", [r.note]),
+          ],
+        );
+        item.title = `Click to jump to Stage ${r.stage}`;
+        item.addEventListener("click", () => {
+          const sIdx = stages.findIndex((s) => (s.stageNumber ?? -1) === r.stage);
+          if (sIdx !== -1) void navigate(sIdx);
+          else if (r.stage <= stages.length) void navigate(r.stage - 1);
+        });
+        notesDrawerStageListEl.appendChild(item);
+      });
+    } else {
+      const noStageNotes = div("tv-notes-stage-empty", [
+        "No stage-specific remarks recorded.",
+      ]);
+      notesDrawerStageListEl.appendChild(noStageNotes);
+    }
   }
 
   function buildMovementRow(
@@ -1752,8 +1967,93 @@ export function createTreatmentApp(
       refreshIprPanel();
       startIprLoop();
       renderIprOverlay();
+      if (!state.manifest.ipr || state.manifest.ipr.length === 0) {
+        void checkFreshIpr();
+      }
     } else {
       stopIprLoop();
+    }
+  }
+
+  async function checkFreshIpr(): Promise<void> {
+    const caseId = state.manifest.caseId;
+    if (!caseId) return;
+
+    try {
+      // 1. Try public storage manifest with cache buster
+      const storageUrl = `https://yrjulcwnabnhgtqebrtn.supabase.co/storage/v1/object/public/treatment-models/${caseId}/manifest.json?t=${Date.now()}`;
+      const pubRes = await fetch(storageUrl, { cache: "no-store" });
+      if (pubRes.ok) {
+        const pubManifest = await pubRes.json();
+        if (Array.isArray(pubManifest.ipr) && pubManifest.ipr.length > 0) {
+          (state.manifest as any).ipr = pubManifest.ipr;
+          refreshIprPanel();
+          renderIprOverlay();
+          return;
+        }
+      }
+
+      // 2. Try API route fallback
+      const apiRes = await fetch(`/api/cases/${caseId}/ipr?t=${Date.now()}`, { cache: "no-store" });
+      if (apiRes.ok) {
+        const data = await apiRes.json();
+        if (Array.isArray(data.ipr) && data.ipr.length > 0) {
+          (state.manifest as any).ipr = data.ipr;
+          refreshIprPanel();
+          renderIprOverlay();
+        }
+      }
+    } catch {
+      // Non-blocking background check
+    }
+  }
+
+  async function checkFreshNotes(): Promise<void> {
+    const caseId = state.manifest.caseId;
+    if (!caseId) return;
+
+    try {
+      // 1. Try public storage manifest with cache buster
+      const storageUrl = `https://yrjulcwnabnhgtqebrtn.supabase.co/storage/v1/object/public/treatment-models/${caseId}/manifest.json?t=${Date.now()}`;
+      const pubRes = await fetch(storageUrl, { cache: "no-store" });
+      if (pubRes.ok) {
+        const pubManifest = await pubRes.json();
+        const dn = pubManifest.doctorNotes;
+        if (
+          dn &&
+          (dn.general ||
+            dn.doctorName ||
+            dn.clinicName ||
+            (Array.isArray(dn.stageRemarks) && dn.stageRemarks.length > 0))
+        ) {
+          (state.manifest as any).doctorNotes = dn;
+          if (state.notesOpen) refreshNotesDrawer();
+          syncUI();
+          return;
+        }
+      }
+
+      // 2. Try API route fallback (queries Postgres cases.doctor_notes directly)
+      const apiRes = await fetch(`/api/cases/${caseId}/notes?t=${Date.now()}`, {
+        cache: "no-store",
+      });
+      if (apiRes.ok) {
+        const data = await apiRes.json();
+        const dn = data.doctorNotes;
+        if (
+          dn &&
+          (dn.general ||
+            dn.doctorName ||
+            dn.clinicName ||
+            (Array.isArray(dn.stageRemarks) && dn.stageRemarks.length > 0))
+        ) {
+          (state.manifest as any).doctorNotes = dn;
+          if (state.notesOpen) refreshNotesDrawer();
+          syncUI();
+        }
+      }
+    } catch {
+      // Non-blocking background check
     }
   }
 
@@ -1980,8 +2280,10 @@ export function createTreatmentApp(
     // Update patient brand in header
     const patientNameEl = root.querySelector(".tv-header__patient-name");
     if (patientNameEl) {
-      patientNameEl.textContent =
-        newManifest.patientName ?? newManifest.caseId;
+      const pName = newManifest.patientName ?? newManifest.caseId;
+      patientNameEl.textContent = newManifest.patientId
+        ? `${pName} (#${newManifest.patientId})`
+        : pName;
     }
 
     // Rebuild dots and sidebar for the new case
@@ -2050,7 +2352,23 @@ export function createTreatmentApp(
     sidebarListEl.replaceChildren();
     const count = state.manifest.treatmentStages.length;
     const pName = state.manifest.patientName ?? state.manifest.caseId;
-    sidebarPatientNameEl.textContent = pName;
+    sidebarPatientNameEl.textContent = state.manifest.patientId
+      ? `${pName} (#${state.manifest.patientId})`
+      : pName;
+
+    const demographics = [
+      state.manifest.patientSex,
+      state.manifest.patientAge != null ? `${state.manifest.patientAge} yrs` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    if (demographics) {
+      sidebarPatientDemographicsEl.textContent = demographics;
+      sidebarPatientDemographicsEl.hidden = false;
+    } else {
+      sidebarPatientDemographicsEl.hidden = true;
+    }
+
     sidebarStageCountEl.textContent = `${count} ${count === 1 ? "Stage" : "Stages"}`;
 
     state.manifest.treatmentStages.forEach((stg, idx) => {
@@ -2134,6 +2452,13 @@ export function createTreatmentApp(
     iprBtn.classList.toggle("tv-dock-tool-btn--active", state.iprActive);
     iprBtn.classList.toggle("tv-ba-btn--active", state.iprActive);
     iprBtn.setAttribute("aria-pressed", String(state.iprActive));
+    notesHeaderBtn.classList.toggle("tv-btn--active", state.notesOpen);
+
+    const hasNotes = Boolean(
+      state.manifest.doctorNotes &&
+      (state.manifest.doctorNotes.general || (state.manifest.doctorNotes.stageRemarks && state.manifest.doctorNotes.stageRemarks.length > 0))
+    );
+    notesHeaderBtn.classList.toggle("tv-btn--has-notes", hasNotes);
 
     updateScrubberProgress();
     syncSidebarSelection();
@@ -2366,6 +2691,23 @@ export function createTreatmentApp(
     void navigate(0);
   }
 
+  const onStorageSync = (e: StorageEvent): void => {
+    if (e.key === "dental_viewer_sync" && e.newValue) {
+      try {
+        const syncData = JSON.parse(e.newValue);
+        if (syncData.caseId === state.manifest.caseId) {
+          if (syncData.type === "ipr" || !syncData.type) {
+            void checkFreshIpr();
+          }
+          if (syncData.type === "notes" || !syncData.type) {
+            void checkFreshNotes();
+          }
+        }
+      } catch {}
+    }
+  };
+  window.addEventListener("storage", onStorageSync);
+
   return {
     dispose: () => {
       stopPlay();
@@ -2375,6 +2717,7 @@ export function createTreatmentApp(
         transitionAnimId = null;
       }
       window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("storage", onStorageSync);
       viewport.dispose();
       root.replaceChildren();
       const existingModal = document.querySelector(".tv-modal-backdrop");
@@ -2394,6 +2737,8 @@ export function createTreatmentApp(
     setAttachmentsVisible,
     toggleIpr,
     setIprActive,
+    toggleNotes: toggleNotesDrawer,
+    setNotesOpen,
     getState: () => ({ ...state }),
   };
 }

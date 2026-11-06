@@ -53,11 +53,41 @@ export interface IprEntry {
   readonly note?: string;
 }
 
+export interface StageRemark {
+  readonly stage: number;
+  readonly note: string;
+}
+
+export interface DoctorNotes {
+  /** General treatment instructions, care advice, wear guidelines */
+  readonly general?: string;
+  /** Specific stage-by-stage instructions or milestone remarks */
+  readonly stageRemarks?: readonly StageRemark[];
+  /** Name of the treating doctor / orthodontist */
+  readonly doctorName?: string;
+  /** Name of the clinic / dental practice */
+  readonly clinicName?: string;
+  /** Recommended aligner wear time in hours/day (typically 20-22) */
+  readonly wearHoursPerDay?: number;
+  /** Recommended days per aligner stage (typically 7-14) */
+  readonly daysPerStage?: number;
+  /** ISO date or formatted date when remarks were last updated */
+  readonly updatedAt?: string;
+}
+
 export interface CaseManifest {
   /** Unique case or patient identifier. */
   readonly caseId: string;
   /** Patient name if available. */
   readonly patientName?: string;
+  /** Unique patient chart or record identifier if assigned. */
+  readonly patientId?: string;
+  /** Patient age in years if recorded. */
+  readonly patientAge?: number;
+  /** Patient biological sex / gender if recorded ("Female" | "Male" | "Other"). */
+  readonly patientSex?: string;
+  /** Clinic or dental practice name if assigned. */
+  readonly clinicName?: string;
   /** Treatment arch type: "both" (default), "upper", or "lower". */
   readonly archType?: "both" | "upper" | "lower";
   /** Whether upper arch assets exist in this case. */
@@ -66,6 +96,8 @@ export interface CaseManifest {
   readonly hasLower?: boolean;
   /** Planned Interproximal Reduction (IPR) prescriptions */
   readonly ipr?: readonly IprEntry[];
+  /** Treating doctor notes, treatment instructions, and stage remarks */
+  readonly doctorNotes?: DoctorNotes;
   /**
    * Patient-visible treatment stages in progression sequence.
    * Template stages MUST NOT be included here.
@@ -129,6 +161,10 @@ export function validateCaseManifest(raw: unknown): ManifestValidationResult {
 
   const patientName =
     typeof obj.patientName === "string" ? obj.patientName : undefined;
+  const patientId =
+    typeof obj.patientId === "string" && obj.patientId.trim() ? obj.patientId.trim() : undefined;
+  const clinicName =
+    typeof obj.clinicName === "string" && obj.clinicName.trim() ? obj.clinicName.trim() : undefined;
 
   const archType =
     typeof obj.archType === "string" && ["both", "upper", "lower"].includes(obj.archType)
@@ -203,6 +239,8 @@ export function validateCaseManifest(raw: unknown): ManifestValidationResult {
     manifest: {
       caseId,
       patientName,
+      patientId,
+      clinicName,
       archType: archType || (hasUpper && hasLower ? "both" : hasUpper ? "upper" : "lower"),
       hasUpper,
       hasLower,
