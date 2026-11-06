@@ -10,7 +10,7 @@ import {
   HemisphereLight,
   Mesh,
   MeshBasicMaterial,
-  MeshStandardMaterial,
+  MeshPhysicalMaterial,
   PerspectiveCamera,
   PMREMGenerator,
   Scene,
@@ -318,14 +318,48 @@ class ThreeViewport implements Viewport {
     const isAnatomical = spec.colour === "anatomical";
     const baseColor = isAnatomical ? "#ffffff" : spec.colour;
 
-    const material = new MeshStandardMaterial({
+    const material = new MeshPhysicalMaterial({
       color: new Color(baseColor),
-      roughness: 0.32,   // realistic natural enamel satin sheen (prevents harsh specular blowout, reveals occlusal anatomy)
-      metalness: 0.02,
-      envMapIntensity: 0.25, // subtle realistic environment reflection without diffuse washing
+      roughness: 0.32,
+      metalness: 0.01,
+      clearcoat: 0.65,
+      clearcoatRoughness: 0.14,
+      ior: 1.55,
+      envMapIntensity: 0.30,
       vertexColors: isAnatomical && Boolean(geometry.getAttribute("color")),
       side: DoubleSide,
     });
+
+    if (isAnatomical) {
+      material.onBeforeCompile = (shader) => {
+        shader.fragmentShader = shader.fragmentShader.replace(
+          "#include <lights_physical_fragment>",
+          `#include <lights_physical_fragment>
+          #if defined( USE_COLOR )
+            bool isGum = (vColor.r > 0.35 && (vColor.r - vColor.g) > 0.10);
+            if (isGum) {
+              // Moist biological oral mucosa (wet saliva clearcoat)
+              material.roughness = 0.32;
+              #ifdef USE_CLEARCOAT
+                material.clearcoat = 0.88;
+                material.clearcoatRoughness = 0.08;
+              #endif
+            } else {
+              // Glazed dental ceramic enamel
+              material.roughness = 0.28;
+              #ifdef USE_CLEARCOAT
+                material.clearcoat = 0.35;
+                material.clearcoatRoughness = 0.18;
+              #endif
+              // Occlusal fissure & groove depth enhancement based on normal derivative curvature
+              float crevice = clamp((length(dxy) - 0.04) * 1.6, 0.0, 0.38);
+              material.diffuseColor *= (1.0 - crevice);
+            }
+          #endif
+          `
+        );
+      };
+    }
 
     // White on its own, because the ramp that arrives in the vertex colours is the reading.
     const measuredMaterial = new MeshBasicMaterial({
@@ -698,27 +732,27 @@ class ThreeViewport implements Viewport {
 
   private addLights(): void {
     // Balanced studio lighting calibrated for clinical CAD models:
-    // Prevents color bleaching/blowout so healthy gingiva and natural enamel maintain rich depth and contrast.
-    this.scene.add(new HemisphereLight(0xffffff, 0x1e2638, 0.25));
+    // Retains warm ivory/off-white enamel and deep fissure contrast without diffuse bleaching/blowout
+    this.scene.add(new HemisphereLight(0xfff8ee, 0x141824, 0.22));
 
-    // Primary key light: crisp form, depth, and specular contour (subtle warm tone to avoid stark white blowout)
-    const key = new DirectionalLight(0xfffbf5, 0.90);
-    key.position.set(45, -75, 90);
+    // Primary key light: crisp form, depth, and specular contour (calibrated to preserve ivory enamel tone)
+    const key = new DirectionalLight(0xfffbf2, 0.65);
+    key.position.set(35, -65, 80);
     this.scene.add(key);
 
     // Daylight fill light: lifts contralateral shadows while preserving occlusal grooves
-    const fill = new DirectionalLight(0xf0f5ff, 0.35);
-    fill.position.set(-65, -55, 40);
+    const fill = new DirectionalLight(0xeef4ff, 0.25);
+    fill.position.set(-55, -45, 35);
     this.scene.add(fill);
 
-    // Incisal rim light: highlights incisal crowns and silhouettes against dark/light canvas
-    const rim = new DirectionalLight(0xffffff, 0.52);
-    rim.position.set(0, 95, 65);
+    // Incisal rim light: highlights incisal crowns and silhouettes against dark canvas
+    const rim = new DirectionalLight(0xffffff, 0.28);
+    rim.position.set(0, 75, 55);
     this.scene.add(rim);
 
     // Subtle upward bounce: prevents lingual undercuts from turning pitch black
-    const bounce = new DirectionalLight(0xf8fafc, 0.15);
-    bounce.position.set(0, -50, -60);
+    const bounce = new DirectionalLight(0xf5f3ee, 0.10);
+    bounce.position.set(0, -40, -50);
     this.scene.add(bounce);
   }
 

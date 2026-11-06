@@ -3,6 +3,7 @@ import {
   type BufferGeometry,
   type Mesh,
   type MeshBasicMaterial,
+  type MeshPhysicalMaterial,
   type MeshStandardMaterial,
 } from "three";
 import type { LayerSurface } from "../domain/view-settings";
@@ -17,14 +18,17 @@ export interface NamedLayer {
 }
 
 /** Either the layer's own colour, lit like the rest of the scene, or the map itself, unlit. */
-export type SurfaceMaterial = MeshStandardMaterial | MeshBasicMaterial;
+export type SurfaceMaterial =
+  | MeshPhysicalMaterial
+  | MeshStandardMaterial
+  | MeshBasicMaterial;
 
 /** The part of a layer a surface is shown on: its geometry, its two materials, and what it wants. */
 export interface SurfaceLayer extends NamedLayer {
   readonly geometry: BufferGeometry;
   readonly mesh: Mesh<BufferGeometry, SurfaceMaterial>;
   /** The layer's own colour, lit and shaded like the rest of the scene. */
-  readonly material: MeshStandardMaterial;
+  readonly material: MeshPhysicalMaterial | MeshStandardMaterial;
   /**
    * The measured map, unlit.
    *

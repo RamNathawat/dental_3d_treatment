@@ -269,38 +269,143 @@ function calibrateGeometryColors(geom: BufferGeometry): void {
   geom.computeBoundingBox();
   geom.computeBoundingSphere();
 
-  // Calibrate vertex colors for natural ClinCheck / 3Shape aesthetics:
-  // Upgrades previously uploaded cases with pale/chalky colors to clinical enamel & gingiva tones
   const colorAttr = geom.getAttribute("color");
-  if (colorAttr) {
-    const arr = colorAttr.array as Float32Array;
-    for (let i = 0; i < arr.length; i += 3) {
-      const r = arr[i]!;
-      const g = arr[i + 1]!;
-      const b = arr[i + 2]!;
-      // 1. Remove green CAD labels (e.g., "NIYA 1", "NIYA 2") from the models:
-      // Paint over green CAD label markings with surrounding natural gingiva color so the model is clean and seamless
-      if (g > 0.35 && g > r * 1.25) {
-        arr[i] = 0.46;
-        arr[i + 1] = 0.085;
-        arr[i + 2] = 0.105;
-        continue;
-      }
-      // 2. Gum / Gingiva: rich healthy vascular coral-rose (#CC5C6A in linear: 0.46, 0.085, 0.105)
-      if (r > 0.35 && (r - g) > 0.08) {
-        arr[i] = 0.46;
-        arr[i + 1] = 0.085;
-        arr[i + 2] = 0.105;
-      } else if (r > 0.50 && g > 0.45 && b > 0.40) {
-        // 3. Tooth Enamel: warm natural ivory / beige tooth shade (Vita A1/A2 aesthetic)
-        // Eliminates harsh chalky pearl-white blowout and enhances occlusal fissure details
-        arr[i] = 0.82;
-        arr[i + 1] = 0.76;
-        arr[i + 2] = 0.68;
-      }
+  if (!colorAttr) return;
+
+  const arr = colorAttr.array as Float32Array;
+  const pos = geom.getAttribute("position");
+  const norm = geom.getAttribute("normal");
+  const count = colorAttr.count;
+
+  // 1. Gather arch statistics to classify Upper vs Lower and bounds
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  let toothSumY = 0, toothCount = 0;
+  let gumSumY = 0, gumCount = 0;
+
+  for (let i = 0; i < count; i++) {
+    const cIdx = i * 3;
+    const r = arr[cIdx]!;
+    const g = arr[cIdx + 1]!;
+    const b = arr[cIdx + 2]!;
+    const y = pos ? pos.getY(i) : 0;
+
+    const isGum = (r > 0.35 && (r - g) > 0.08) || (r > 0.40 && g < 0.35 && b < 0.35);
+    if (isGum) {
+      gumSumY += y;
+      gumCount++;
+    } else {
+      toothSumY += y;
+      toothCount++;
     }
-    colorAttr.needsUpdate = true;
+
+    if (pos) {
+      const x = pos.getX(i), z = pos.getZ(i);
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
   }
+
+  // In Lower jaw: teeth sit above gums (toothMeanY > gumMeanY).
+  // In Upper jaw: teeth hang below gums (toothMeanY < gumMeanY).
+  const isUpper = gumCount > 0 && toothCount > 0 ? (toothSumY / toothCount) < (gumSumY / gumCount) : false;
+
+  const midX = (minX + maxX) / 2;
+  const focalZ = minZ - 12.0;
+  const toothExtentY = Math.max(1, maxY - minY);
+
+  // Calibrated Clinical Palette: Natural warm ivory / off-white enamel (matches Veer reference)
+  // Prevents harsh chalky blowout and reveals crisp occlusal grooves and anatomical contours
+  const tipR = 0.82, tipG = 0.79, tipB = 0.72; // Incisal edge & cusp tips (warm ivory highlight)
+  const midR = 0.76, midG = 0.71, midB = 0.63; // Mid-crown body (natural warm ivory enamel)
+  const nckR = 0.68, nckG = 0.61, nckB = 0.50; // Cervical neck warmth (natural dentin depth)
+  const shdR = 0.46, shdG = 0.40, shdB = 0.32; // Occlusal fissure & interproximal shadow depth
+
+  const gumR = 0.50, gumG = 0.09, gumB = 0.12; // Rich vascular coral-rose
+
+  for (let i = 0; i < count; i++) {
+    const cIdx = i * 3;
+    const r = arr[cIdx]!;
+    const g = arr[cIdx + 1]!;
+    const b = arr[cIdx + 2]!;
+
+    // 1. Remove green CAD labels (e.g., "NIYA 1", "NIYA 2") from models:
+    if (g > 0.30 && g > r * 1.20) {
+      arr[cIdx] = gumR;
+      arr[cIdx + 1] = gumG;
+      arr[cIdx + 2] = gumB;
+      continue;
+    }
+
+    // 2. Gum / Gingiva: rich healthy vascular coral-rose
+    const isGum = (r > 0.35 && (r - g) > 0.08) || (r > 0.40 && g < 0.35 && b < 0.35);
+    if (isGum) {
+      arr[cIdx] = gumR;
+      arr[cIdx + 1] = gumG;
+      arr[cIdx + 2] = gumB;
+      continue;
+    }
+
+    // 3. Tooth Enamel: warm ivory / off-white with realistic anatomical fissure & contact depth
+    if (pos && norm) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const nx = norm.getX(i), ny = norm.getY(i), nz = norm.getZ(i);
+
+      const dx = x - midX;
+      const dz = z - focalZ;
+      const dist2D = Math.sqrt(dx * dx + dz * dz) || 1;
+      const ux = dx / dist2D, uz = dz / dist2D;
+      const nTangent = nx * (-uz) + nz * ux;
+      const absTangent = Math.abs(nTangent);
+      const absAngle = Math.abs(Math.atan2(dx, dz));
+
+      // Normalized crown height: 0 at cusp tip, 1 at cervical margin
+      const h = isUpper
+        ? Math.max(0, Math.min(1, (y - minY) / (toothExtentY * 0.55)))
+        : Math.max(0, Math.min(1, (maxY - y) / (toothExtentY * 0.55)));
+
+      // Base gradient from cusp tip down to cervical neck
+      let tr: number, tg: number, tb: number;
+      if (h < 0.45) {
+        const t = h / 0.45;
+        tr = tipR + (midR - tipR) * t;
+        tg = tipG + (midG - tipG) * t;
+        tb = tipB + (midB - tipB) * t;
+      } else {
+        const t = (h - 0.45) / 0.55;
+        tr = midR + (nckR - midR) * t;
+        tg = midG + (nckG - midG) * t;
+        tb = midB + (nckB - midB) * t;
+      }
+
+      // Interproximal contact shadow between teeth
+      let crevice = Math.max(0, Math.min(1, (absTangent - 0.38) * 2.2));
+
+      // Occlusal fissures, central grooves, and fossae on premolars and molars
+      if (absAngle > 0.28 && h < 0.45) {
+        const occlusalTilt = 1.0 - Math.abs(ny);
+        if (occlusalTilt > 0.20) {
+          const fissure = Math.max(0, Math.min(1, (occlusalTilt - 0.20) * 1.8));
+          crevice = Math.max(crevice, fissure * 0.85);
+        }
+      }
+
+      if (crevice > 0) {
+        tr = tr + (shdR - tr) * (crevice * 0.65);
+        tg = tg + (shdG - tg) * (crevice * 0.65);
+        tb = tb + (shdB - tb) * (crevice * 0.65);
+      }
+
+      arr[cIdx] = tr;
+      arr[cIdx + 1] = tg;
+      arr[cIdx + 2] = tb;
+    } else {
+      arr[cIdx] = midR;
+      arr[cIdx + 1] = midG;
+      arr[cIdx + 2] = midB;
+    }
+  }
+  colorAttr.needsUpdate = true;
 }
 
 export interface ExtractedGlbGeometries {

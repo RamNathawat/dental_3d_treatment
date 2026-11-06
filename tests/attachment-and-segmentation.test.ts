@@ -174,7 +174,7 @@ describe("computeAnatomicalColors", () => {
         }
       } else if (y <= -6.0) {
         // Gingiva: natural vascular coral-rose
-        if (r > 0.6 && g < 0.40 && b < 0.45) {
+        if (r > 0.48 && g < 0.40 && b < 0.45) {
           foundCoralGum = true;
         }
       }
@@ -206,11 +206,11 @@ describe("computeAnatomicalColors", () => {
         const r = color.getX(i);
         const g = color.getY(i);
 
-        // Gingiva has lower green and distinctive coral-rose hue (g < 0.42, r > 0.60)
-        // Tooth enamel has high green and ivory warmth (g > 0.70)
-        if (g < 0.42 && r > 0.60) {
+        // Gingiva has lower green and distinctive coral-rose hue (g < 0.42, r > 0.48)
+        // Tooth enamel has warm ivory tone (g > 0.48, r > 0.55)
+        if (g < 0.42 && r > 0.48) {
           gumCount++;
-        } else if (g > 0.70) {
+        } else if (g > 0.48 && r > 0.55) {
           toothCount++;
         }
       }

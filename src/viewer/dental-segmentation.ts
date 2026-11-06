@@ -58,17 +58,17 @@ export function computeAnatomicalColors(
   }
   const norm = geometry.getAttribute("normal");
 
-  // ── Realistic Clinical Palette ─────────────────────────────────────────────
-  // Tooth enamel: polychromatic ceramic depth (natural warm ivory / beige tooth enamel).
-  const tipR = 0.88, tipG = 0.84, tipB = 0.76; // Incisal edge & cusp tips (warm ivory highlight)
-  const midR = 0.83, midG = 0.77, midB = 0.68; // Mid-crown body (natural warm ivory/beige enamel)
-  const nckR = 0.78, nckG = 0.70, nckB = 0.58; // Cervical neck warmth (natural dentin depth)
-  const shdR = 0.73, shdG = 0.65, shdB = 0.53; // Interproximal shadow / fissure depth
+  // ── Realistic Clinical Palette (Matches Veer / 3Shape Reference) ───────────
+  // Tooth enamel: warm natural ivory / off-white ceramic depth.
+  const tipR = 0.82, tipG = 0.79, tipB = 0.72; // Incisal edge & cusp tips (warm ivory highlight)
+  const midR = 0.76, midG = 0.71, midB = 0.63; // Mid-crown body (natural warm ivory/beige enamel)
+  const nckR = 0.68, nckG = 0.61, nckB = 0.50; // Cervical neck warmth (natural dentin depth)
+  const shdR = 0.46, shdG = 0.40, shdB = 0.32; // Interproximal shadow / fissure depth
 
-  // Gingival tissue: natural vascular coral-rose (matches reference ClinCheck / 3Shape standard).
-  const gumMarginR = 0.76, gumMarginG = 0.22, gumMarginB = 0.30; // Free gingival margin
-  const gumAttachR = 0.70, gumAttachG = 0.18, gumAttachB = 0.26; // Attached gingiva
-  const gumDeepR   = 0.62, gumDeepG   = 0.14, gumDeepB   = 0.20; // Deep alveolar mucosa
+  // Gingival tissue: natural vascular coral-rose.
+  const gumMarginR = 0.68, gumMarginG = 0.18, gumMarginB = 0.24; // Free gingival margin
+  const gumAttachR = 0.60, gumAttachG = 0.14, gumAttachB = 0.20; // Attached gingiva
+  const gumDeepR   = 0.50, gumDeepG   = 0.10, gumDeepB   = 0.14; // Deep alveolar mucosa
 
   // ── Step 1: Compute Arch Extents and Center in (X, Z) ──────────────────────
   let minX = Infinity, maxX = -Infinity;
@@ -207,12 +207,22 @@ export function computeAnatomicalColors(
         g = midG + (nckG - midG) * t;
         b = midB + (nckB - midB) * t;
       }
-      // Subtle interproximal contact shadow
-      if (absTangent > 0.55) {
-        const shadowT = Math.min(0.35, (absTangent - 0.55) * 0.8);
+      // Interproximal contact shadow
+      if (absTangent > 0.40) {
+        const shadowT = Math.min(0.60, (absTangent - 0.40) * 1.5);
         r = r + (shdR - r) * shadowT;
         g = g + (shdG - g) * shadowT;
         b = b + (shdB - b) * shadowT;
+      }
+      // Occlusal fissures & fossae on molars and premolars
+      if (absAngle > 0.28 && crownT < 0.40) {
+        const occlusalTilt = 1.0 - Math.abs(ny);
+        if (occlusalTilt > 0.20) {
+          const fissureT = Math.min(0.55, (occlusalTilt - 0.20) * 1.6);
+          r = r + (shdR - r) * fissureT;
+          g = g + (shdG - g) * fissureT;
+          b = b + (shdB - b) * fissureT;
+        }
       }
       colors[i * 3] = r;
       colors[i * 3 + 1] = g;

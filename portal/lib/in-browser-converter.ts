@@ -249,15 +249,16 @@ export function computeAnatomicalColors(
   }
   const norm = geometry.getAttribute("normal");
 
-  // Calibrated Clinical Palette
-  const tipR = 0.95, tipG = 0.93, tipB = 0.91; // Incisal edge
-  const midR = 0.91, midG = 0.88, midB = 0.82; // Mid-crown body
-  const nckR = 0.86, nckG = 0.80, nckB = 0.70; // Cervical neck
-  const shdR = 0.82, shdG = 0.75, shdB = 0.65; // Interproximal shadow
+  // Natural Ivory / Off-White Enamel Palette (matches Veer / 3Shape clinical reference)
+  // Soft, warm ceramic off-white with distinct fissure and interproximal shadow depth
+  const tipR = 0.82, tipG = 0.79, tipB = 0.72; // Incisal edge & cusp tips (warm ivory highlight)
+  const midR = 0.76, midG = 0.71, midB = 0.63; // Mid-crown body (natural warm ivory enamel)
+  const nckR = 0.68, nckG = 0.61, nckB = 0.50; // Cervical neck warmth (natural dentin depth)
+  const shdR = 0.46, shdG = 0.40, shdB = 0.32; // Interproximal shadow & occlusal fissure depth
 
-  const gumMarginR = 0.76, gumMarginG = 0.22, gumMarginB = 0.30;
-  const gumAttachR = 0.70, gumAttachG = 0.18, gumAttachB = 0.26;
-  const gumDeepR   = 0.62, gumDeepG   = 0.14, gumDeepB   = 0.20;
+  const gumMarginR = 0.68, gumMarginG = 0.18, gumMarginB = 0.24;
+  const gumAttachR = 0.60, gumAttachG = 0.14, gumAttachB = 0.20;
+  const gumDeepR   = 0.50, gumDeepG   = 0.10, gumDeepB   = 0.14;
 
   let minX = Infinity, maxX = -Infinity;
   let minZ = Infinity, maxZ = -Infinity;
@@ -374,11 +375,21 @@ export function computeAnatomicalColors(
         g = midG + (nckG - midG) * t;
         b = midB + (nckB - midB) * t;
       }
-      if (absTangent > 0.55) {
-        const shadowT = Math.min(0.35, (absTangent - 0.55) * 0.8);
+      if (absTangent > 0.40) {
+        const shadowT = Math.min(0.60, (absTangent - 0.40) * 1.5);
         r = r + (shdR - r) * shadowT;
         g = g + (shdG - g) * shadowT;
         b = b + (shdB - b) * shadowT;
+      }
+      // Occlusal fissures & fossae on molars and premolars
+      if (absAngle > 0.28 && crownT < 0.40) {
+        const occlusalTilt = 1.0 - Math.abs(ny);
+        if (occlusalTilt > 0.20) {
+          const fissureT = Math.min(0.55, (occlusalTilt - 0.20) * 1.6);
+          r = r + (shdR - r) * fissureT;
+          g = g + (shdG - g) * fissureT;
+          b = b + (shdB - b) * fissureT;
+        }
       }
       colors[i * 3] = r;
       colors[i * 3 + 1] = g;
