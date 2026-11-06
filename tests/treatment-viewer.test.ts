@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BufferAttribute, BufferGeometry } from "three";
 import {
+  DEFAULT_CASE_MANIFEST,
   STAGE_COUNT,
   TREATMENT_STAGES,
   stageAt,
@@ -11,6 +12,9 @@ import {
   clearStageGeometryCache,
   loadStageModels,
   stlLoader,
+  isStageGeomCached,
+  prioritizeStage,
+  prewarmAllStageGeometries,
 } from "../src/treatment-viewer/model-loader";
 import {
   createTreatmentApp,
@@ -851,6 +855,49 @@ describe("Treatment Viewer Application", () => {
       expect(app.getState().notesOpen).toBe(false);
       expect(drawer.hidden).toBe(true);
 
+      app.dispose();
+    });
+
+    it("concurrently prewarms all stage geometries into cache for zero-latency playback", async () => {
+      const manifestStages = DEFAULT_CASE_MANIFEST.treatmentStages;
+      prioritizeStage("stage-02");
+      prewarmAllStageGeometries(manifestStages);
+
+      await vi.waitFor(
+        () => {
+          expect(isStageGeomCached("stage-01")).toBe(true);
+          expect(isStageGeomCached("stage-02")).toBe(true);
+        },
+        { timeout: 3000 },
+      );
+    });
+
+    it("plays back smoothly without rendering loading indicators on scrubber dots or cards", async () => {
+      const app = createTreatmentApp(root, {
+        createViewport: () => fakeViewport,
+        autoLoad: true,
+        autoplayIntervalMs: 50,
+      });
+
+      await vi.waitFor(() => {
+        expect(app.getState().currentIndex).toBe(0);
+      });
+
+      // Start autoplay
+      app.togglePlay();
+      expect(app.getState().isPlaying).toBe(true);
+
+      // Verify that while playing, no scrubber dots or stage cards carry the loading class
+      const loadingDot = root.querySelector(".tv-scrubber-dot--loading");
+      const loadingCard = root.querySelector(".tv-stage-card--loading");
+      expect(loadingDot).toBeNull();
+      expect(loadingCard).toBeNull();
+
+      // Verify stage label does not show "Loading 3D model…"
+      const label = root.querySelector(".tv-stage-label");
+      expect(label?.textContent).not.toContain("Loading 3D model…");
+
+      app.togglePlay();
       app.dispose();
     });
   });

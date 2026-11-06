@@ -34,6 +34,9 @@ import {
   loadStageGeometries,
   prewarmAllStageGeometries,
   getCachedStageGeometries,
+  isStageGeomCached,
+  prioritizeStage,
+  prioritizeStages,
   setModelProgressCallback,
 } from "./model-loader";
 import { applyBiteContacts } from "./bite-contacts";
@@ -1060,8 +1063,19 @@ export function createTreatmentApp(
 
   function startPlay(): void {
     if (state.isPlaying) return;
-    const count = state.manifest.treatmentStages.length;
+    const stages = state.manifest.treatmentStages;
+    const count = stages.length;
     if (count <= 1) return;
+
+    // Prioritize upcoming stages immediately in background worker pool
+    const cur = state.currentIndex >= 0 ? state.currentIndex : 0;
+    const priorityIds: string[] = [];
+    for (let i = 1; i <= Math.min(12, count); i++) {
+      const idx = (cur + i) % count;
+      const s = stages[idx];
+      if (s) priorityIds.push(s.id);
+    }
+    prioritizeStages(priorityIds);
 
     state.isPlaying = true;
     playBtn.textContent = "⏸ Pause";
@@ -1104,21 +1118,33 @@ export function createTreatmentApp(
     state.activeTemplateStage = null;
     templateNoticeEl.hidden = true;
 
-    pendingStageIndex = clamped;
-    syncUI();
+    // Prioritize adjacent stages in background prewarmer immediately
+    prioritizeStage(stage.id);
+    const next1 = stages[clamped + 1];
+    if (next1) prioritizeStage(next1.id);
+    const next2 = stages[clamped + 2];
+    if (next2) prioritizeStage(next2.id);
+
+    const isCached = isStageGeomCached(stage.id);
+
+    // Only mark pending in UI if not yet cached AND user is manually navigating (never during smooth playback)
+    if (!isCached && !state.isPlaying) {
+      pendingStageIndex = clamped;
+      isStageLoading = true;
+      syncUI();
+    }
 
     try {
       await loadAndDisplayStage(stage, clamped);
     } finally {
-      pendingStageIndex = null;
-      syncUI();
+      if (pendingStageIndex !== null) {
+        pendingStageIndex = null;
+        isStageLoading = false;
+        syncUI();
+      }
     }
 
-    // Prefetch adjacent stages into the buffer cache so subsequent navigations are instant.
-    const prev = stages[clamped - 1];
-    const next1 = stages[clamped + 1];
-    const next2 = stages[clamped + 2];
-    if (prev) prefetchStageModels(prev.upper, prev.lower);
+    // Fire prefetch for subsequent stages
     if (next1) prefetchStageModels(next1.upper, next1.lower);
     if (next2) prefetchStageModels(next2.upper, next2.lower);
   }
@@ -1141,7 +1167,6 @@ export function createTreatmentApp(
       state.abortController?.abort();
       state.abortController = new AbortController();
     }
-    const controller = state.abortController ?? new AbortController();
 
     const isFirstSuccessfulLoad = state.currentIndex === -1;
     const hasRequiredArchLayers = isSingleArchUpper
@@ -1223,17 +1248,14 @@ export function createTreatmentApp(
     if (isFirstSuccessfulLoad) {
       state.loading = true;
       syncUI();
+    } else if (!state.isPlaying) {
+      isStageLoading = true;
+      syncUI();
     }
-    isStageLoading = true;
-    syncUI();
     state.error = null;
 
-    // Try to load pre-parsed geometries (with normals & colors already computed)
-    const geomOutcome = await loadStageGeometries(stage, controller.signal);
-    if (controller.signal.aborted) {
-      isStageLoading = false;
-      return;
-    }
+    // Load pre-parsed geometries (shared with background prewarmer)
+    const geomOutcome = await loadStageGeometries(stage);
     isStageLoading = false;
 
     if (
@@ -1332,56 +1354,68 @@ export function createTreatmentApp(
         cancelAnimationFrame(transitionAnimId);
         transitionAnimId = null;
       }
-      viewport.clearLayers();
-      layerCounter++;
-      activeUpperId = isFirstSuccessfulLoad
-        ? UPPER_ARCH_ID
-        : `${UPPER_ARCH_ID}-${layerCounter}`;
-      activeLowerId = isFirstSuccessfulLoad
-        ? LOWER_ARCH_ID
-        : `${LOWER_ARCH_ID}-${layerCounter}`;
-      prevUpperId = null;
-      prevLowerId = null;
 
       const hasUpperModel = Boolean(upperGeometry || upperStl);
       const hasLowerModel = Boolean(lowerGeometry || lowerStl);
 
-      if (hasUpperModel) {
-        const upperOutcome = viewport.addLayer({
-          id: activeUpperId,
-          label: `${stage.label} - Upper`,
-          colour: UPPER_ARCH_COLOUR,
-          stl: upperStl || undefined,
-          geometry: upperGeometry || undefined,
-        });
+      if (!isFirstSuccessfulLoad && viewport.setLayerGeometry && hasRequiredArchLayers) {
+        if (upperGeometry && activeUpperId) {
+          viewport.setLayerGeometry(activeUpperId, upperGeometry);
+          viewport.setLayerOpacity(activeUpperId, 1);
+        }
+        if (lowerGeometry && activeLowerId) {
+          viewport.setLayerGeometry(activeLowerId, lowerGeometry);
+          viewport.setLayerOpacity(activeLowerId, 1);
+        }
+      } else {
+        viewport.clearLayers();
+        layerCounter++;
+        activeUpperId = isFirstSuccessfulLoad
+          ? UPPER_ARCH_ID
+          : `${UPPER_ARCH_ID}-${layerCounter}`;
+        activeLowerId = isFirstSuccessfulLoad
+          ? LOWER_ARCH_ID
+          : `${LOWER_ARCH_ID}-${layerCounter}`;
+        prevUpperId = null;
+        prevLowerId = null;
 
-        if (!upperOutcome.ok) {
-          state.error = `Upper jaw: ${upperOutcome.reason}`;
-          syncUI();
-          return;
+        if (hasUpperModel) {
+          const upperOutcome = viewport.addLayer({
+            id: activeUpperId,
+            label: `${stage.label} - Upper`,
+            colour: UPPER_ARCH_COLOUR,
+            stl: upperStl || undefined,
+            geometry: upperGeometry || undefined,
+          });
+
+          if (!upperOutcome.ok) {
+            state.error = `Upper jaw: ${upperOutcome.reason}`;
+            syncUI();
+            return;
+          }
+
+          viewport.setLayerVisible(activeUpperId, state.upperVisible);
+          viewport.setLayerOpacity(activeUpperId, 1);
         }
 
-        viewport.setLayerVisible(activeUpperId, state.upperVisible);
-        viewport.setLayerOpacity(activeUpperId, 1);
-      }
+        if (hasLowerModel) {
+          const lowerOutcome = viewport.addLayer({
+            id: activeLowerId,
+            label: `${stage.label} - Lower`,
+            colour: LOWER_ARCH_COLOUR,
+            stl: lowerStl || undefined,
+            geometry: lowerGeometry || undefined,
+          });
 
-      if (hasLowerModel) {
-        const lowerOutcome = viewport.addLayer({
-          id: activeLowerId,
-          label: `${stage.label} - Lower`,
-          colour: LOWER_ARCH_COLOUR,
-          stl: lowerStl || undefined,
-          geometry: lowerGeometry || undefined,
-        });
+          if (!lowerOutcome.ok) {
+            state.error = `Lower jaw: ${lowerOutcome.reason}`;
+            syncUI();
+            return;
+          }
 
-        if (!lowerOutcome.ok) {
-          state.error = `Lower jaw: ${lowerOutcome.reason}`;
-          syncUI();
-          return;
+          viewport.setLayerVisible(activeLowerId, state.lowerVisible);
+          viewport.setLayerOpacity(activeLowerId, 1);
         }
-
-        viewport.setLayerVisible(activeLowerId, state.lowerVisible);
-        viewport.setLayerOpacity(activeLowerId, 1);
       }
 
       if (isFirstSuccessfulLoad) {
@@ -2336,7 +2370,7 @@ export function createTreatmentApp(
       dot.classList.toggle("tv-scrubber-dot--passed", idx < targetIdx);
       dot.classList.toggle(
         "tv-scrubber-dot--loading",
-        idx === pendingStageIndex && pendingStageIndex !== state.currentIndex,
+        !state.isPlaying && idx === pendingStageIndex && pendingStageIndex !== state.currentIndex,
       );
     });
 
@@ -2399,7 +2433,7 @@ export function createTreatmentApp(
       card.classList.toggle("tv-stage-card--active", idx === targetIdx);
       card.classList.toggle(
         "tv-stage-card--loading",
-        idx === pendingStageIndex && pendingStageIndex !== state.currentIndex,
+        !state.isPlaying && idx === pendingStageIndex && pendingStageIndex !== state.currentIndex,
       );
     });
   }
@@ -2416,7 +2450,7 @@ export function createTreatmentApp(
       stageLabel.textContent = `${state.activeTemplateStage.label} (Doctor Reference)`;
     } else if (current) {
       const actualNumber = current.stageNumber ?? targetIdx + 1;
-      const isLoading = isStageLoading && pendingStageIndex !== null && pendingStageIndex !== state.currentIndex;
+      const isLoading = !state.isPlaying && isStageLoading && pendingStageIndex !== null && pendingStageIndex !== state.currentIndex;
       stageLabel.textContent = isLoading
         ? `Stage ${actualNumber} (${targetIdx + 1} of ${count}) · Loading 3D model…`
         : `Stage ${actualNumber} (${targetIdx + 1} of ${count})`;
@@ -2689,6 +2723,7 @@ export function createTreatmentApp(
 
   if (options.autoLoad !== false && state.manifest.treatmentStages.length > 0) {
     void navigate(0);
+    prewarmAllStageGeometries(state.manifest.treatmentStages);
   }
 
   const onStorageSync = (e: StorageEvent): void => {

@@ -476,8 +476,11 @@ class ThreeViewport implements Viewport {
       if (!geometry.getAttribute("color")) {
         computeAnatomicalColors(geometry, layer.label);
       }
-      layer.material.vertexColors = Boolean(geometry.getAttribute("color"));
-      layer.material.needsUpdate = true;
+      const hasColors = Boolean(geometry.getAttribute("color"));
+      if (layer.material.vertexColors !== hasColors) {
+        layer.material.vertexColors = hasColors;
+        layer.material.needsUpdate = true;
+      }
     }
     this.refreshSeparation();
   }
