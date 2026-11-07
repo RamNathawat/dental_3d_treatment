@@ -119,6 +119,26 @@ async function init() {
               Array.isArray(storedManifest.treatmentStages) &&
               storedManifest.treatmentStages.length > 0
             ) {
+              // Sync single-arch designation from database caseRecord if present
+              const isDbUpperOnly = caseRecord.patient_name?.includes("[Upper]");
+              const isDbLowerOnly = caseRecord.patient_name?.includes("[Lower]");
+
+              if (isDbUpperOnly) {
+                storedManifest.archType = "upper";
+                storedManifest.hasUpper = true;
+                storedManifest.hasLower = false;
+                if (!storedManifest.patientName?.includes("[Upper]")) {
+                  storedManifest.patientName = `${storedManifest.patientName || ""} [Upper]`.trim();
+                }
+              } else if (isDbLowerOnly) {
+                storedManifest.archType = "lower";
+                storedManifest.hasUpper = false;
+                storedManifest.hasLower = true;
+                if (!storedManifest.patientName?.includes("[Lower]")) {
+                  storedManifest.patientName = `${storedManifest.patientName || ""} [Lower]`.trim();
+                }
+              }
+
               normalizeManifestStages(storedManifest, storageFiles);
 
               // Merge in database records if manifest is missing any recent fields
@@ -166,7 +186,7 @@ async function init() {
 
         const dynamicManifest: CaseManifest = {
           caseId: caseId,
-          patientName: cleanPatientName,
+          patientName: isUpperOnly ? `${cleanPatientName} [Upper]` : isLowerOnly ? `${cleanPatientName} [Lower]` : cleanPatientName,
           patientId: caseRecord.patient_id || undefined,
           patientAge: caseRecord.patient_age != null ? Number(caseRecord.patient_age) : undefined,
           patientSex: caseRecord.patient_sex || undefined,

@@ -466,10 +466,10 @@ export function parseStageFromPath(rawPath: string): number | null {
   const baseName = parts[parts.length - 1] || "";
   const baseLower = baseName.toLowerCase();
 
-  // If path is inside an attachment template or unaligned raw segmented directory, ignore as progressive stage
-  for (const part of parts) {
-    const pl = part.toLowerCase();
-    if (pl.includes("template") || pl.includes("segmented")) {
+  // If path is specifically inside an attachment template or unaligned raw segmented folder, ignore as progressive stage
+  for (let i = 0; i < parts.length - 1; i++) {
+    const pl = parts[i]!.toLowerCase().trim();
+    if (pl === "template" || pl === "templates" || pl === "attachment_templates" || pl === "raw_segmented") {
       return null;
     }
   }
@@ -490,34 +490,34 @@ export function parseStageFromPath(rawPath: string): number | null {
 
     // 1. Direct exact numeric folder: "01", "02", "10"
     const exactNum = dir.match(/^0*([1-9]\d?)$/);
-    if (exactNum) return parseInt(exactNum[1], 10);
+    if (exactNum && exactNum[1]) return parseInt(exactNum[1], 10);
 
     // 2. Folder with stage/step: "Stage 01", "Stage_01", "Step-02", "Stage 10"
     const stageDir = dir.match(/(?:stage|step|phase|aligner|stg)[\s_.-]*0*([1-9]\d?)(?:[^\d]|$)/i);
-    if (stageDir) return parseInt(stageDir[1], 10);
+    if (stageDir && stageDir[1]) return parseInt(stageDir[1], 10);
 
     // 3. Folder with arch and number: "Upper_01", "01-Upper", "Maxilla_02"
     const archDir =
       dir.match(/(?:upper|lower|maxill|mandib)[\s_.-]*0*([1-9]\d?)(?:[^\d]|$)/i) ||
       dir.match(/^0*([1-9]\d?)[\s_.-]*(?:upper|lower|maxill|mandib)/i);
-    if (archDir) return parseInt(archDir[1], 10);
+    if (archDir && archDir[1]) return parseInt(archDir[1], 10);
   }
 
   // If NOT a component (i.e. it is a solid stage file like "Stage 01.stl", "01.obj", "Upper_02.obj"):
   if (!isComponent) {
     // 1. "Stage 01.obj", "Step 02.stl"
     const stageFile = baseName.match(/(?:stage|step|phase|aligner|stg)[\s_.-]*0*([1-9]\d?)(?:[^\d]|$)/i);
-    if (stageFile) return parseInt(stageFile[1], 10);
+    if (stageFile && stageFile[1]) return parseInt(stageFile[1], 10);
 
     // 2. "Upper_01.obj", "01_Upper.stl"
     const archFile =
       baseName.match(/(?:upper|lower|maxill|mandib)[\s_.-]*0*([1-9]\d?)(?:[^\d]|$)/i) ||
       baseName.match(/^0*([1-9]\d?)[\s_.-]*(?:upper|lower|maxill|mandib)/i);
-    if (archFile) return parseInt(archFile[1], 10);
+    if (archFile && archFile[1]) return parseInt(archFile[1], 10);
 
     // 3. Simple "01.obj", "02.stl"
     const fileNumMatch = baseName.match(/^0*([1-9]\d?)\.(?:obj|stl|glb)$/i);
-    if (fileNumMatch) return parseInt(fileNumMatch[1], 10);
+    if (fileNumMatch && fileNumMatch[1]) return parseInt(fileNumMatch[1], 10);
   }
 
   return null;
@@ -532,6 +532,11 @@ export function parseStageFromPath(rawPath: string): number | null {
  * 5. Uploads models and manifest.json to Supabase Cloud Storage.
  * 6. Creates case database row with proper arch labeling.
  */
+export interface EditModelOptions {
+  removeExistingUpper?: boolean;
+  removeExistingLower?: boolean;
+}
+
 export async function processDentalZipInBrowser(
   input: DentalUploadFiles | File,
   patientName: string,
@@ -545,6 +550,7 @@ export async function processDentalZipInBrowser(
   patientSex?: string,
   clinicEmail?: string,
   existingCaseId?: string,
+  editOptions?: EditModelOptions,
 ): Promise<IngestResult> {
   const supabase = createClient();
   const objLoader = new OBJLoader();
@@ -564,7 +570,12 @@ export async function processDentalZipInBrowser(
       singleFile = input.singleZip ?? null;
     }
 
-    if (!upperFile && !lowerFile && !singleFile) {
+    if (
+      !upperFile &&
+      !lowerFile &&
+      !singleFile &&
+      (!isEdit || (!editOptions?.removeExistingUpper && !editOptions?.removeExistingLower))
+    ) {
       return { ok: false, error: "Please provide at least one dental archive (Upper or Lower)." };
     }
 
@@ -684,22 +695,132 @@ export async function processDentalZipInBrowser(
       }
     }
 
-    const hasUpper = upperStages.size > 0;
-    const hasLower = lowerStages.size > 0;
+    // In edit mode: preserve models from the arch that was NOT re-uploaded,
+    // unless the user explicitly chose to remove that arch in the edit menu
+    const existingUpperAssets = new Map<number, { filename: string; url: string }>();
+    const existingLowerAssets = new Map<number, { filename: string; url: string }>();
+
+    if (isEdit && existingCaseId) {
+      // 1. Fetch previous manifest (skipping any arch marked for removal)
+      try {
+        const manifestRes = await fetch(
+          `https://yrjulcwnabnhgtqebrtn.supabase.co/storage/v1/object/public/treatment-models/${existingCaseId}/manifest.json?t=${Date.now()}`,
+          { cache: "no-store" }
+        );
+        if (manifestRes.ok) {
+          const prev = await manifestRes.json();
+          if (Array.isArray(prev?.treatmentStages)) {
+            for (const st of prev.treatmentStages) {
+              const num = st.stageNumber || parseInt(st.id?.replace(/\D/g, "") || "0", 10);
+              if (num > 0) {
+                if (!editOptions?.removeExistingUpper && st.upper && !existingUpperAssets.has(num)) {
+                  existingUpperAssets.set(num, st.upper);
+                }
+                if (!editOptions?.removeExistingLower && st.lower && !existingLowerAssets.has(num)) {
+                  existingLowerAssets.set(num, st.lower);
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Could not fetch existing manifest for arch preservation:", e);
+      }
+
+      // 2. Fallback: inspect storage files ONLY if that arch is not explicitly removed
+      const needUpper = upperStages.size === 0 && existingUpperAssets.size === 0 && !editOptions?.removeExistingUpper;
+      const needLower = lowerStages.size === 0 && existingLowerAssets.size === 0 && !editOptions?.removeExistingLower;
+
+      if (needUpper || needLower) {
+        try {
+          const { data: storageList } = await supabase.storage
+            .from("treatment-models")
+            .list(existingCaseId, { limit: 200 });
+
+          if (Array.isArray(storageList)) {
+            for (const item of storageList) {
+              const name = item.name;
+              const isUpper = /upper|maxill/i.test(name);
+              const isLower = /lower|mandib/i.test(name);
+              const numMatch =
+                name.match(/(?:upper|maxill|lower|mandib)[\s_.-]*(?:jaw[\s_.-]*)?0*([1-9]\d*)/i) ||
+                name.match(/(?:jaw|model|upper|lower)[\s_.-]*0*([1-9]\d*)/i) ||
+                name.match(/0*([1-9]\d*)[\s_.-]*(?:model|glb|stl)/i);
+              if (numMatch && numMatch[1]) {
+                const n = parseInt(numMatch[1], 10);
+                const fileUrl = `https://yrjulcwnabnhgtqebrtn.supabase.co/storage/v1/object/public/treatment-models/${existingCaseId}/${encodeURIComponent(name)}`;
+                if (needUpper && isUpper && !existingUpperAssets.has(n)) {
+                  existingUpperAssets.set(n, { filename: name, url: fileUrl });
+                }
+                if (needLower && isLower && !existingLowerAssets.has(n)) {
+                  existingLowerAssets.set(n, { filename: name, url: fileUrl });
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Could not inspect storage files for arch preservation:", e);
+        }
+      }
+
+      // 3. Clean up storage files for explicitly removed arches so they don't linger
+      if (editOptions?.removeExistingUpper) {
+        try {
+          const { data: storageList } = await supabase.storage
+            .from("treatment-models")
+            .list(existingCaseId, { limit: 300 });
+          if (Array.isArray(storageList)) {
+            const filesToRemove = storageList
+              .filter((f) => /upper|maxill/i.test(f.name))
+              .map((f) => `${existingCaseId}/${f.name}`);
+            if (filesToRemove.length > 0) {
+              await supabase.storage.from("treatment-models").remove(filesToRemove);
+            }
+          }
+        } catch (e) {
+          console.warn("Could not remove upper models from storage:", e);
+        }
+      }
+
+      if (editOptions?.removeExistingLower) {
+        try {
+          const { data: storageList } = await supabase.storage
+            .from("treatment-models")
+            .list(existingCaseId, { limit: 300 });
+          if (Array.isArray(storageList)) {
+            const filesToRemove = storageList
+              .filter((f) => /lower|mandib/i.test(f.name))
+              .map((f) => `${existingCaseId}/${f.name}`);
+            if (filesToRemove.length > 0) {
+              await supabase.storage.from("treatment-models").remove(filesToRemove);
+            }
+          }
+        } catch (e) {
+          console.warn("Could not remove lower models from storage:", e);
+        }
+      }
+    }
+
+    const hasUpper = upperStages.size > 0 || existingUpperAssets.size > 0;
+    const hasLower = lowerStages.size > 0 || existingLowerAssets.size > 0;
 
     if (!hasUpper && !hasLower) {
       return {
         ok: false,
-        error: "No recognizable orthodontic OBJ stages (gum.obj, tooth_*.obj, or stage OBJ models) found in the uploaded archives.",
+        error: "A treatment case must contain at least one arch (Upper or Lower). To delete the entire case, use the delete button on the dashboard.",
       };
     }
 
     const archType: "both" | "upper" | "lower" =
       hasUpper && hasLower ? "both" : hasUpper ? "upper" : "lower";
 
-    const availableStages = Array.from(
-      new Set([...upperStages.keys(), ...lowerStages.keys()]),
-    ).sort((a, b) => a - b);
+    const allStageSet = new Set<number>([
+      ...upperStages.keys(),
+      ...lowerStages.keys(),
+      ...(upperStages.size === 0 ? existingUpperAssets.keys() : []),
+      ...(lowerStages.size === 0 ? existingLowerAssets.keys() : []),
+    ]);
+    const availableStages = Array.from(allStageSet).sort((a, b) => a - b);
 
     const totalStages = availableStages.length;
     const archDescription =
@@ -785,7 +906,7 @@ export async function processDentalZipInBrowser(
         updatePayload.doctor_notes = { clinic_email: effectiveClinicEmail };
       }
 
-      const { data: updatedData, error: updateErr } = await supabase
+      const { error: updateErr } = await supabase
         .from("cases")
         .update(updatePayload)
         .eq("id", existingCaseId!)
@@ -875,14 +996,10 @@ export async function processDentalZipInBrowser(
       caseId = caseRow.id;
     }
     let completedSteps = 0;
-    const totalSteps = totalStages * (archType === "both" ? 2 : 1);
-
-    const archesToProcess: ("Upper" | "Lower")[] =
-      archType === "both"
-        ? ["Upper", "Lower"]
-        : archType === "upper"
-        ? ["Upper"]
-        : ["Lower"];
+    const archesToProcess: ("Upper" | "Lower")[] = [];
+    if (upperStages.size > 0) archesToProcess.push("Upper");
+    if (lowerStages.size > 0) archesToProcess.push("Lower");
+    const totalSteps = Math.max(1, (upperStages.size + lowerStages.size));
 
     for (const stageNum of availableStages) {
       const pad = String(stageNum).padStart(2, "0");
@@ -1052,7 +1169,7 @@ export async function processDentalZipInBrowser(
 
     const manifestData = {
       caseId,
-      patientName: cleanPatientName,
+      patientName: dbPatientName,
       patientId: effectivePatientId,
       patientAge: patientAge != null && !isNaN(patientAge) && patientAge > 0 ? Math.round(patientAge) : undefined,
       patientSex: patientSex?.trim() || undefined,
@@ -1072,31 +1189,49 @@ export async function processDentalZipInBrowser(
         let effLowerNum: number | undefined = undefined;
 
         if (hasUpper) {
-          const maxUpperStage = upperStages.size > 0 ? Math.max(...upperStages.keys()) : 0;
-          const minUpperStage = upperStages.size > 0 ? Math.min(...upperStages.keys()) : 1;
-          effUpperNum = upperStages.has(stageNum)
-            ? stageNum
-            : Math.max(minUpperStage, Math.min(maxUpperStage, stageNum));
-          const padUpper = String(effUpperNum).padStart(2, "0");
-          const upperFilename = `${cleanPatientName} Upper jaw - ${padUpper} - Model.glb`;
-          upperAsset = {
-            filename: upperFilename,
-            url: `${baseStorage}/${encodeURIComponent(upperFilename)}`,
-          };
+          if (upperStages.size > 0) {
+            const maxUpperStage = Math.max(...upperStages.keys());
+            const minUpperStage = Math.min(...upperStages.keys());
+            effUpperNum = upperStages.has(stageNum)
+              ? stageNum
+              : Math.max(minUpperStage, Math.min(maxUpperStage, stageNum));
+            const padUpper = String(effUpperNum).padStart(2, "0");
+            const upperFilename = `${cleanPatientName} Upper jaw - ${padUpper} - Model.glb`;
+            upperAsset = {
+              filename: upperFilename,
+              url: `${baseStorage}/${encodeURIComponent(upperFilename)}`,
+            };
+          } else if (existingUpperAssets.size > 0) {
+            const maxUpperStage = Math.max(...existingUpperAssets.keys());
+            const minUpperStage = Math.min(...existingUpperAssets.keys());
+            effUpperNum = existingUpperAssets.has(stageNum)
+              ? stageNum
+              : Math.max(minUpperStage, Math.min(maxUpperStage, stageNum));
+            upperAsset = existingUpperAssets.get(effUpperNum) || existingUpperAssets.get(maxUpperStage);
+          }
         }
 
         if (hasLower) {
-          const maxLowerStage = lowerStages.size > 0 ? Math.max(...lowerStages.keys()) : 0;
-          const minLowerStage = lowerStages.size > 0 ? Math.min(...lowerStages.keys()) : 1;
-          effLowerNum = lowerStages.has(stageNum)
-            ? stageNum
-            : Math.max(minLowerStage, Math.min(maxLowerStage, stageNum));
-          const padLower = String(effLowerNum).padStart(2, "0");
-          const lowerFilename = `${cleanPatientName} Lower jaw - ${padLower} - Model.glb`;
-          lowerAsset = {
-            filename: lowerFilename,
-            url: `${baseStorage}/${encodeURIComponent(lowerFilename)}`,
-          };
+          if (lowerStages.size > 0) {
+            const maxLowerStage = Math.max(...lowerStages.keys());
+            const minLowerStage = Math.min(...lowerStages.keys());
+            effLowerNum = lowerStages.has(stageNum)
+              ? stageNum
+              : Math.max(minLowerStage, Math.min(maxLowerStage, stageNum));
+            const padLower = String(effLowerNum).padStart(2, "0");
+            const lowerFilename = `${cleanPatientName} Lower jaw - ${padLower} - Model.glb`;
+            lowerAsset = {
+              filename: lowerFilename,
+              url: `${baseStorage}/${encodeURIComponent(lowerFilename)}`,
+            };
+          } else if (existingLowerAssets.size > 0) {
+            const maxLowerStage = Math.max(...existingLowerAssets.keys());
+            const minLowerStage = Math.min(...existingLowerAssets.keys());
+            effLowerNum = existingLowerAssets.has(stageNum)
+              ? stageNum
+              : Math.max(minLowerStage, Math.min(maxLowerStage, stageNum));
+            lowerAsset = existingLowerAssets.get(effLowerNum) || existingLowerAssets.get(maxLowerStage);
+          }
         }
 
         return {
@@ -1161,7 +1296,6 @@ function mergeGeometry(
   indices: number[],
 ) {
   const pos = geom.attributes.position;
-  const col = geom.attributes.color;
   if (!pos) return;
 
   for (let i = 0; i < pos.count; i++) {
@@ -1176,15 +1310,8 @@ function mergeGeometry(
       vertexMap.set(key, idx);
       positions.push(x, y, z);
 
-      if (col && i < col.count) {
-        const cr = col.getX(i);
-        const cg = col.getY(i);
-        const cb = col.getZ(i);
-        // Paint over any green CAD label markings (e.g. "NIYA 1", "NIYA 2") so gingiva is clean
-        colors.push(defaultR, defaultG, defaultB);
-      } else {
-        colors.push(defaultR, defaultG, defaultB);
-      }
+      // Paint gingiva with clean anatomical color
+      colors.push(defaultR, defaultG, defaultB);
     }
     indices.push(idx);
   }
@@ -1228,9 +1355,10 @@ export async function extractDentalZipMetadata(
       if (lk.includes("lower") || lk.includes("mandib")) hasLower = true;
 
       const parts = k.split("/");
-      const base = parts[parts.length - 1];
+      const base = parts[parts.length - 1] || "";
 
-      if (base.toLowerCase().endsWith(".zip")) {
+      const rawEntry = topEntries[rawKey];
+      if (base.toLowerCase().endsWith(".zip") && rawEntry) {
         const nameWithoutExt = base.replace(/\.zip$/i, "");
         const cleaned = nameWithoutExt
           .replace(/[\s_-]*(?:upper|lower|maxilla|mandible)[\s_-]*/gi, " ")
@@ -1239,7 +1367,7 @@ export async function extractDentalZipMetadata(
           detectedName = cleaned;
         }
         try {
-          const innerEntries = fflate.unzipSync(topEntries[rawKey]);
+          const innerEntries = fflate.unzipSync(rawEntry);
           for (const rawIk of Object.keys(innerEntries)) {
             const ik = rawIk.replace(/\\/g, "/");
             const stageNum = parseStageFromPath(ik);
@@ -1259,8 +1387,9 @@ export async function extractDentalZipMetadata(
       for (const rawKey of entryKeys) {
         const k = rawKey.replace(/\\/g, "/");
         const parts = k.split("/").filter(Boolean);
-        if (parts.length > 0 && !parts[0].startsWith("__") && !isGenericFolderName(parts[0])) {
-          detectedName = parts[0].trim();
+        const firstPart = parts[0];
+        if (firstPart && !firstPart.startsWith("__") && !isGenericFolderName(firstPart)) {
+          detectedName = firstPart.trim();
           break;
         }
       }

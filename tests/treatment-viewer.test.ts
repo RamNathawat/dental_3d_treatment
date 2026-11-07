@@ -1112,5 +1112,87 @@ describe("Treatment Viewer Application", () => {
         expect(stage19Res.models.lowerStl).toBe(mockBuffer18);
       }
     });
+
+    it("cycles playback speed through 1x, 0.5x, and 1.5x via speed button and API", () => {
+      const app = createTreatmentApp(root, {
+        createViewport: () => fakeViewport,
+        autoLoad: false,
+      });
+
+      const speedBtn = root.querySelector<HTMLButtonElement>(".tv-btn--speed");
+      expect(speedBtn).not.toBeNull();
+      expect(speedBtn?.textContent).toBe("1x");
+      expect(app.getPlaybackSpeed()).toBe(1);
+
+      // Cycle 1: 1x -> 0.5x
+      speedBtn?.click();
+      expect(speedBtn?.textContent).toBe("0.5x");
+      expect(app.getPlaybackSpeed()).toBe(0.5);
+      expect(app.getState().playbackSpeed).toBe(0.5);
+
+      // Cycle 2: 0.5x -> 1.5x
+      speedBtn?.click();
+      expect(speedBtn?.textContent).toBe("1.5x");
+      expect(app.getPlaybackSpeed()).toBe(1.5);
+      expect(app.getState().playbackSpeed).toBe(1.5);
+
+      // Cycle 3: 1.5x -> 1x
+      speedBtn?.click();
+      expect(speedBtn?.textContent).toBe("1x");
+      expect(app.getPlaybackSpeed()).toBe(1);
+      expect(app.getState().playbackSpeed).toBe(1);
+
+      // Direct programmatic setting
+      app.setPlaybackSpeed(0.5);
+      expect(speedBtn?.textContent).toBe("0.5x");
+      expect(app.getPlaybackSpeed()).toBe(0.5);
+
+      app.dispose();
+    });
+
+    it("cleanly opens and closes doctor notes drawer toggling tv-drawer--open, display, visibility, and backdrop", () => {
+      const app = createTreatmentApp(root, {
+        createViewport: () => fakeViewport,
+        autoLoad: false,
+      });
+
+      const notesDrawer = root.querySelector<HTMLDivElement>(".tv-notes-drawer");
+      const notesBackdrop = root.querySelector<HTMLDivElement>(".tv-notes-backdrop");
+      const notesHeaderBtn = root.querySelector<HTMLButtonElement>(".tv-btn--notes");
+
+      expect(notesDrawer).not.toBeNull();
+      expect(notesBackdrop).not.toBeNull();
+      expect(notesHeaderBtn).not.toBeNull();
+
+      // Initially closed
+      expect(notesDrawer?.hidden).toBe(true);
+      expect(notesDrawer?.style.display).toBe("none");
+      expect(notesDrawer?.style.visibility).toBe("hidden");
+      expect(notesDrawer?.classList.contains("tv-drawer--open")).toBe(false);
+      expect(notesBackdrop?.hidden).toBe(true);
+      expect(notesBackdrop?.style.display).toBe("none");
+
+      // Open notes
+      app.setNotesOpen(true);
+      expect(notesDrawer?.hidden).toBe(false);
+      expect(notesDrawer?.style.display).toBe("flex");
+      expect(notesDrawer?.style.visibility).toBe("visible");
+      expect(notesDrawer?.classList.contains("tv-drawer--open")).toBe(true);
+      expect(notesBackdrop?.hidden).toBe(false);
+      expect(notesBackdrop?.style.display).toBe("block");
+      expect(notesHeaderBtn?.classList.contains("tv-btn--active")).toBe(true);
+
+      // Close notes via backdrop click
+      notesBackdrop?.click();
+      expect(notesDrawer?.hidden).toBe(true);
+      expect(notesDrawer?.style.display).toBe("none");
+      expect(notesDrawer?.style.visibility).toBe("hidden");
+      expect(notesDrawer?.classList.contains("tv-drawer--open")).toBe(false);
+      expect(notesBackdrop?.hidden).toBe(true);
+      expect(notesBackdrop?.style.display).toBe("none");
+      expect(notesHeaderBtn?.classList.contains("tv-btn--active")).toBe(false);
+
+      app.dispose();
+    });
   });
 });

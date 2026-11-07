@@ -579,9 +579,10 @@ export function getArchStageNumbers(stage: StageDefinition): {
   if (upperNum === undefined && stage.upper) {
     const filename = stage.upper.filename || stage.upper.url || "";
     const match =
-      filename.match(/(?:upper|maxill)[\s_.-]*0*([1-9]\d?)/i) ||
-      filename.match(/0*([1-9]\d?)[\s_.-]*(?:upper|maxill)/i) ||
-      filename.match(/(?:jaw|model)[\s_.-]*0*([1-9]\d?)/i);
+      filename.match(/(?:upper|maxill)[\s_.-]*(?:jaw[\s_.-]*)?0*([1-9]\d*)/i) ||
+      filename.match(/0*([1-9]\d*)[\s_.-]*(?:upper|maxill)/i) ||
+      filename.match(/(?:jaw|model)[\s_.-]*0*([1-9]\d*)/i) ||
+      filename.match(/0*([1-9]\d*)[\s_.-]*(?:model|glb|stl)/i);
     if (match && match[1]) {
       upperNum = parseInt(match[1], 10);
     } else if (stage.stageNumber !== undefined) {
@@ -592,9 +593,10 @@ export function getArchStageNumbers(stage: StageDefinition): {
   if (lowerNum === undefined && stage.lower) {
     const filename = stage.lower.filename || stage.lower.url || "";
     const match =
-      filename.match(/(?:lower|mandib)[\s_.-]*0*([1-9]\d?)/i) ||
-      filename.match(/0*([1-9]\d?)[\s_.-]*(?:lower|mandib)/i) ||
-      filename.match(/(?:jaw|model)[\s_.-]*0*([1-9]\d?)/i);
+      filename.match(/(?:lower|mandib)[\s_.-]*(?:jaw[\s_.-]*)?0*([1-9]\d*)/i) ||
+      filename.match(/0*([1-9]\d*)[\s_.-]*(?:lower|mandib)/i) ||
+      filename.match(/(?:jaw|model)[\s_.-]*0*([1-9]\d*)/i) ||
+      filename.match(/0*([1-9]\d*)[\s_.-]*(?:model|glb|stl)/i);
     if (match && match[1]) {
       lowerNum = parseInt(match[1], 10);
     } else if (stage.stageNumber !== undefined) {
@@ -625,18 +627,27 @@ export function normalizeManifestStages(
 
   let maxExistingUpper = 0;
   let maxExistingLower = 0;
+  const discoveredUpperByStage = new Map<number, string>();
+  const discoveredLowerByStage = new Map<number, string>();
 
   if (Array.isArray(storageFileNames) && storageFileNames.length > 0) {
     for (const name of storageFileNames) {
       const isUpper = /upper|maxill/i.test(name);
       const isLower = /lower|mandib/i.test(name);
       const numMatch =
-        name.match(/(?:jaw|model|upper|lower)[\s_.-]*0*([1-9]\d?)/i) ||
-        name.match(/0*([1-9]\d?)[\s_.-]*(?:model|glb|stl)/i);
+        name.match(/(?:upper|maxill|lower|mandib)[\s_.-]*(?:jaw[\s_.-]*)?0*([1-9]\d*)/i) ||
+        name.match(/(?:jaw|model|upper|lower)[\s_.-]*0*([1-9]\d*)/i) ||
+        name.match(/0*([1-9]\d*)[\s_.-]*(?:model|glb|stl)/i);
       if (numMatch && numMatch[1]) {
         const n = parseInt(numMatch[1], 10);
-        if (isUpper && n > maxExistingUpper) maxExistingUpper = n;
-        if (isLower && n > maxExistingLower) maxExistingLower = n;
+        if (isUpper) {
+          if (n > maxExistingUpper) maxExistingUpper = n;
+          discoveredUpperByStage.set(n, name);
+        }
+        if (isLower) {
+          if (n > maxExistingLower) maxExistingLower = n;
+          discoveredLowerByStage.set(n, name);
+        }
       }
     }
   }
@@ -652,6 +663,12 @@ export function normalizeManifestStages(
 
   const mutableStages = manifest.treatmentStages as StageDefinition[];
 
+  const isExplicitLowerOnly = Boolean(manifest.patientName?.includes("[Lower]"));
+  const isExplicitUpperOnly = Boolean(manifest.patientName?.includes("[Upper]"));
+
+  const allowUpperRestore = !isExplicitLowerOnly;
+  const allowLowerRestore = !isExplicitUpperOnly;
+
   for (let i = 0; i < mutableStages.length; i++) {
     const s = mutableStages[i]!;
     const nominalStage = s.stageNumber ?? i + 1;
@@ -666,8 +683,33 @@ export function normalizeManifestStages(
       effLower = maxExistingLower;
     }
 
-    let updatedUpper = s.upper;
-    let updatedLower = s.lower;
+    let updatedUpper = isExplicitLowerOnly ? undefined : s.upper;
+    let updatedLower = isExplicitUpperOnly ? undefined : s.lower;
+
+    // Self-healing: if an arch is missing in the manifest stage but present in storage files, restore it
+    // Guard: Do NOT restore an arch if the case was explicitly named/configured as single-arch (e.g. "[Upper]" or "[Lower]")
+    const baseStorageUrl = `https://yrjulcwnabnhgtqebrtn.supabase.co/storage/v1/object/public/treatment-models/${manifest.caseId}`;
+    if (!updatedUpper && allowUpperRestore && discoveredUpperByStage.size > 0) {
+      const eff = Math.min(nominalStage, maxExistingUpper);
+      const filename = discoveredUpperByStage.get(eff) || discoveredUpperByStage.get(maxExistingUpper);
+      if (filename) {
+        updatedUpper = {
+          filename,
+          url: `${baseStorageUrl}/${encodeURIComponent(filename)}`,
+        };
+      }
+    }
+
+    if (!updatedLower && allowLowerRestore && discoveredLowerByStage.size > 0) {
+      const eff = Math.min(nominalStage, maxExistingLower);
+      const filename = discoveredLowerByStage.get(eff) || discoveredLowerByStage.get(maxExistingLower);
+      if (filename) {
+        updatedLower = {
+          filename,
+          url: `${baseStorageUrl}/${encodeURIComponent(filename)}`,
+        };
+      }
+    }
 
     if (updatedUpper && effUpper !== nominalStage) {
       const pad = String(effUpper).padStart(2, "0");
@@ -717,6 +759,13 @@ export function normalizeManifestStages(
       lower: updatedLower,
     };
   }
+
+  const hasUpper = isExplicitLowerOnly ? false : mutableStages.some((s) => Boolean(s.upper));
+  const hasLower = isExplicitUpperOnly ? false : mutableStages.some((s) => Boolean(s.lower));
+  const archType = isExplicitLowerOnly ? "lower" : isExplicitUpperOnly ? "upper" : hasUpper && hasLower ? "both" : hasUpper ? "upper" : "lower";
+  (manifest as any).hasUpper = hasUpper;
+  (manifest as any).hasLower = hasLower;
+  (manifest as any).archType = archType;
 
   return manifest;
 }

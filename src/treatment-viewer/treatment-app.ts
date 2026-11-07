@@ -42,6 +42,7 @@ import {
   prioritizeStage,
   prioritizeStages,
   setModelProgressCallback,
+  getLastKnownValidArchStages,
 } from "./model-loader";
 import { applyBiteContacts } from "./bite-contacts";
 import {
@@ -83,6 +84,8 @@ export interface AppState {
   lowerVisible: boolean;
   /** Whether orthodontic composite attachments are visible. */
   attachmentsVisible: boolean;
+  /** Playback speed multiplier (1 = normal 1x, 0.5 = 0.5x, 1.5 = 1.5x). Defaults to 1. */
+  playbackSpeed: number;
   /** Whether autoplay progression is currently running. */
   isPlaying: boolean;
   /** Whether occlusal bite contacts inspection is active. */
@@ -140,6 +143,9 @@ export interface TreatmentAppHandle {
   readonly setIprActive: (active: boolean) => void;
   readonly toggleNotes: () => void;
   readonly setNotesOpen: (open: boolean) => void;
+  readonly cyclePlaybackSpeed: () => number;
+  readonly setPlaybackSpeed: (speed: number) => void;
+  readonly getPlaybackSpeed: () => number;
   readonly getState: () => Readonly<AppState>;
 }
 
@@ -169,6 +175,7 @@ export function createTreatmentApp(
     upperVisible: !isSingleArchLower,
     lowerVisible: !isSingleArchUpper,
     attachmentsVisible: false,
+    playbackSpeed: 1,
     isPlaying: false,
     contactsActive: false,
     overlayActive: false,
@@ -347,12 +354,22 @@ export function createTreatmentApp(
     ]),
   ]);
   movementDrawerEl.hidden = true;
+  movementDrawerEl.style.display = "none";
+  movementDrawerEl.style.visibility = "hidden";
 
   // ── Doctor's Notes & Remarks Drawer ───────────────────────────────────────
   const notesDrawerDoctorMetaEl = div("tv-notes-meta");
   const notesDrawerGuidelinesEl = div("tv-notes-guidelines");
   const notesDrawerGeneralEl = div("tv-notes-general");
   const notesDrawerStageListEl = div("tv-notes-stage-list");
+
+  // Backdrop overlay to cleanly dismiss drawer on mobile or canvas click
+  const notesBackdropEl = div("tv-notes-backdrop");
+  notesBackdropEl.hidden = true;
+  notesBackdropEl.style.display = "none";
+  notesBackdropEl.addEventListener("click", () => {
+    setNotesOpen(false);
+  });
 
   const notesDrawerEl = div("tv-notes-drawer", [
     div("tv-notes-drawer__header", [
@@ -379,6 +396,8 @@ export function createTreatmentApp(
     ]),
   ]);
   notesDrawerEl.hidden = true;
+  notesDrawerEl.style.display = "none";
+  notesDrawerEl.style.visibility = "hidden";
 
   // Doctor's Notes button in header
   const notesHeaderBtn = makeBtn(
@@ -506,6 +525,10 @@ export function createTreatmentApp(
 
   // Stage controls (Patient timeline)
   const stageLabel = span("tv-stage-label", "Stage 1 / 1");
+  stageLabel.title = "View all treatment stages";
+  stageLabel.addEventListener("click", () => {
+    openStageSelector();
+  });
 
   const sliderEl = document.createElement("input");
   sliderEl.type = "range";
@@ -531,6 +554,18 @@ export function createTreatmentApp(
   circularPlayBtn.innerHTML = "▶";
   circularPlayBtn.title = "Play / pause treatment progression";
   circularPlayBtn.addEventListener("click", () => togglePlay());
+
+  const SPEED_OPTIONS: readonly number[] = [1, 0.5, 1.5];
+
+  const speedBtn = document.createElement("button");
+  speedBtn.type = "button";
+  speedBtn.className = "tv-btn--speed";
+  speedBtn.textContent = "1x";
+  speedBtn.title = "Playback speed: 1x (Click to cycle: 1x, 0.5x, 1.5x)";
+  speedBtn.setAttribute("aria-label", "Playback speed: 1x");
+  speedBtn.addEventListener("click", () => {
+    cyclePlaybackSpeed();
+  });
 
   const nextBtn = makeBtn("›", () => {
     stopPlay();
@@ -647,6 +682,7 @@ export function createTreatmentApp(
     dockToolsEl,
     scrubberWrapEl,
     div("tv-bottom-dock__actions", [
+      speedBtn,
       circularPlayBtn,
       playBtn,
       upperToggleBtn,
@@ -742,11 +778,14 @@ export function createTreatmentApp(
   const ambiguityBannerEl = div("tv-ambiguity-banner", []);
   ambiguityBannerEl.hidden = true;
 
-  // Loading overlay
+  // Loading overlay with clinical progress bar
   const loadingTextEl = span("tv-loading__text", "Loading 3D Models…");
+  const loadingBarFillEl = div("tv-loading__bar-fill", []);
+  const loadingBarTrackEl = div("tv-loading__bar-track", [loadingBarFillEl]);
   const loadingEl = div("tv-loading", [
     div("tv-loading__spinner", []),
     loadingTextEl,
+    loadingBarTrackEl,
   ]);
   loadingEl.hidden = true;
 
@@ -755,9 +794,19 @@ export function createTreatmentApp(
     if (total > 0) {
       const loadedMb = (loaded / (1024 * 1024)).toFixed(1);
       const totalMb = (total / (1024 * 1024)).toFixed(1);
-      loadingTextEl.textContent = `Loading 3D Models: ${percent}% (${loadedMb} / ${totalMb} MB)`;
+      if (percent >= 100) {
+        loadingTextEl.textContent = "Preparing 3D geometry & anatomical colors…";
+        loadingBarFillEl.style.width = "100%";
+        loadingBarFillEl.classList.add("tv-loading__bar-fill--pulse");
+      } else {
+        loadingTextEl.textContent = `Loading 3D Models: ${percent}% (${loadedMb} / ${totalMb} MB)`;
+        loadingBarFillEl.style.width = `${percent}%`;
+        loadingBarFillEl.classList.remove("tv-loading__bar-fill--pulse");
+      }
     } else {
       loadingTextEl.textContent = "Loading 3D Models…";
+      loadingBarFillEl.style.width = "25%";
+      loadingBarFillEl.classList.add("tv-loading__bar-fill--pulse");
     }
   });
 
@@ -858,6 +907,7 @@ export function createTreatmentApp(
     iprLegendEl,
     overlayPanelEl,
     movementDrawerEl,
+    notesBackdropEl,
     notesDrawerEl,
     cameraDockEl,
     bottomDockEl,
@@ -1067,11 +1117,41 @@ export function createTreatmentApp(
       return;
     }
 
-    // At the final outcome stage, pause for 1200ms so user can appreciate the final result before looping
-    const delay = nextIndex === count - 1 ? 1200 : autoplayInterval;
+    // At the final outcome stage, pause so user can appreciate the final result before looping
+    const delay = nextIndex === count - 1
+      ? Math.round(1200 / state.playbackSpeed)
+      : Math.round(autoplayInterval / state.playbackSpeed);
     playTimer = window.setTimeout(() => {
       void stepPlayLoop();
     }, delay);
+  }
+
+  function cyclePlaybackSpeed(): number {
+    const currentIdx = SPEED_OPTIONS.indexOf(state.playbackSpeed);
+    const nextIdx = (currentIdx === -1 ? 0 : currentIdx + 1) % SPEED_OPTIONS.length;
+    const nextSpeed = SPEED_OPTIONS[nextIdx] ?? 1;
+    setPlaybackSpeed(nextSpeed);
+    return nextSpeed;
+  }
+
+  function setPlaybackSpeed(speed: number): void {
+    state.playbackSpeed = speed > 0 ? speed : 1;
+    speedBtn.textContent = `${state.playbackSpeed}x`;
+    speedBtn.title = `Playback speed: ${state.playbackSpeed}x (Click to cycle: 1x, 0.5x, 1.5x)`;
+    speedBtn.setAttribute("aria-label", `Playback speed: ${state.playbackSpeed}x`);
+
+    // If currently playing, reschedule next frame immediately at new rate
+    if (state.isPlaying && playTimer !== null) {
+      clearTimeout(playTimer);
+      const delay = Math.round(autoplayInterval / state.playbackSpeed);
+      playTimer = window.setTimeout(() => {
+        void stepPlayLoop();
+      }, delay);
+    }
+  }
+
+  function getPlaybackSpeed(): number {
+    return state.playbackSpeed;
   }
 
   function startPlay(): void {
@@ -1270,6 +1350,36 @@ export function createTreatmentApp(
     // Load pre-parsed geometries (shared with background prewarmer)
     const geomOutcome = await loadStageGeometries(stage);
     isStageLoading = false;
+
+    if (geomOutcome.ok) {
+      const { upperStageNum, lowerStageNum } = getLastKnownValidArchStages();
+      if (lowerStageNum !== null && lowerStageNum > 0) {
+        const stages = state.manifest.treatmentStages;
+        for (let i = lowerStageNum; i < stages.length; i++) {
+          const st = stages[i] as any;
+          if (st && (!st.lowerStageNumber || st.lowerStageNumber > lowerStageNum)) {
+            st.lowerStageNumber = lowerStageNum;
+            const donor = stages[lowerStageNum - 1];
+            if (donor?.lower) {
+              st.lower = { ...donor.lower };
+            }
+          }
+        }
+      }
+      if (upperStageNum !== null && upperStageNum > 0) {
+        const stages = state.manifest.treatmentStages;
+        for (let i = upperStageNum; i < stages.length; i++) {
+          const st = stages[i] as any;
+          if (st && (!st.upperStageNumber || st.upperStageNumber > upperStageNum)) {
+            st.upperStageNumber = upperStageNum;
+            const donor = stages[upperStageNum - 1];
+            if (donor?.upper) {
+              st.upper = { ...donor.upper };
+            }
+          }
+        }
+      }
+    }
 
     if (
       geomOutcome.ok &&
@@ -1620,13 +1730,24 @@ export function createTreatmentApp(
   // ── Clinical Tooth Movements Drawer ─────────────────────────────────────────
 
   function toggleMovementsDrawer(): void {
-    state.metricsPanelOpen = !state.metricsPanelOpen;
-    movementDrawerEl.hidden = !state.metricsPanelOpen;
-    if (state.metricsPanelOpen) {
+    const nextOpen = !state.metricsPanelOpen;
+    state.metricsPanelOpen = nextOpen;
+    movementDrawerEl.hidden = !nextOpen;
+    movementDrawerEl.classList.toggle("tv-drawer--open", nextOpen);
+    movementDrawerEl.style.display = nextOpen ? "flex" : "none";
+    movementDrawerEl.style.visibility = nextOpen ? "visible" : "hidden";
+    movementDrawerEl.style.backdropFilter = nextOpen ? "" : "none";
+    (movementDrawerEl.style as any).webkitBackdropFilter = nextOpen ? "" : "none";
+
+    if (nextOpen) {
       if (state.notesOpen) {
         setNotesOpen(false);
       }
       refreshMovementDrawer();
+    } else {
+      requestAnimationFrame(() => {
+        (viewport as any).render?.();
+      });
     }
   }
 
@@ -1670,12 +1791,31 @@ export function createTreatmentApp(
   function setNotesOpen(open: boolean): void {
     state.notesOpen = open;
     notesDrawerEl.hidden = !open;
+    notesDrawerEl.classList.toggle("tv-drawer--open", open);
+    notesDrawerEl.style.display = open ? "flex" : "none";
+    notesDrawerEl.style.visibility = open ? "visible" : "hidden";
+    notesDrawerEl.style.backdropFilter = open ? "" : "none";
+    (notesDrawerEl.style as any).webkitBackdropFilter = open ? "" : "none";
+
+    notesBackdropEl.hidden = !open;
+    notesBackdropEl.classList.toggle("tv-backdrop--open", open);
+    notesBackdropEl.style.display = open ? "block" : "none";
+    notesBackdropEl.style.visibility = open ? "visible" : "hidden";
+    notesBackdropEl.style.backdropFilter = open ? "" : "none";
+    (notesBackdropEl.style as any).webkitBackdropFilter = open ? "" : "none";
+
     notesHeaderBtn.classList.toggle("tv-btn--active", open);
+    notesHeaderBtn.setAttribute("aria-expanded", String(open));
 
     if (open) {
       if (state.metricsPanelOpen) {
         state.metricsPanelOpen = false;
         movementDrawerEl.hidden = true;
+        movementDrawerEl.classList.remove("tv-drawer--open");
+        movementDrawerEl.style.display = "none";
+        movementDrawerEl.style.visibility = "hidden";
+        movementDrawerEl.style.backdropFilter = "none";
+        (movementDrawerEl.style as any).webkitBackdropFilter = "none";
       }
       refreshNotesDrawer();
       const dn = state.manifest.doctorNotes;
@@ -1689,6 +1829,10 @@ export function createTreatmentApp(
       if (!hasContent) {
         void checkFreshNotes();
       }
+    } else {
+      requestAnimationFrame(() => {
+        (viewport as any).render?.();
+      });
     }
   }
 
@@ -2535,7 +2679,18 @@ export function createTreatmentApp(
     syncSidebarSelection();
     syncArchPillUI();
 
-    loadingEl.hidden = !state.loading;
+    if (state.loading) {
+      loadingEl.classList.remove("tv-loading--fade-out");
+      loadingEl.hidden = false;
+    } else if (!loadingEl.hidden) {
+      loadingEl.classList.add("tv-loading--fade-out");
+      setTimeout(() => {
+        if (!state.loading) {
+          loadingEl.hidden = true;
+          loadingEl.classList.remove("tv-loading--fade-out");
+        }
+      }, 220);
+    }
 
     if (state.error !== null) {
       statusEl.textContent = state.error;
@@ -2811,6 +2966,9 @@ export function createTreatmentApp(
     setIprActive,
     toggleNotes: toggleNotesDrawer,
     setNotesOpen,
+    cyclePlaybackSpeed,
+    setPlaybackSpeed,
+    getPlaybackSpeed,
     getState: () => ({ ...state }),
   };
 }

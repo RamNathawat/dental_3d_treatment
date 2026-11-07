@@ -13,14 +13,14 @@ export default function TreatmentViewerClient() {
     if (!document.querySelector('link[href*="treatment-main"]')) {
       const link = document.createElement("link");
       link.rel = "stylesheet";
-      link.href = "/assets/treatment-main-B436-nZ-.css";
+      link.href = "/assets/treatment-main-CC1oxRmd.css";
       document.head.appendChild(link);
     }
 
     // 2. Dynamically load the bundled 3D viewer module
     const script = document.createElement("script");
     script.type = "module";
-    script.src = "/assets/treatment-main-DipPV6QN.js";
+    script.src = "/assets/treatment-main-0HExL4h2.js";
     document.body.appendChild(script);
 
     return () => {

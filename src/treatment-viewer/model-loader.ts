@@ -38,6 +38,43 @@ export type ModelProgressCallback = (
 ) => void;
 
 let globalProgressCallback: ModelProgressCallback | null = null;
+const activeDownloads = new Map<string, { loaded: number; total: number; completed: boolean }>();
+let highestReportedPercent = 0;
+
+export function resetModelProgress(): void {
+  activeDownloads.clear();
+  highestReportedPercent = 0;
+  if (globalProgressCallback) {
+    globalProgressCallback(0, 0, 0);
+  }
+}
+
+function reportDownloadProgress(
+  url: string,
+  loaded: number,
+  total: number,
+  completed = false,
+): void {
+  activeDownloads.set(url, { loaded, total, completed });
+
+  let sumLoaded = 0;
+  let sumTotal = 0;
+  for (const entry of activeDownloads.values()) {
+    sumLoaded += entry.loaded;
+    sumTotal += entry.total;
+  }
+
+  if (sumTotal > 0) {
+    const rawPct = Math.round((sumLoaded / sumTotal) * 100);
+    const monotonicPct = Math.min(100, Math.max(highestReportedPercent, rawPct));
+    highestReportedPercent = monotonicPct;
+    if (globalProgressCallback) {
+      globalProgressCallback(sumLoaded, sumTotal, monotonicPct);
+    }
+  } else if (globalProgressCallback) {
+    globalProgressCallback(sumLoaded, sumTotal, 0);
+  }
+}
 
 export function setModelProgressCallback(
   cb: ModelProgressCallback | null,
@@ -69,11 +106,31 @@ const stlLoader = new STLLoader();
 
 let lastKnownValidUpperBuffer: ArrayBuffer | null = null;
 let lastKnownValidLowerBuffer: ArrayBuffer | null = null;
+let lastKnownValidUpperStageNum: number | null = null;
+let lastKnownValidLowerStageNum: number | null = null;
+
+export function getLastKnownValidArchStages(): {
+  upperStageNum: number | null;
+  lowerStageNum: number | null;
+} {
+  return {
+    upperStageNum: lastKnownValidUpperStageNum,
+    lowerStageNum: lastKnownValidLowerStageNum,
+  };
+}
+
+export function setLastKnownValidArchStages(
+  upper?: number | null,
+  lower?: number | null,
+): void {
+  if (upper !== undefined) lastKnownValidUpperStageNum = upper;
+  if (lower !== undefined) lastKnownValidLowerStageNum = lower;
+}
 
 async function probePreviousArchBuffer(
   source: ModelSource,
   signal?: AbortSignal,
-): Promise<ArrayBuffer | null> {
+): Promise<{ buffer: ArrayBuffer; stageNum: number } | null> {
   const url =
     typeof source === "string"
       ? source
@@ -83,21 +140,36 @@ async function probePreviousArchBuffer(
   if (!url) return null;
 
   const match =
-    url.match(/(?:jaw|model|upper|lower)(?:%20|\s)*-(?:%20|\s)*0*([1-9]\d?)/i) ||
-    url.match(/0*([1-9]\d?)(?:%20|\s)*-(?:%20|\s)*(?:model|glb|stl)/i);
+    url.match(/(?:lower|mandib|upper|maxill)[\s_.-]*(?:jaw[\s_.-]*)?0*([1-9]\d*)/i) ||
+    url.match(/0*([1-9]\d*)[\s_.-]*(?:lower|mandib|upper|maxill)/i) ||
+    url.match(/(?:jaw|model)[\s_.-]*0*([1-9]\d*)/i) ||
+    url.match(/0*([1-9]\d*)[\s_.-]*(?:model|glb|stl)/i);
   if (!match || !match[1]) return null;
 
   const currentNum = parseInt(match[1], 10);
   for (let n = currentNum - 1; n >= 1; n--) {
     const pad = String(n).padStart(2, "0");
-    const testUrl = url.replace(
-      /((?:jaw|model|upper|lower)(?:%20|\s)*-(?:%20|\s)*)0*([1-9]\d?)/i,
-      `$1${pad}`,
-    );
+    let testUrl = url;
+    if (/(?:jaw|model|upper|lower|maxill|mandib)(?:%20|\s)*-(?:%20|\s)*0*[1-9]\d*/i.test(url)) {
+      testUrl = url.replace(
+        /((?:jaw|model|upper|lower|maxill|mandib)(?:%20|\s)*-(?:%20|\s)*)0*[1-9]\d*/i,
+        `$1${pad}`,
+      );
+    } else if (/0*[1-9]\d*((?:%20|\s)*-(?:%20|\s)*(?:model|glb|stl))/i.test(url)) {
+      testUrl = url.replace(
+        /0*[1-9]\d*((?:%20|\s)*-(?:%20|\s)*(?:model|glb|stl))/i,
+        `${pad}$1`,
+      );
+    }
+
     try {
       const res = await fetchStl(testUrl, signal);
       if (res.ok) {
-        return res.buffer;
+        if (isGlb(res.buffer)) {
+          rawGlbCache.set(url, res.buffer);
+          rawGlbCache.set(testUrl, res.buffer);
+        }
+        return { buffer: res.buffer, stageNum: n };
       }
     } catch {
       // Continue searching backwards
@@ -122,6 +194,7 @@ export async function loadStageModels(
   }
 
   try {
+    resetModelProgress();
     const [upperResult, lowerResult] = await Promise.all([
       upper ? resolveStlBuffer(upper, "Upper jaw", signal) : Promise.resolve(null),
       lower ? resolveStlBuffer(lower, "Lower jaw", signal) : Promise.resolve(null),
@@ -142,14 +215,19 @@ export async function loadStageModels(
         isNotFoundError(upperResult.reason)
       ) {
         const fallback =
-          lastKnownValidUpperBuffer ||
-          (await probePreviousArchBuffer(upper, signal));
+          lastKnownValidUpperBuffer
+            ? { buffer: lastKnownValidUpperBuffer, stageNum: lastKnownValidUpperStageNum ?? 1 }
+            : await probePreviousArchBuffer(upper, signal);
         if (fallback) {
           console.info(
-            "Upper jaw model not found for this stage (upper arch reached final stage earlier than lower). Holding upper arch at final stage.",
+            `Upper jaw model not found for this stage (upper arch reached final stage at ${fallback.stageNum}). Holding upper arch at stage ${fallback.stageNum}.`,
           );
-          finalUpperBuffer = fallback;
-          lastKnownValidUpperBuffer = fallback;
+          finalUpperBuffer = fallback.buffer;
+          lastKnownValidUpperBuffer = fallback.buffer;
+          lastKnownValidUpperStageNum = fallback.stageNum;
+          if (upper && typeof upper === "object" && "url" in upper && upper.url) {
+            rawGlbCache.set(upper.url, fallback.buffer);
+          }
         } else {
           return { ok: false, reason: `Upper jaw: ${upperResult.reason}` };
         }
@@ -165,14 +243,19 @@ export async function loadStageModels(
         isNotFoundError(lowerResult.reason)
       ) {
         const fallback =
-          lastKnownValidLowerBuffer ||
-          (await probePreviousArchBuffer(lower, signal));
+          lastKnownValidLowerBuffer
+            ? { buffer: lastKnownValidLowerBuffer, stageNum: lastKnownValidLowerStageNum ?? 1 }
+            : await probePreviousArchBuffer(lower, signal);
         if (fallback) {
           console.info(
-            "Lower jaw model not found for this stage (lower arch reached final stage earlier than upper). Holding lower arch at final stage.",
+            `Lower jaw model not found for this stage (lower arch reached final stage at ${fallback.stageNum}). Holding lower arch at stage ${fallback.stageNum}.`,
           );
-          finalLowerBuffer = fallback;
-          lastKnownValidLowerBuffer = fallback;
+          finalLowerBuffer = fallback.buffer;
+          lastKnownValidLowerBuffer = fallback.buffer;
+          lastKnownValidLowerStageNum = fallback.stageNum;
+          if (lower && typeof lower === "object" && "url" in lower && lower.url) {
+            rawGlbCache.set(lower.url, fallback.buffer);
+          }
         } else {
           return { ok: false, reason: `Lower jaw: ${lowerResult.reason}` };
         }
@@ -352,6 +435,8 @@ export function clearStlBufferCache(): void {
   clearStageGeometryCache();
   lastKnownValidUpperBuffer = null;
   lastKnownValidLowerBuffer = null;
+  lastKnownValidUpperStageNum = null;
+  lastKnownValidLowerStageNum = null;
 }
 
 function calibrateGeometryColors(geom: BufferGeometry): void {
@@ -676,9 +761,7 @@ async function fetchStl(
           if (isGlb(idbCached)) {
             rawGlbCache.set(url, idbCached);
           }
-          if (globalProgressCallback) {
-            globalProgressCallback(idbCached.byteLength, idbCached.byteLength, 100);
-          }
+          reportDownloadProgress(url, idbCached.byteLength, idbCached.byteLength, true);
           return { ok: true, buffer: idbCached };
         }
       } catch {
@@ -716,11 +799,10 @@ async function fetchStl(
           if (value) {
             chunks.push(value);
             loaded += value.length;
-            if (globalProgressCallback) {
-              globalProgressCallback(loaded, total, Math.round((loaded / total) * 100));
-            }
+            reportDownloadProgress(url, loaded, total, false);
           }
         }
+        reportDownloadProgress(url, loaded, total, true);
         const merged = new Uint8Array(loaded);
         let offset = 0;
         for (const chunk of chunks) {
@@ -730,9 +812,7 @@ async function fetchStl(
         buffer = merged.buffer;
       } else {
         buffer = await response.arrayBuffer();
-        if (globalProgressCallback && buffer.byteLength > 0) {
-          globalProgressCallback(buffer.byteLength, buffer.byteLength, 100);
-        }
+        reportDownloadProgress(url, buffer.byteLength, total || buffer.byteLength, true);
       }
 
       if (isGlb(buffer)) {

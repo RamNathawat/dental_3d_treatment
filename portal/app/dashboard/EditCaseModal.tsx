@@ -16,6 +16,8 @@ import {
   Mail,
   Layers,
   RefreshCw,
+  Trash2,
+  Undo2,
 } from "lucide-react";
 import { DentalCase } from "./page";
 import { createClient } from "@/lib/supabase/client";
@@ -64,6 +66,8 @@ export default function EditCaseModal({
   const [lowerFile, setLowerFile] = useState<File | null>(null);
   const [upperMeta, setUpperMeta] = useState<DentalZipMetadata | null>(null);
   const [lowerMeta, setLowerMeta] = useState<DentalZipMetadata | null>(null);
+  const [removeExistingUpper, setRemoveExistingUpper] = useState(false);
+  const [removeExistingLower, setRemoveExistingLower] = useState(false);
 
   const [isInspectingUpper, setIsInspectingUpper] = useState(false);
   const [isInspectingLower, setIsInspectingLower] = useState(false);
@@ -107,6 +111,8 @@ export default function EditCaseModal({
     setLowerFile(null);
     setUpperMeta(null);
     setLowerMeta(null);
+    setRemoveExistingUpper(false);
+    setRemoveExistingLower(false);
     setErrorMsg("");
     setIsProcessing(false);
   }, [isOpen, caseItem, allCases]);
@@ -116,6 +122,8 @@ export default function EditCaseModal({
   const currentStages = caseItem.total_stages || 1;
   const isUpperOnly = caseItem.patient_name.includes("[Upper]");
   const isLowerOnly = caseItem.patient_name.includes("[Lower]");
+  const hasExistingUpper = !isLowerOnly;
+  const hasExistingLower = !isUpperOnly;
   const archLabel = isUpperOnly ? "Upper Arch Only" : isLowerOnly ? "Lower Arch Only" : "Dual-Arch Alignment";
 
   const hasNewFiles = Boolean(upperFile || lowerFile);
@@ -134,6 +142,7 @@ export default function EditCaseModal({
       return;
     }
     setErrorMsg("");
+    setRemoveExistingUpper(false);
     setUpperFile(file);
     setIsInspectingUpper(true);
     try {
@@ -152,6 +161,7 @@ export default function EditCaseModal({
       return;
     }
     setErrorMsg("");
+    setRemoveExistingLower(false);
     setLowerFile(file);
     setIsInspectingLower(true);
     try {
@@ -185,11 +195,26 @@ export default function EditCaseModal({
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // CASE A: Re-entering / replacing 3D Models
+    // CASE A: Re-entering / replacing 3D Models or Removing an Existing Arch
     // ──────────────────────────────────────────────────────────────────────────
-    if (hasNewFiles) {
-      setProgressMsg("Re-processing and uploading new 3D models...");
-      setProgressPct(10);
+    const hasModelChanges = Boolean(upperFile || lowerFile || removeExistingUpper || removeExistingLower);
+
+    if (hasModelChanges) {
+      const willHaveUpper = Boolean(upperFile || (hasExistingUpper && !removeExistingUpper));
+      const willHaveLower = Boolean(lowerFile || (hasExistingLower && !removeExistingLower));
+
+      if (!willHaveUpper && !willHaveLower) {
+        setIsProcessing(false);
+        setErrorMsg("A treatment case must contain at least one arch (Upper or Lower). To delete the entire case, use the delete button on the dashboard.");
+        return;
+      }
+
+      setProgressMsg(
+        upperFile || lowerFile
+          ? "Re-processing and uploading new 3D models..."
+          : "Updating treatment arches and removing selected models..."
+      );
+      setProgressPct(15);
 
       const result: IngestResult = await processDentalZipInBrowser(
         {
@@ -210,10 +235,14 @@ export default function EditCaseModal({
         resolvedSex ?? undefined,
         resolvedClinicEmail ?? undefined,
         caseItem.id, // existingCaseId: overwrites models for this case!
+        {
+          removeExistingUpper,
+          removeExistingLower,
+        },
       );
 
       if (result.ok && result.caseId) {
-        const archType = result.archType || (upperFile && lowerFile ? "both" : upperFile ? "upper" : "lower");
+        const archType = result.archType || (willHaveUpper && willHaveLower ? "both" : willHaveUpper ? "upper" : "lower");
         const cleanName = patientName.replace(/\s*\[(Upper|Lower|Dual)\]/i, "").trim();
         const dbName =
           archType === "upper"
@@ -230,19 +259,23 @@ export default function EditCaseModal({
           patient_id: result.patientId || resolvedPatientId,
           patient_age: resolvedAge,
           patient_sex: resolvedSex,
-          total_stages: result.totalStages || Math.max(upperMeta?.totalStages || 1, lowerMeta?.totalStages || 1),
+          total_stages: result.totalStages || caseItem.total_stages || 1,
           updated_at: new Date().toISOString(),
         };
 
         onCaseUpdated(updatedCase);
         setIsProcessing(false);
         if (onToast) {
-          onToast(`Case "${dbName}" models re-entered and updated successfully (${updatedCase.total_stages} stages)`);
+          onToast(
+            removeExistingUpper || removeExistingLower
+              ? `Case "${dbName}" updated: removed selected arch models (${updatedCase.total_stages} stages)`
+              : `Case "${dbName}" models re-entered and updated successfully (${updatedCase.total_stages} stages)`
+          );
         }
         onClose();
       } else {
         setIsProcessing(false);
-        setErrorMsg(result.error || "Failed to re-process new orthodontic archives.");
+        setErrorMsg(result.error || "Failed to update orthodontic archives.");
       }
       return;
     }
@@ -427,7 +460,7 @@ export default function EditCaseModal({
                       <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
                         Upper Jaw .ZIP
                       </span>
-                      {upperFile && (
+                      {upperFile ? (
                         <button
                           type="button"
                           onClick={() => {
@@ -436,9 +469,30 @@ export default function EditCaseModal({
                           }}
                           className="text-[10px] text-red-500 hover:underline"
                         >
-                          Remove
+                          Remove new ZIP
                         </button>
-                      )}
+                      ) : hasExistingUpper ? (
+                        removeExistingUpper ? (
+                          <button
+                            type="button"
+                            onClick={() => setRemoveExistingUpper(false)}
+                            className="text-[10px] text-amber-600 dark:text-[#ffd166] hover:underline font-semibold flex items-center gap-1"
+                          >
+                            <Undo2 className="w-3 h-3" />
+                            <span>Undo</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setRemoveExistingUpper(true)}
+                            className="text-[10px] text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 hover:underline flex items-center gap-1 font-medium"
+                            title="Remove already added Upper models from this case"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>Remove Models</span>
+                          </button>
+                        )
+                      ) : null}
                     </div>
                     <div
                       onDragOver={(e) => {
@@ -457,6 +511,8 @@ export default function EditCaseModal({
                       className={`border-2 border-dashed rounded-xl p-3 text-center transition-all min-h-[90px] flex flex-col justify-center cursor-pointer ${
                         upperFile
                           ? "border-sky-400 dark:border-sky-500 bg-sky-50/50 dark:bg-sky-950/20"
+                          : removeExistingUpper
+                          ? "border-rose-300 dark:border-rose-900/60 bg-rose-50/50 dark:bg-rose-950/20"
                           : dragOverUpper
                           ? "border-amber-500 bg-amber-50 dark:bg-amber-950/20"
                           : "border-slate-200 dark:border-slate-700 hover:border-amber-400 dark:hover:border-amber-600 bg-white dark:bg-[#131A26]"
@@ -487,13 +543,48 @@ export default function EditCaseModal({
                             </span>
                           ) : null}
                         </div>
+                      ) : removeExistingUpper ? (
+                        <div className="space-y-1 text-center py-0.5">
+                          <div className="w-6 h-6 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </div>
+                          <p className="font-bold text-rose-600 dark:text-rose-400 text-[11px]">
+                            Upper Models Removed
+                          </p>
+                          <p className="text-[9px] text-slate-500 dark:text-slate-400">
+                            Will be deleted on save · Drop new ZIP to replace
+                          </p>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRemoveExistingUpper(false);
+                            }}
+                            className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 hover:bg-rose-200 dark:hover:bg-rose-900/60 transition-colors"
+                          >
+                            <Undo2 className="w-3 h-3" />
+                            <span>Keep original models</span>
+                          </button>
+                        </div>
                       ) : (
                         <div className="space-y-0.5">
-                          <UploadCloud className="w-4 h-4 mx-auto text-slate-400 dark:text-slate-500" />
-                          <p className="font-semibold text-slate-700 dark:text-slate-300 text-[11px]">
-                            Drop Upper ZIP
-                          </p>
-                          <p className="text-[9px] text-slate-400">Optional replacement</p>
+                          {hasExistingUpper ? (
+                            <>
+                              <Check className="w-4 h-4 mx-auto text-emerald-500" />
+                              <p className="font-semibold text-emerald-700 dark:text-emerald-400 text-[11px]">
+                                Keeping Upper Models ({currentStages} stg)
+                              </p>
+                              <p className="text-[9px] text-slate-400">Drop new ZIP to replace</p>
+                            </>
+                          ) : (
+                            <>
+                              <UploadCloud className="w-4 h-4 mx-auto text-sky-500" />
+                              <p className="font-semibold text-sky-700 dark:text-sky-400 text-[11px]">
+                                + Add Upper Jaw ZIP
+                              </p>
+                              <p className="text-[9px] text-slate-400">Converts to Dual-Arch</p>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>
@@ -505,7 +596,7 @@ export default function EditCaseModal({
                       <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
                         Lower Jaw .ZIP
                       </span>
-                      {lowerFile && (
+                      {lowerFile ? (
                         <button
                           type="button"
                           onClick={() => {
@@ -514,9 +605,30 @@ export default function EditCaseModal({
                           }}
                           className="text-[10px] text-red-500 hover:underline"
                         >
-                          Remove
+                          Remove new ZIP
                         </button>
-                      )}
+                      ) : hasExistingLower ? (
+                        removeExistingLower ? (
+                          <button
+                            type="button"
+                            onClick={() => setRemoveExistingLower(false)}
+                            className="text-[10px] text-amber-600 dark:text-[#ffd166] hover:underline font-semibold flex items-center gap-1"
+                          >
+                            <Undo2 className="w-3 h-3" />
+                            <span>Undo</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setRemoveExistingLower(true)}
+                            className="text-[10px] text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 hover:underline flex items-center gap-1 font-medium"
+                            title="Remove already added Lower models from this case"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>Remove Models</span>
+                          </button>
+                        )
+                      ) : null}
                     </div>
                     <div
                       onDragOver={(e) => {
@@ -535,6 +647,8 @@ export default function EditCaseModal({
                       className={`border-2 border-dashed rounded-xl p-3 text-center transition-all min-h-[90px] flex flex-col justify-center cursor-pointer ${
                         lowerFile
                           ? "border-purple-400 dark:border-purple-500 bg-purple-50/50 dark:bg-purple-950/20"
+                          : removeExistingLower
+                          ? "border-rose-300 dark:border-rose-900/60 bg-rose-50/50 dark:bg-rose-950/20"
                           : dragOverLower
                           ? "border-amber-500 bg-amber-50 dark:bg-amber-950/20"
                           : "border-slate-200 dark:border-slate-700 hover:border-amber-400 dark:hover:border-amber-600 bg-white dark:bg-[#131A26]"
@@ -565,13 +679,48 @@ export default function EditCaseModal({
                             </span>
                           ) : null}
                         </div>
+                      ) : removeExistingLower ? (
+                        <div className="space-y-1 text-center py-0.5">
+                          <div className="w-6 h-6 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </div>
+                          <p className="font-bold text-rose-600 dark:text-rose-400 text-[11px]">
+                            Lower Models Removed
+                          </p>
+                          <p className="text-[9px] text-slate-500 dark:text-slate-400">
+                            Will be deleted on save · Drop new ZIP to replace
+                          </p>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRemoveExistingLower(false);
+                            }}
+                            className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 hover:bg-rose-200 dark:hover:bg-rose-900/60 transition-colors"
+                          >
+                            <Undo2 className="w-3 h-3" />
+                            <span>Keep original models</span>
+                          </button>
+                        </div>
                       ) : (
                         <div className="space-y-0.5">
-                          <UploadCloud className="w-4 h-4 mx-auto text-slate-400 dark:text-slate-500" />
-                          <p className="font-semibold text-slate-700 dark:text-slate-300 text-[11px]">
-                            Drop Lower ZIP
-                          </p>
-                          <p className="text-[9px] text-slate-400">Optional replacement</p>
+                          {hasExistingLower ? (
+                            <>
+                              <Check className="w-4 h-4 mx-auto text-emerald-500" />
+                              <p className="font-semibold text-emerald-700 dark:text-emerald-400 text-[11px]">
+                                Keeping Lower Models ({currentStages} stg)
+                              </p>
+                              <p className="text-[9px] text-slate-400">Drop new ZIP to replace</p>
+                            </>
+                          ) : (
+                            <>
+                              <UploadCloud className="w-4 h-4 mx-auto text-purple-500" />
+                              <p className="font-semibold text-purple-700 dark:text-purple-400 text-[11px]">
+                                + Add Lower Jaw ZIP
+                              </p>
+                              <p className="text-[9px] text-slate-400">Converts to Dual-Arch</p>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>

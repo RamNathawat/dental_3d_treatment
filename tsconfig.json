@@ -18,6 +18,9 @@
     "isolatedModules": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
+    "paths": {
+      "@/*": ["./portal/*"]
+    },
     "noEmit": true
   },
   "include": [
