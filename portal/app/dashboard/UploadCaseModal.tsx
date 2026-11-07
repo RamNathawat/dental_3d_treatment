@@ -27,6 +27,7 @@ import {
 import {
   processDentalZipInBrowser,
   extractDentalZipMetadata,
+  cleanPatientNameFromFilename,
   DentalZipMetadata,
   IngestResult,
 } from "@/lib/in-browser-converter";
@@ -121,14 +122,14 @@ export default function UploadCaseModal({
     try {
       const meta = await extractDentalZipMetadata(file, "upper");
       setUpperMeta(meta);
-      if (!patientName.trim()) {
+      if (!patientName.trim() && meta.patientName) {
         setPatientName(meta.patientName);
       }
     } catch (e) {
       console.warn("Could not extract metadata from upper zip:", e);
       if (!patientName.trim()) {
-        const cleanName = cleanFilename(file.name);
-        setPatientName(cleanName);
+        const cleanName = cleanPatientNameFromFilename(file.name);
+        if (cleanName) setPatientName(cleanName);
       }
     } finally {
       setIsInspectingUpper(false);
@@ -147,14 +148,14 @@ export default function UploadCaseModal({
     try {
       const meta = await extractDentalZipMetadata(file, "lower");
       setLowerMeta(meta);
-      if (!patientName.trim()) {
+      if (!patientName.trim() && meta.patientName) {
         setPatientName(meta.patientName);
       }
     } catch (e) {
       console.warn("Could not extract metadata from lower zip:", e);
       if (!patientName.trim()) {
-        const cleanName = cleanFilename(file.name);
-        setPatientName(cleanName);
+        const cleanName = cleanPatientNameFromFilename(file.name);
+        if (cleanName) setPatientName(cleanName);
       }
     } finally {
       setIsInspectingLower(false);
@@ -162,15 +163,7 @@ export default function UploadCaseModal({
   }
 
   function cleanFilename(filename: string): string {
-    return filename
-      .replace(/\.zip$/i, "")
-      .replace(/-\d{8}T\d{6}Z.*$/i, "")
-      .replace(/\s*\(\d+\)$/, "")
-      .replace(/[_-]\d+$/, "")
-      .replace(/[\s_-]*(?:upper|lower|maxilla|mandible|export|cad|model|models|treatment)[\s_-]*/gi, " ")
-      .replace(/[_-]+/g, " ")
-      .trim()
-      .replace(/\b([a-z])/g, (_, c) => c.toUpperCase());
+    return cleanPatientNameFromFilename(filename);
   }
 
   function handleResetUpper() {
@@ -590,12 +583,18 @@ export default function UploadCaseModal({
           <div className="space-y-3">
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200">
-                  Patient / Case Name <span className="text-amber-500">*</span>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
+                  <span>Patient / Case Name</span>
+                  <span className="text-rose-500 font-bold">*</span>
                 </label>
-                {(upperMeta || lowerMeta) && (
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
-                    Auto-populated from archive
+                {patientName.trim() ? (
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                    ✓ Name Specified
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-rose-500 font-medium">
+                    Required (e.g. Niya)
                   </span>
                 )}
               </div>
@@ -604,11 +603,8 @@ export default function UploadCaseModal({
                 disabled={isProcessing}
                 value={patientName}
                 onChange={(e) => setPatientName(e.target.value)}
-                placeholder={
-                  hasFiles
-                    ? "Enter patient or case name (e.g. Niya)"
-                    : "Drop ZIP above to auto-populate patient name"
-                }
+                placeholder="Enter patient or case name (e.g. Niya) *"
+                required
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:focus:ring-[#e0b457]/20 focus:border-slate-900 dark:focus:border-[#e0b457] transition-all disabled:bg-slate-50 dark:disabled:bg-slate-900"
               />
             </div>

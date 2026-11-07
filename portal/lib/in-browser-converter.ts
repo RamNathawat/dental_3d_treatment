@@ -1325,12 +1325,86 @@ export interface DentalZipMetadata {
   summary: string;
 }
 
-function isGenericFolderName(name: string): boolean {
-  const s = name.toLowerCase().trim();
-  return (
-    /^\d+$/.test(s) ||
-    /^(?:stage|step|segmented|template|upper|lower|models?|jaw|maxilla|mandible|archive|cad)$/i.test(s)
-  );
+export function isGenericOrTechnicalName(name: string): boolean {
+  if (!name || typeof name !== "string") return true;
+  const s = name.toLowerCase().replace(/[\s_\-.]+/g, " ").trim();
+  if (s.length <= 1) return true;
+  // If purely digits (e.g. "00", "01", "10")
+  if (/^\d+$/.test(s)) return true;
+
+  // Technical CAD, arch, stage, and export tokens
+  const technicalTokens = [
+    "segmented",
+    "unsegmented",
+    "segment",
+    "stage",
+    "stages",
+    "step",
+    "steps",
+    "stg",
+    "upper",
+    "lower",
+    "maxilla",
+    "maxillary",
+    "mandible",
+    "mandibular",
+    "jaw",
+    "jaws",
+    "model",
+    "models",
+    "cad",
+    "export",
+    "exports",
+    "archive",
+    "zip",
+    "stl",
+    "ply",
+    "obj",
+    "ortho",
+    "orthodontic",
+    "maestro",
+    "3shape",
+    "setup",
+    "aligner",
+    "aligners",
+    "template",
+    "patient",
+    "treatment",
+    "case",
+    "new case",
+    "dental",
+  ];
+
+  let stripped = s;
+  for (const token of technicalTokens) {
+    stripped = stripped.replace(new RegExp(`\\b${token}\\b`, "gi"), " ");
+  }
+  stripped = stripped.replace(/\d+/g, " ").replace(/[\s_\-.]+/g, " ").trim();
+  return stripped.length <= 1;
+}
+
+export function cleanPatientNameFromFilename(filename: string): string {
+  if (!filename) return "";
+  let clean = filename
+    .replace(/\.zip$/i, "")
+    .replace(/-\d{8}T\d{6}Z.*$/i, "")
+    .replace(/\s*\(\d+\)$/, "")
+    .replace(/[\s_-]*(?:upper|lower|maxilla|mandible|jaw|jaws|export|cad|model|models|treatment|segmented|unsegmented|archive)[\s_-]*/gi, " ")
+    .replace(/[\s_-]+\d+$/, "")
+    .replace(/[_-]+/g, " ")
+    .trim();
+
+  if (isGenericOrTechnicalName(clean)) {
+    return "";
+  }
+
+  // Capitalize nicely
+  clean = clean
+    .replace(/\b([a-z])/g, (_, c) => c.toUpperCase())
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return clean;
 }
 
 export async function extractDentalZipMetadata(
@@ -1348,23 +1422,29 @@ export async function extractDentalZipMetadata(
     let hasLower = explicitArch === "lower";
     const stages = new Set<number>();
 
+    // 1. Primary Priority: Check the actual file name dropped by the user (e.g. "Niya_Upper.zip" -> "Niya")
+    const outerClean = cleanPatientNameFromFilename(file.name);
+    if (outerClean && !isGenericOrTechnicalName(outerClean)) {
+      detectedName = outerClean;
+    }
+
+    // 2. Scan entry keys to detect stages, arch types, and inner archives
     for (const rawKey of entryKeys) {
       const k = rawKey.replace(/\\/g, "/");
       const lk = k.toLowerCase();
       if (lk.includes("upper") || lk.includes("maxill")) hasUpper = true;
       if (lk.includes("lower") || lk.includes("mandib")) hasLower = true;
 
-      const parts = k.split("/");
+      const parts = k.split("/").filter(Boolean);
       const base = parts[parts.length - 1] || "";
-
       const rawEntry = topEntries[rawKey];
+
       if (base.toLowerCase().endsWith(".zip") && rawEntry) {
-        const nameWithoutExt = base.replace(/\.zip$/i, "");
-        const cleaned = nameWithoutExt
-          .replace(/[\s_-]*(?:upper|lower|maxilla|mandible)[\s_-]*/gi, " ")
-          .trim();
-        if (cleaned && !isGenericFolderName(cleaned) && (!detectedName || cleaned.length > detectedName.length)) {
-          detectedName = cleaned;
+        if (!detectedName) {
+          const innerClean = cleanPatientNameFromFilename(base);
+          if (innerClean && !isGenericOrTechnicalName(innerClean)) {
+            detectedName = innerClean;
+          }
         }
         try {
           const innerEntries = fflate.unzipSync(rawEntry);
@@ -1382,35 +1462,22 @@ export async function extractDentalZipMetadata(
       }
     }
 
-    // Fallback: check top-level folder names
+    // 3. Secondary Fallback: Only check top-level folder names if outer file name was generic (e.g. "upper.zip")
+    // Filters out CAD folders like "00 Segmented", "01 Segmented", "Stage 00", "Models", etc.
     if (!detectedName) {
       for (const rawKey of entryKeys) {
         const k = rawKey.replace(/\\/g, "/");
         const parts = k.split("/").filter(Boolean);
         const firstPart = parts[0];
-        if (firstPart && !firstPart.startsWith("__") && !isGenericFolderName(firstPart)) {
-          detectedName = firstPart.trim();
-          break;
+        if (firstPart && !firstPart.startsWith("__")) {
+          const folderClean = cleanPatientNameFromFilename(firstPart);
+          if (folderClean && !isGenericOrTechnicalName(folderClean)) {
+            detectedName = folderClean;
+            break;
+          }
         }
       }
     }
-
-    // Fallback: clean outer filename
-    if (!detectedName) {
-      detectedName = file.name
-        .replace(/\.zip$/i, "")
-        .replace(/-\d{8}T\d{6}Z.*$/i, "")
-        .replace(/\s*\(\d+\)$/, "")
-        .replace(/[_-]\d+$/, "")
-        .replace(/[\s_-]*(?:upper|lower|maxilla|mandible|export|cad|model|models|treatment)[\s_-]*/gi, " ")
-        .replace(/[_-]+/g, " ")
-        .trim();
-    }
-
-    detectedName = detectedName
-      .replace(/\b([a-z])/g, (_, c) => c.toUpperCase())
-      .replace(/\s+/g, " ")
-      .trim();
 
     const totalStages = stages.size || 1;
     const archLabel =
@@ -1427,27 +1494,21 @@ export async function extractDentalZipMetadata(
         : "Dental Arch";
 
     return {
-      patientName: detectedName || "Patient Treatment",
+      patientName: detectedName || "",
       totalStages,
       hasUpper,
       hasLower,
       summary: `${totalStages} Stages · ${archLabel}`,
     };
   } catch (err) {
-    console.warn("Could not inspect zip metadata:", err);
-    const cleanName = file.name
-      .replace(/\.zip$/i, "")
-      .replace(/-\d{8}T\d{6}Z.*$/i, "")
-      .replace(/[_-]+/g, " ")
-      .trim()
-      .replace(/\b([a-z])/g, (_, c) => c.toUpperCase());
-
+    console.warn("Could not extract zip metadata:", err);
+    const outerClean = cleanPatientNameFromFilename(file.name);
     return {
-      patientName: cleanName || "Patient Treatment",
+      patientName: outerClean || "",
       totalStages: 1,
       hasUpper: explicitArch === "upper",
       hasLower: explicitArch === "lower",
-      summary: explicitArch === "upper" ? "Upper Arch Archive" : explicitArch === "lower" ? "Lower Arch Archive" : "CAD Archive",
+      summary: "1 Stage",
     };
   }
 }
