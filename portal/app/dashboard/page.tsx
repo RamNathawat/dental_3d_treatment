@@ -9,6 +9,7 @@ export interface DentalCase {
   dentist_id: string;
   patient_name: string;
   clinic_name?: string | null;
+  clinic_email?: string | null;
   patient_id?: string | null;
   patient_age?: number | null;
   patient_sex?: string | null;

@@ -972,6 +972,8 @@ describe("Treatment Viewer Application", () => {
         archType: "both",
         hasUpper: true,
         hasLower: true,
+        templateStages: [],
+        ambiguities: [],
         treatmentStages: [
           {
             id: "stage-18",
@@ -998,8 +1000,6 @@ describe("Treatment Viewer Application", () => {
             lower: { filename: "Patient Lower jaw - 20 - Model.glb" },
           },
         ],
-        templateStages: [],
-        ambiguities: [],
       };
 
       const storageFiles = [
@@ -1026,6 +1026,8 @@ describe("Treatment Viewer Application", () => {
         archType: "both",
         hasUpper: true,
         hasLower: true,
+        templateStages: [],
+        ambiguities: [],
         treatmentStages: [
           {
             id: "stage-20",
@@ -1044,8 +1046,6 @@ describe("Treatment Viewer Application", () => {
             },
           },
         ],
-        templateStages: [],
-        ambiguities: [],
       };
 
       const app = createTreatmentApp(root, {

@@ -26,6 +26,7 @@ export interface IngestResult {
   patientAge?: number;
   patientSex?: string;
   clinicName?: string;
+  clinicEmail?: string;
   error?: string;
 }
 
@@ -542,10 +543,13 @@ export async function processDentalZipInBrowser(
   clinicName?: string,
   patientAge?: number,
   patientSex?: string,
+  clinicEmail?: string,
+  existingCaseId?: string,
 ): Promise<IngestResult> {
   const supabase = createClient();
   const objLoader = new OBJLoader();
   const gltfExporter = new GLTFExporter();
+  const isEdit = Boolean(existingCaseId);
 
   try {
     let upperFile: File | null = null;
@@ -721,59 +725,155 @@ export async function processDentalZipInBrowser(
         ? `${cleanPatientName} [Lower]`
         : cleanPatientName;
 
-    // Create case row in database with optional clinic_name & patient_id
-    const shareToken = Array.from(crypto.getRandomValues(new Uint8Array(16)))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
+    // Create or update case row in database with optional clinic_name, clinic_email & patient_id
+    let shareToken: string;
+    let existingCaseRow: any = null;
+
+    if (isEdit) {
+      const { data: foundCase } = await supabase
+        .from("cases")
+        .select("*")
+        .eq("id", existingCaseId!)
+        .single();
+      existingCaseRow = foundCase;
+      shareToken =
+        foundCase?.share_token ||
+        Array.from(crypto.getRandomValues(new Uint8Array(16)))
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("");
+      if (!doctorNotes && foundCase?.doctor_notes) doctorNotes = foundCase.doctor_notes;
+      if (!ipr && foundCase?.ipr) ipr = foundCase.ipr;
+      if (clinicEmail === undefined && foundCase?.clinic_email) clinicEmail = foundCase.clinic_email;
+    } else {
+      shareToken = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+    }
 
     // Patient ID resolution: use provided ID or auto-generate unique PT-XXXX ID
     const effectivePatientId =
-      patientId?.trim() || `PT-${Math.floor(1000 + Math.random() * 9000)}`;
+      patientId?.trim() ||
+      existingCaseRow?.patient_id ||
+      `PT-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    const insertPayload: Record<string, unknown> = {
-      dentist_id: userId,
-      patient_name: dbPatientName,
-      total_stages: totalStages,
-      share_token: shareToken,
-      status: "ready",
-      patient_id: effectivePatientId,
-    };
-    if (clinicName?.trim()) insertPayload.clinic_name = clinicName.trim();
-    if (patientAge != null && !isNaN(patientAge) && patientAge > 0) {
-      insertPayload.patient_age = Math.round(patientAge);
-    }
-    if (patientSex?.trim()) insertPayload.patient_sex = patientSex.trim();
-    if (Array.isArray(ipr) && ipr.length > 0) insertPayload.ipr = ipr;
-    if (doctorNotes) insertPayload.doctor_notes = doctorNotes;
+    const effectiveClinicEmail = clinicEmail?.trim() || undefined;
 
-    let caseRow: any = null;
-    let { data: insertedData, error: caseErr } = await supabase
-      .from("cases")
-      .insert(insertPayload)
-      .select()
-      .single();
+    let caseId = existingCaseId || "";
 
-    if (caseErr && (caseErr.message?.includes("column") || caseErr.code === "PGRST204" || caseErr.code === "42703")) {
-      // Fallback: If DB migration has not run yet in Supabase, retry without extra columns
-      const fallbackPayload = {
+    if (isEdit) {
+      const updatePayload: Record<string, unknown> = {
+        patient_name: dbPatientName,
+        total_stages: totalStages,
+        updated_at: new Date().toISOString(),
+        patient_id: effectivePatientId,
+      };
+      if (clinicName !== undefined) updatePayload.clinic_name = clinicName?.trim() || null;
+      if (effectiveClinicEmail !== undefined) updatePayload.clinic_email = effectiveClinicEmail || null;
+      if (patientAge != null && !isNaN(patientAge) && patientAge > 0) {
+        updatePayload.patient_age = Math.round(patientAge);
+      } else if (patientAge === null) {
+        updatePayload.patient_age = null;
+      }
+      if (patientSex !== undefined) updatePayload.patient_sex = patientSex?.trim() || null;
+      if (Array.isArray(ipr)) updatePayload.ipr = ipr;
+      if (doctorNotes) {
+        updatePayload.doctor_notes = {
+          ...doctorNotes,
+          ...(effectiveClinicEmail ? { clinic_email: effectiveClinicEmail } : {}),
+        };
+      } else if (effectiveClinicEmail) {
+        updatePayload.doctor_notes = { clinic_email: effectiveClinicEmail };
+      }
+
+      const { data: updatedData, error: updateErr } = await supabase
+        .from("cases")
+        .update(updatePayload)
+        .eq("id", existingCaseId!)
+        .select()
+        .single();
+
+      if (
+        updateErr &&
+        (updateErr.message?.includes("column") ||
+          updateErr.code === "PGRST204" ||
+          updateErr.code === "42703")
+      ) {
+        delete updatePayload.clinic_email;
+        const retry = await supabase
+          .from("cases")
+          .update(updatePayload)
+          .eq("id", existingCaseId!)
+          .select()
+          .single();
+        if (retry.error) {
+          console.warn("Could not update case row in DB:", retry.error);
+        }
+      }
+      caseId = existingCaseId!;
+    } else {
+      const insertPayload: Record<string, unknown> = {
         dentist_id: userId,
         patient_name: dbPatientName,
         total_stages: totalStages,
         share_token: shareToken,
         status: "ready",
+        patient_id: effectivePatientId,
       };
-      const retry = await supabase.from("cases").insert(fallbackPayload).select().single();
-      if (retry.error || !retry.data) {
-        throw new Error(`Failed to create case in database: ${retry.error?.message || "Unknown error"}`);
+      if (clinicName?.trim()) insertPayload.clinic_name = clinicName.trim();
+      if (effectiveClinicEmail) insertPayload.clinic_email = effectiveClinicEmail;
+      if (patientAge != null && !isNaN(patientAge) && patientAge > 0) {
+        insertPayload.patient_age = Math.round(patientAge);
       }
-      caseRow = retry.data;
-    } else if (caseErr || !insertedData) {
-      throw new Error(`Failed to create case in database: ${caseErr?.message || "Unknown error"}`);
-    } else {
-      caseRow = insertedData;
-    }
+      if (patientSex?.trim()) insertPayload.patient_sex = patientSex.trim();
+      if (Array.isArray(ipr) && ipr.length > 0) insertPayload.ipr = ipr;
+      if (doctorNotes) {
+        insertPayload.doctor_notes = {
+          ...doctorNotes,
+          ...(effectiveClinicEmail ? { clinic_email: effectiveClinicEmail } : {}),
+        };
+      } else if (effectiveClinicEmail) {
+        insertPayload.doctor_notes = { clinic_email: effectiveClinicEmail };
+      }
 
-    const caseId = caseRow.id;
+      let caseRow: any = null;
+      let { data: insertedData, error: caseErr } = await supabase
+        .from("cases")
+        .insert(insertPayload)
+        .select()
+        .single();
+
+      if (
+        caseErr &&
+        (caseErr.message?.includes("column") ||
+          caseErr.code === "PGRST204" ||
+          caseErr.code === "42703")
+      ) {
+        delete insertPayload.clinic_email;
+        const retry = await supabase.from("cases").insert(insertPayload).select().single();
+        if (retry.error || !retry.data) {
+          const fallbackPayload = {
+            dentist_id: userId,
+            patient_name: dbPatientName,
+            total_stages: totalStages,
+            share_token: shareToken,
+            status: "ready",
+          };
+          const fallbackRetry = await supabase.from("cases").insert(fallbackPayload).select().single();
+          if (fallbackRetry.error || !fallbackRetry.data) {
+            throw new Error(`Failed to create case in database: ${fallbackRetry.error?.message || "Unknown error"}`);
+          }
+          caseRow = fallbackRetry.data;
+        } else {
+          caseRow = retry.data;
+        }
+      } else if (caseErr || !insertedData) {
+        throw new Error(`Failed to create case in database: ${caseErr?.message || "Unknown error"}`);
+      } else {
+        caseRow = insertedData;
+      }
+
+      caseId = caseRow.id;
+    }
     let completedSteps = 0;
     const totalSteps = totalStages * (archType === "both" ? 2 : 1);
 
@@ -957,6 +1057,7 @@ export async function processDentalZipInBrowser(
       patientAge: patientAge != null && !isNaN(patientAge) && patientAge > 0 ? Math.round(patientAge) : undefined,
       patientSex: patientSex?.trim() || undefined,
       clinicName: clinicName?.trim() || undefined,
+      clinicEmail: effectiveClinicEmail,
       archType,
       hasUpper,
       hasLower,
@@ -1038,6 +1139,7 @@ export async function processDentalZipInBrowser(
       patientAge: patientAge != null && !isNaN(patientAge) && patientAge > 0 ? Math.round(patientAge) : undefined,
       patientSex: patientSex?.trim() || undefined,
       clinicName: clinicName?.trim() || undefined,
+      clinicEmail: effectiveClinicEmail,
     };
   } catch (err) {
     console.error("In-browser ingestion error:", err);

@@ -17,7 +17,13 @@ import {
   Hash,
   Calendar,
   User,
+  Mail,
 } from "lucide-react";
+import {
+  getSavedClinicEmails,
+  saveClinicEmail,
+  getSavedEmailForClinic,
+} from "@/lib/clinic-email-storage";
 import {
   processDentalZipInBrowser,
   extractDentalZipMetadata,
@@ -58,6 +64,23 @@ export default function UploadCaseModal({
   const [patientAge, setPatientAge] = useState("");
   const [patientSex, setPatientSex] = useState("");
   const [clinicName, setClinicName] = useState("");
+  const [clinicEmail, setClinicEmail] = useState("");
+  const [savedEmails, setSavedEmails] = useState<string[]>([]);
+
+  // Load remembered clinic emails for 1-click autocomplete
+  useState(() => {
+    if (typeof window !== "undefined") {
+      setSavedEmails(getSavedClinicEmails());
+    }
+  });
+
+  function handleClinicNameChange(name: string) {
+    setClinicName(name);
+    if (!clinicEmail.trim()) {
+      const match = getSavedEmailForClinic(name);
+      if (match) setClinicEmail(match);
+    }
+  }
   const [upperFile, setUpperFile] = useState<File | null>(null);
   const [lowerFile, setLowerFile] = useState<File | null>(null);
   const [upperMeta, setUpperMeta] = useState<DentalZipMetadata | null>(null);
@@ -213,6 +236,7 @@ export default function UploadCaseModal({
     const parsedAge = parseInt(patientAge.trim(), 10);
     const resolvedAge = !isNaN(parsedAge) && parsedAge > 0 && parsedAge <= 120 ? parsedAge : undefined;
     const resolvedSex = patientSex.trim() || undefined;
+    const resolvedClinicEmail = clinicEmail.trim() || undefined;
 
     const result: IngestResult = await processDentalZipInBrowser(
       {
@@ -231,9 +255,13 @@ export default function UploadCaseModal({
       clinicName.trim() || undefined,
       resolvedAge,
       resolvedSex,
+      resolvedClinicEmail,
     );
 
     if (result.ok && result.caseId) {
+      if (resolvedClinicEmail) {
+        saveClinicEmail(resolvedClinicEmail, clinicName.trim() || undefined);
+      }
       const archType = result.archType || (upperFile && lowerFile ? "both" : upperFile ? "upper" : "lower");
       const cleanName = patientName.replace(/\s*\[(Upper|Lower|Dual)\]/i, "").trim();
       const dbName =
@@ -248,6 +276,7 @@ export default function UploadCaseModal({
         dentist_id: userId,
         patient_name: dbName,
         clinic_name: clinicName.trim() || null,
+        clinic_email: resolvedClinicEmail || null,
         patient_id: result.patientId || resolvedPatientId,
         patient_age: resolvedAge ?? null,
         patient_sex: resolvedSex ?? null,
@@ -614,7 +643,7 @@ export default function UploadCaseModal({
                   type="text"
                   disabled={isProcessing}
                   value={clinicName}
-                  onChange={(e) => setClinicName(e.target.value)}
+                  onChange={(e) => handleClinicNameChange(e.target.value)}
                   placeholder="e.g. Smile Dental Clinic"
                   className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:focus:ring-[#e0b457]/20 focus:border-slate-900 dark:focus:border-[#e0b457] transition-all disabled:bg-slate-50 dark:disabled:bg-slate-900"
                 />
@@ -622,6 +651,57 @@ export default function UploadCaseModal({
                   Associates the case with a clinic branch.
                 </p>
               </div>
+            </div>
+
+            {/* Clinic Email Field with Autocomplete & Remembered Emails */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                  <Mail className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
+                  <span>Clinic Email</span>
+                  <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500">(Optional)</span>
+                </label>
+                {savedEmails.length > 0 && (
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                    {savedEmails.length} remembered {savedEmails.length === 1 ? "email" : "emails"}
+                  </span>
+                )}
+              </div>
+              <div className="relative">
+                <input
+                  type="email"
+                  list="saved-clinic-emails-upload"
+                  disabled={isProcessing}
+                  value={clinicEmail}
+                  onChange={(e) => setClinicEmail(e.target.value)}
+                  placeholder="e.g. clinic@smiledental.com (auto-filled for 1-click mail button)"
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:focus:ring-[#e0b457]/20 focus:border-slate-900 dark:focus:border-[#e0b457] transition-all disabled:bg-slate-50 dark:disabled:bg-slate-900"
+                />
+                <datalist id="saved-clinic-emails-upload">
+                  {savedEmails.map((em) => (
+                    <option key={em} value={em} />
+                  ))}
+                </datalist>
+              </div>
+              {/* Quick-select chips if not typed */}
+              {savedEmails.length > 0 && !clinicEmail && (
+                <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500">Recent:</span>
+                  {savedEmails.slice(0, 3).map((em) => (
+                    <button
+                      key={em}
+                      type="button"
+                      onClick={() => setClinicEmail(em)}
+                      className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-[#ffd166] hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                    >
+                      {em}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+                Allows clicking the &quot;Mail&quot; button on this case to immediately dispatch the 3D viewer link to the clinic without re-typing.
+              </p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

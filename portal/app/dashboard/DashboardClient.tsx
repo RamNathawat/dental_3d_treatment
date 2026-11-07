@@ -25,11 +25,15 @@ import {
   FileText,
   Building2,
   Hash,
+  Mail,
+  Pencil,
 } from "lucide-react";
 import { DentalCase } from "./page";
 import UploadCaseModal from "./UploadCaseModal";
 import EditIprModal from "./EditIprModal";
 import EditNotesModal from "./EditNotesModal";
+import ShareModal from "./ShareModal";
+import EditCaseModal from "./EditCaseModal";
 
 interface DashboardClientProps {
   email: string;
@@ -49,6 +53,8 @@ export default function DashboardClient({
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [selectedIprCase, setSelectedIprCase] = useState<DentalCase | null>(null);
   const [selectedNotesCase, setSelectedNotesCase] = useState<DentalCase | null>(null);
+  const [selectedShareCase, setSelectedShareCase] = useState<DentalCase | null>(null);
+  const [selectedEditCase, setSelectedEditCase] = useState<DentalCase | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isDark, setIsDark] = useState<boolean>(false);
 
@@ -127,6 +133,18 @@ export default function DashboardClient({
   function handleCaseCreated(newCase: DentalCase) {
     setCases((prev) => [newCase, ...prev]);
     showToast(`Case "${newCase.patient_name}" created and synced to cloud`);
+  }
+
+  function handleCaseUpdated(updatedCase: DentalCase) {
+    setCases((prev) =>
+      prev.map((c) => (c.id === updatedCase.id ? updatedCase : c))
+    );
+  }
+
+  function handleEmailUpdated(caseId: string, email: string) {
+    setCases((prev) =>
+      prev.map((c) => (c.id === caseId ? { ...c, clinic_email: email } : c))
+    );
   }
 
   const filteredCases = cases.filter((c) => {
@@ -471,9 +489,16 @@ export default function DashboardClient({
                             Ready
                           </span>
                           <button
+                            onClick={() => setSelectedEditCase(item)}
+                            title="Edit case details & re-enter 3D models"
+                            className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-300 dark:text-slate-600 hover:text-amber-600 dark:hover:text-[#ffd166] hover:bg-amber-50 dark:hover:bg-amber-950/40 transition-colors ml-1"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
                             onClick={() => handleDeleteCase(item.id, item.patient_name)}
                             title="Delete case"
-                            className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-300 dark:text-slate-600 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors ml-1"
+                            className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-300 dark:text-slate-600 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -530,25 +555,19 @@ export default function DashboardClient({
                         <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 dark:text-slate-900" />
                       </a>
 
-                      {/* Secondary CTA: Share Link */}
+                      {/* Secondary CTA: Share Link (Opens popup with Copy Link & Clinic Mailbox) */}
                       <button
-                        onClick={() => handleCopyShareLink(item.share_token)}
-                        className={`py-2.5 px-3.5 rounded-xl text-xs font-semibold border transition-all flex items-center justify-center gap-1.5 active:scale-98 ${
-                          copiedToken === item.share_token
-                            ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700"
-                            : "bg-white dark:bg-[#1A2234] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-[#232D42] border-slate-200 dark:border-slate-700 shadow-2xs hover:dark:border-[#e0b457]/40"
-                        }`}
+                        onClick={() => setSelectedShareCase(item)}
+                        className="py-2.5 px-3.5 rounded-xl text-xs font-semibold border transition-all flex items-center justify-center gap-1.5 active:scale-98 bg-white dark:bg-[#1A2234] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-[#232D42] border-slate-200 dark:border-slate-700 shadow-2xs hover:dark:border-[#e0b457]/40"
+                        title="Share 3D progression: copy patient link or email to clinic"
                       >
-                        {copiedToken === item.share_token ? (
-                          <>
-                            <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                            <span>Link Copied</span>
-                          </>
-                        ) : (
-                          <>
-                            <Share2 className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                            <span>Share Link</span>
-                          </>
+                        <Share2 className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+                        <span>Share</span>
+                        {item.clinic_email && (
+                          <span
+                            className="w-1.5 h-1.5 rounded-full bg-sky-500 ml-0.5"
+                            title="Clinic email connected"
+                          />
                         )}
                       </button>
 
@@ -614,6 +633,32 @@ export default function DashboardClient({
               `Doctor remarks updated for ${selectedNotesCase.patient_name}`,
             )
           }
+        />
+      )}
+
+      {/* ─── Share Modal (Copy Link & Send to Clinic) ────────────────────── */}
+      {selectedShareCase && (
+        <ShareModal
+          isOpen={Boolean(selectedShareCase)}
+          onClose={() => setSelectedShareCase(null)}
+          caseItem={selectedShareCase}
+          doctorName={email !== "Doctor" ? email.split("@")[0] : undefined}
+          allCases={cases}
+          onEmailUpdated={handleEmailUpdated}
+          onToast={showToast}
+        />
+      )}
+
+      {/* ─── Edit Case & Re-enter Models Modal ────────────────────────────── */}
+      {selectedEditCase && (
+        <EditCaseModal
+          isOpen={Boolean(selectedEditCase)}
+          onClose={() => setSelectedEditCase(null)}
+          caseItem={selectedEditCase}
+          userId={userId}
+          allCases={cases}
+          onCaseUpdated={handleCaseUpdated}
+          onToast={showToast}
         />
       )}
     </div>
