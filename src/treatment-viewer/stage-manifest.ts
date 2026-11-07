@@ -24,6 +24,10 @@ export interface StageDefinition {
   readonly id: string;
   /** Actual stage number if numeric (e.g. 1, 2, 5, 6). */
   readonly stageNumber?: number;
+  /** Upper arch stage number when upper and lower stage counts differ (e.g. 20). */
+  readonly upperStageNumber?: number;
+  /** Lower arch stage number when upper and lower stage counts differ (e.g. 18). */
+  readonly lowerStageNumber?: number;
   /** Human-readable label: "Stage 5", "Template (Doctor Reference)", etc. */
   readonly label: string;
   /** Whether this stage is doctor-only (excluded from patient progression). */
@@ -557,4 +561,162 @@ export function pairTreatmentFiles(
     templateStages,
     ambiguities,
   };
+}
+
+/**
+ * Resolves the effective upper stage number and lower stage number for a stage definition.
+ * Accurately reports when one arch has finished alignment earlier than the other arch
+ * (e.g. Upper 20 of 23, but Lower stopped at 18).
+ */
+export function getArchStageNumbers(stage: StageDefinition): {
+  upperNum?: number;
+  lowerNum?: number;
+  hasMismatch: boolean;
+} {
+  let upperNum = stage.upperStageNumber;
+  let lowerNum = stage.lowerStageNumber;
+
+  if (upperNum === undefined && stage.upper) {
+    const filename = stage.upper.filename || stage.upper.url || "";
+    const match =
+      filename.match(/(?:upper|maxill)[\s_.-]*0*([1-9]\d?)/i) ||
+      filename.match(/0*([1-9]\d?)[\s_.-]*(?:upper|maxill)/i) ||
+      filename.match(/(?:jaw|model)[\s_.-]*0*([1-9]\d?)/i);
+    if (match && match[1]) {
+      upperNum = parseInt(match[1], 10);
+    } else if (stage.stageNumber !== undefined) {
+      upperNum = stage.stageNumber;
+    }
+  }
+
+  if (lowerNum === undefined && stage.lower) {
+    const filename = stage.lower.filename || stage.lower.url || "";
+    const match =
+      filename.match(/(?:lower|mandib)[\s_.-]*0*([1-9]\d?)/i) ||
+      filename.match(/0*([1-9]\d?)[\s_.-]*(?:lower|mandib)/i) ||
+      filename.match(/(?:jaw|model)[\s_.-]*0*([1-9]\d?)/i);
+    if (match && match[1]) {
+      lowerNum = parseInt(match[1], 10);
+    } else if (stage.stageNumber !== undefined) {
+      lowerNum = stage.stageNumber;
+    }
+  }
+
+  const hasMismatch =
+    upperNum !== undefined &&
+    lowerNum !== undefined &&
+    upperNum !== lowerNum;
+
+  return { upperNum, lowerNum, hasMismatch };
+}
+
+/**
+ * Normalizes manifest stages when upper and lower jaw counts differ (e.g. Upper 23 stages, Lower 18 stages).
+ * When storage files or actual existing stage numbers are known, clamps the completed arch to its
+ * final stage instead of letting it request non-existent models and crash with HTTP 400/404.
+ */
+export function normalizeManifestStages(
+  manifest: CaseManifest,
+  storageFileNames?: string[],
+): CaseManifest {
+  if (!manifest || !Array.isArray(manifest.treatmentStages) || manifest.treatmentStages.length === 0) {
+    return manifest;
+  }
+
+  let maxExistingUpper = 0;
+  let maxExistingLower = 0;
+
+  if (Array.isArray(storageFileNames) && storageFileNames.length > 0) {
+    for (const name of storageFileNames) {
+      const isUpper = /upper|maxill/i.test(name);
+      const isLower = /lower|mandib/i.test(name);
+      const numMatch =
+        name.match(/(?:jaw|model|upper|lower)[\s_.-]*0*([1-9]\d?)/i) ||
+        name.match(/0*([1-9]\d?)[\s_.-]*(?:model|glb|stl)/i);
+      if (numMatch && numMatch[1]) {
+        const n = parseInt(numMatch[1], 10);
+        if (isUpper && n > maxExistingUpper) maxExistingUpper = n;
+        if (isLower && n > maxExistingLower) maxExistingLower = n;
+      }
+    }
+  }
+
+  // If no storage file list is available, detect the highest stages present in the manifest
+  if (maxExistingUpper === 0 || maxExistingLower === 0) {
+    for (const s of manifest.treatmentStages) {
+      const { upperNum, lowerNum } = getArchStageNumbers(s);
+      if (upperNum && upperNum > maxExistingUpper) maxExistingUpper = upperNum;
+      if (lowerNum && lowerNum > maxExistingLower) maxExistingLower = lowerNum;
+    }
+  }
+
+  const mutableStages = manifest.treatmentStages as StageDefinition[];
+
+  for (let i = 0; i < mutableStages.length; i++) {
+    const s = mutableStages[i]!;
+    const nominalStage = s.stageNumber ?? i + 1;
+
+    let effUpper = s.upperStageNumber ?? nominalStage;
+    let effLower = s.lowerStageNumber ?? nominalStage;
+
+    if (maxExistingUpper > 0 && effUpper > maxExistingUpper) {
+      effUpper = maxExistingUpper;
+    }
+    if (maxExistingLower > 0 && effLower > maxExistingLower) {
+      effLower = maxExistingLower;
+    }
+
+    let updatedUpper = s.upper;
+    let updatedLower = s.lower;
+
+    if (updatedUpper && effUpper !== nominalStage) {
+      const pad = String(effUpper).padStart(2, "0");
+      const cleanUpperName = updatedUpper.filename.replace(
+        /(?:Upper\s+jaw\s*-\s*)\d+(\s*-\s*Model\.(?:glb|stl))/i,
+        `Upper jaw - ${pad}$1`,
+      );
+      const cleanUpperUrl = updatedUpper.url
+        ? updatedUpper.url.replace(
+            /(?:Upper(?:%20|\s)+jaw(?:%20|\s)*-(?:%20|\s)*)\d+((?:%20|\s)*-(?:%20|\s)*Model\.(?:glb|stl))/i,
+            `Upper%20jaw%20-%20${pad}$1`,
+          )
+        : undefined;
+
+      updatedUpper = {
+        ...updatedUpper,
+        filename: cleanUpperName,
+        url: cleanUpperUrl || updatedUpper.url,
+      };
+    }
+
+    if (updatedLower && effLower !== nominalStage) {
+      const pad = String(effLower).padStart(2, "0");
+      const cleanLowerName = updatedLower.filename.replace(
+        /(?:Lower\s+jaw\s*-\s*)\d+(\s*-\s*Model\.(?:glb|stl))/i,
+        `Lower jaw - ${pad}$1`,
+      );
+      const cleanLowerUrl = updatedLower.url
+        ? updatedLower.url.replace(
+            /(?:Lower(?:%20|\s)+jaw(?:%20|\s)*-(?:%20|\s)*)\d+((?:%20|\s)*-(?:%20|\s)*Model\.(?:glb|stl))/i,
+            `Lower%20jaw%20-%20${pad}$1`,
+          )
+        : undefined;
+
+      updatedLower = {
+        ...updatedLower,
+        filename: cleanLowerName,
+        url: cleanLowerUrl || updatedLower.url,
+      };
+    }
+
+    mutableStages[i] = {
+      ...s,
+      upperStageNumber: effUpper,
+      lowerStageNumber: effLower,
+      upper: updatedUpper,
+      lower: updatedLower,
+    };
+  }
+
+  return manifest;
 }

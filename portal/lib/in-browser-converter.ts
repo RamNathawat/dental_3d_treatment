@@ -964,26 +964,49 @@ export async function processDentalZipInBrowser(
       doctorNotes: doctorNotes || undefined,
       treatmentStages: availableStages.map((stageNum) => {
         const pad = String(stageNum).padStart(2, "0");
-        const upperFilename = `${cleanPatientName} Upper jaw - ${pad} - Model.glb`;
-        const lowerFilename = `${cleanPatientName} Lower jaw - ${pad} - Model.glb`;
+
+        let upperAsset: { filename: string; url: string } | undefined = undefined;
+        let lowerAsset: { filename: string; url: string } | undefined = undefined;
+        let effUpperNum: number | undefined = undefined;
+        let effLowerNum: number | undefined = undefined;
+
+        if (hasUpper) {
+          const maxUpperStage = upperStages.size > 0 ? Math.max(...upperStages.keys()) : 0;
+          const minUpperStage = upperStages.size > 0 ? Math.min(...upperStages.keys()) : 1;
+          effUpperNum = upperStages.has(stageNum)
+            ? stageNum
+            : Math.max(minUpperStage, Math.min(maxUpperStage, stageNum));
+          const padUpper = String(effUpperNum).padStart(2, "0");
+          const upperFilename = `${cleanPatientName} Upper jaw - ${padUpper} - Model.glb`;
+          upperAsset = {
+            filename: upperFilename,
+            url: `${baseStorage}/${encodeURIComponent(upperFilename)}`,
+          };
+        }
+
+        if (hasLower) {
+          const maxLowerStage = lowerStages.size > 0 ? Math.max(...lowerStages.keys()) : 0;
+          const minLowerStage = lowerStages.size > 0 ? Math.min(...lowerStages.keys()) : 1;
+          effLowerNum = lowerStages.has(stageNum)
+            ? stageNum
+            : Math.max(minLowerStage, Math.min(maxLowerStage, stageNum));
+          const padLower = String(effLowerNum).padStart(2, "0");
+          const lowerFilename = `${cleanPatientName} Lower jaw - ${padLower} - Model.glb`;
+          lowerAsset = {
+            filename: lowerFilename,
+            url: `${baseStorage}/${encodeURIComponent(lowerFilename)}`,
+          };
+        }
 
         return {
           id: `stage-${pad}`,
           stageNumber: stageNum,
+          upperStageNumber: effUpperNum,
+          lowerStageNumber: effLowerNum,
           label: `Stage ${stageNum}`,
           doctorOnly: false,
-          upper: hasUpper
-            ? {
-                filename: upperFilename,
-                url: `${baseStorage}/${encodeURIComponent(upperFilename)}`,
-              }
-            : undefined,
-          lower: hasLower
-            ? {
-                filename: lowerFilename,
-                url: `${baseStorage}/${encodeURIComponent(lowerFilename)}`,
-              }
-            : undefined,
+          upper: upperAsset,
+          lower: lowerAsset,
         };
       }),
       templateStages: [],

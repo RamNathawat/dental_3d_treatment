@@ -4,7 +4,7 @@
  */
 import "./treatment.css";
 import { createTreatmentApp } from "./treatment-app";
-import type { CaseManifest } from "./stage-manifest";
+import { normalizeManifestStages, type CaseManifest } from "./stage-manifest";
 
 const root = document.querySelector<HTMLElement>("#app");
 if (root === null) throw new Error("The page has no #app mount point.");
@@ -85,6 +85,28 @@ async function init() {
 
         const baseStorage = `${supabaseUrl}/storage/v1/object/public/treatment-models/${caseId}`;
 
+        // Discover genuine uploaded model files for each arch to safely resolve unequal upper/lower stage counts
+        let storageFiles: string[] | undefined = undefined;
+        try {
+          const listRes = await fetch(`${supabaseUrl}/storage/v1/object/list/treatment-models`, {
+            method: "POST",
+            headers: {
+              apikey: supabaseKey,
+              Authorization: `Bearer ${supabaseKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ prefix: caseId, limit: 300 }),
+          });
+          if (listRes.ok) {
+            const rawList = await listRes.json();
+            if (Array.isArray(rawList)) {
+              storageFiles = rawList.map((f: { name: string }) => f.name);
+            }
+          }
+        } catch (listErr) {
+          console.info("Could not list storage files, relying on manifest/runtime fallback:", listErr);
+        }
+
         // 1. First attempt to load stored manifest.json if present (with zero-cache buster)
         try {
           const manifestRes = await fetch(`${baseStorage}/manifest.json?t=${Date.now()}`, {
@@ -97,6 +119,8 @@ async function init() {
               Array.isArray(storedManifest.treatmentStages) &&
               storedManifest.treatmentStages.length > 0
             ) {
+              normalizeManifestStages(storedManifest, storageFiles);
+
               // Merge in database records if manifest is missing any recent fields
               if ((!storedManifest.ipr || storedManifest.ipr.length === 0) && Array.isArray(caseRecord.ipr) && caseRecord.ipr.length > 0) {
                 storedManifest.ipr = caseRecord.ipr;
@@ -181,6 +205,7 @@ async function init() {
           ambiguities: [],
         };
 
+        normalizeManifestStages(dynamicManifest, storageFiles);
         createTreatmentApp(root!, { caseManifest: dynamicManifest });
         return;
       }

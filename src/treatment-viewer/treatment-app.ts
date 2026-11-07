@@ -27,7 +27,11 @@ import type {
   RawFileDescriptor,
   StageDefinition,
 } from "./stage-manifest";
-import { pairTreatmentFiles } from "./stage-manifest";
+import {
+  pairTreatmentFiles,
+  getArchStageNumbers,
+  normalizeManifestStages,
+} from "./stage-manifest";
 import {
   loadStageModels,
   prefetchStageModels,
@@ -149,7 +153,8 @@ export function createTreatmentApp(
   const autoplayInterval = options.autoplayIntervalMs ?? 240;
   const transitionDuration = options.transitionDurationMs ?? 0;
 
-  const manifest = options.caseManifest ?? DEFAULT_CASE_MANIFEST;
+  const rawManifest = options.caseManifest ?? DEFAULT_CASE_MANIFEST;
+  const manifest = normalizeManifestStages(rawManifest);
   const caseHasUpper = manifest.treatmentStages.some((s) => Boolean(s.upper));
   const caseHasLower = manifest.treatmentStages.some((s) => Boolean(s.lower));
   const isSingleArchUpper = caseHasUpper && !caseHasLower;
@@ -1050,10 +1055,17 @@ export function createTreatmentApp(
     const count = state.manifest.treatmentStages.length;
     if (count <= 1) return;
 
+    const prevIndex = state.currentIndex;
     const nextIndex = (state.currentIndex + 1) % count;
     await navigate(nextIndex);
 
     if (!state.isPlaying) return;
+
+    // Safety guard: If navigate did not advance (e.g. stage error), do not cycle repeatedly in an infinite loop
+    if (state.currentIndex === prevIndex && state.currentIndex !== nextIndex) {
+      stopPlay();
+      return;
+    }
 
     // At the final outcome stage, pause for 1200ms so user can appreciate the final result before looping
     const delay = nextIndex === count - 1 ? 1200 : autoplayInterval;
@@ -2298,7 +2310,7 @@ export function createTreatmentApp(
       prevUpperId = null;
       prevLowerId = null;
     }
-    state.manifest = newManifest;
+    state.manifest = normalizeManifestStages(newManifest);
     state.currentIndex = -1;
     state.activeTemplateStage = null;
     // Reset initial-stage tooth centroids so hover delta recalculates for the new case.
@@ -2412,9 +2424,22 @@ export function createTreatmentApp(
       card.className = "tv-stage-card";
       card.title = `Go to ${stg.label}`;
       const thumb = div("tv-stage-card__thumb", [String(stg.stageNumber ?? idx + 1)]);
+
+      const { upperNum, lowerNum, hasMismatch } = getArchStageNumbers(stg);
+      const metaText = hasMismatch
+        ? `Upper ${upperNum} · Lower ${lowerNum}`
+        : `Stage ${stg.stageNumber ?? idx + 1} of ${count}`;
+
+      const metaEl = div(
+        hasMismatch
+          ? "tv-stage-card__meta tv-stage-card__meta--mismatch"
+          : "tv-stage-card__meta",
+        [metaText],
+      );
+
       const info = div("tv-stage-card__info", [
         div("tv-stage-card__label", [stg.label]),
-        div("tv-stage-card__meta", [`Stage ${stg.stageNumber ?? idx + 1} of ${count}`]),
+        metaEl,
       ]);
       const pip = div("tv-stage-card__pip");
       card.append(thumb, info, pip);
@@ -2451,10 +2476,21 @@ export function createTreatmentApp(
       stageLabel.textContent = `${state.activeTemplateStage.label} (Doctor Reference)`;
     } else if (current) {
       const actualNumber = current.stageNumber ?? targetIdx + 1;
+      const { upperNum, lowerNum, hasMismatch } = getArchStageNumbers(current);
+      let desc = `Stage ${actualNumber} (${targetIdx + 1} of ${count})`;
+      if (hasMismatch) {
+        if (state.upperVisible && state.lowerVisible) {
+          desc = `Stage ${actualNumber} (${targetIdx + 1} of ${count}) · Upper ${upperNum} · Lower ${lowerNum}`;
+        } else if (state.upperVisible && !state.lowerVisible) {
+          desc = `Stage ${actualNumber} (${targetIdx + 1} of ${count}) · Upper ${upperNum}`;
+        } else if (!state.upperVisible && state.lowerVisible) {
+          desc = `Stage ${actualNumber} (${targetIdx + 1} of ${count}) · Lower ${lowerNum} (final)`;
+        }
+      }
       const isLoading = !state.isPlaying && isStageLoading && pendingStageIndex !== null && pendingStageIndex !== state.currentIndex;
       stageLabel.textContent = isLoading
-        ? `Stage ${actualNumber} (${targetIdx + 1} of ${count}) · Loading 3D model…`
-        : `Stage ${actualNumber} (${targetIdx + 1} of ${count})`;
+        ? `${desc} · Loading 3D model…`
+        : desc;
     } else {
       stageLabel.textContent = `Stage — / ${count}`;
     }

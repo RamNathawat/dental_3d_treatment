@@ -24,7 +24,11 @@ import {
   UPPER_ARCH_COLOUR,
   UPPER_ARCH_ID,
 } from "../src/treatment-viewer/treatment-app";
-import type { CaseManifest } from "../src/treatment-viewer/stage-manifest";
+import {
+  getArchStageNumbers,
+  normalizeManifestStages,
+  type CaseManifest,
+} from "../src/treatment-viewer/stage-manifest";
 import {
   identifyToothAtPoint,
   computeToothCentroids,
@@ -941,6 +945,172 @@ describe("Treatment Viewer Application", () => {
       expect(attachmentsBtn?.dataset.tool).toBe("attachments");
 
       app.dispose();
+    });
+
+    it("correctly identifies unequal stage numbers between upper and lower arches", () => {
+      const stageMismatch = {
+        id: "stage-20",
+        stageNumber: 20,
+        upperStageNumber: 20,
+        lowerStageNumber: 18,
+        label: "Stage 20",
+        doctorOnly: false,
+        upper: { filename: "Patient Upper jaw - 20 - Model.glb" },
+        lower: { filename: "Patient Lower jaw - 18 - Model.glb" },
+      };
+
+      const result = getArchStageNumbers(stageMismatch);
+      expect(result.upperNum).toBe(20);
+      expect(result.lowerNum).toBe(18);
+      expect(result.hasMismatch).toBe(true);
+    });
+
+    it("normalizes manifest when lower arch finishes earlier than upper arch", () => {
+      const rawManifest: CaseManifest = {
+        caseId: "case-unequal-stages",
+        patientName: "Patient Unequal",
+        archType: "both",
+        hasUpper: true,
+        hasLower: true,
+        treatmentStages: [
+          {
+            id: "stage-18",
+            stageNumber: 18,
+            label: "Stage 18",
+            doctorOnly: false,
+            upper: { filename: "Patient Upper jaw - 18 - Model.glb" },
+            lower: { filename: "Patient Lower jaw - 18 - Model.glb" },
+          },
+          {
+            id: "stage-19",
+            stageNumber: 19,
+            label: "Stage 19",
+            doctorOnly: false,
+            upper: { filename: "Patient Upper jaw - 19 - Model.glb" },
+            lower: { filename: "Patient Lower jaw - 19 - Model.glb" },
+          },
+          {
+            id: "stage-20",
+            stageNumber: 20,
+            label: "Stage 20",
+            doctorOnly: false,
+            upper: { filename: "Patient Upper jaw - 20 - Model.glb" },
+            lower: { filename: "Patient Lower jaw - 20 - Model.glb" },
+          },
+        ],
+        templateStages: [],
+        ambiguities: [],
+      };
+
+      const storageFiles = [
+        "Patient Upper jaw - 18 - Model.glb",
+        "Patient Upper jaw - 19 - Model.glb",
+        "Patient Upper jaw - 20 - Model.glb",
+        "Patient Lower jaw - 18 - Model.glb",
+      ];
+
+      const normalized = normalizeManifestStages(rawManifest, storageFiles);
+      expect(normalized.treatmentStages[1]?.upperStageNumber).toBe(19);
+      expect(normalized.treatmentStages[1]?.lowerStageNumber).toBe(18);
+      expect(normalized.treatmentStages[1]?.lower?.filename).toBe("Patient Lower jaw - 18 - Model.glb");
+
+      expect(normalized.treatmentStages[2]?.upperStageNumber).toBe(20);
+      expect(normalized.treatmentStages[2]?.lowerStageNumber).toBe(18);
+      expect(normalized.treatmentStages[2]?.lower?.filename).toBe("Patient Lower jaw - 18 - Model.glb");
+    });
+
+    it("displays Upper and Lower stage numbers in the UI when they differ", async () => {
+      const unequalManifest: CaseManifest = {
+        caseId: "case-unequal-display",
+        patientName: "00 Segmented",
+        archType: "both",
+        hasUpper: true,
+        hasLower: true,
+        treatmentStages: [
+          {
+            id: "stage-20",
+            stageNumber: 20,
+            upperStageNumber: 20,
+            lowerStageNumber: 18,
+            label: "Stage 20",
+            doctorOnly: false,
+            upper: {
+              filename: "00 Segmented Upper jaw - 20 - Model.glb",
+              url: "/models/upper-20.stl",
+            },
+            lower: {
+              filename: "00 Segmented Lower jaw - 18 - Model.glb",
+              url: "/models/lower-18.stl",
+            },
+          },
+        ],
+        templateStages: [],
+        ambiguities: [],
+      };
+
+      const app = createTreatmentApp(root, {
+        caseManifest: unequalManifest,
+        createViewport: () => fakeViewport,
+        autoLoad: true,
+      });
+
+      const cardMeta = root.querySelector(".tv-stage-card__meta");
+      expect(cardMeta?.textContent).toBe("Upper 20 · Lower 18");
+
+      await vi.waitFor(() => {
+        const label = root.querySelector(".tv-stage-label");
+        expect(label?.textContent).toContain("Upper 20 · Lower 18");
+      });
+
+      app.dispose();
+    });
+
+    it("holds arch at previous stage when lower model returns 400 not found", async () => {
+      clearStlBufferCache();
+
+      const mockBuffer18 = new Uint8Array([1, 8]).buffer;
+      const mockUpper19 = new Uint8Array([1, 9]).buffer;
+
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        if (url.includes("Lower") && url.includes("19")) {
+          return Promise.resolve({
+            ok: false,
+            status: 400,
+            statusText: "Object not found",
+          } as Response);
+        }
+        if (url.includes("Lower") && url.includes("18")) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            arrayBuffer: () => Promise.resolve(mockBuffer18),
+          } as unknown as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          arrayBuffer: () => Promise.resolve(mockUpper19),
+        } as unknown as Response);
+      });
+
+      // 1. Stage 18 loads successfully
+      const stage18Res = await loadStageModels(
+        "https://example.com/Upper-18.glb",
+        "https://example.com/Lower-18.glb",
+      );
+      expect(stage18Res.ok).toBe(true);
+
+      // 2. Stage 19: Upper 19 exists, Lower 19 returns 400 (not found)
+      const stage19Res = await loadStageModels(
+        "https://example.com/Upper-19.glb",
+        "https://example.com/Lower-19.glb",
+      );
+      // Seamlessly falls back to holding lower at stage 18 without error
+      expect(stage19Res.ok).toBe(true);
+      if (stage19Res.ok) {
+        expect(stage19Res.models.upperStl).toBe(mockUpper19);
+        expect(stage19Res.models.lowerStl).toBe(mockBuffer18);
+      }
     });
   });
 });

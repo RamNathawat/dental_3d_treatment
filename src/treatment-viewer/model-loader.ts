@@ -67,10 +67,50 @@ export type LoadOutcome = LoadResult | LoadError;
 /** The loader is stateless — one instance shared across all loads is fine. */
 const stlLoader = new STLLoader();
 
+let lastKnownValidUpperBuffer: ArrayBuffer | null = null;
+let lastKnownValidLowerBuffer: ArrayBuffer | null = null;
+
+async function probePreviousArchBuffer(
+  source: ModelSource,
+  signal?: AbortSignal,
+): Promise<ArrayBuffer | null> {
+  const url =
+    typeof source === "string"
+      ? source
+      : source && typeof source === "object" && "url" in source
+      ? source.url
+      : null;
+  if (!url) return null;
+
+  const match =
+    url.match(/(?:jaw|model|upper|lower)(?:%20|\s)*-(?:%20|\s)*0*([1-9]\d?)/i) ||
+    url.match(/0*([1-9]\d?)(?:%20|\s)*-(?:%20|\s)*(?:model|glb|stl)/i);
+  if (!match || !match[1]) return null;
+
+  const currentNum = parseInt(match[1], 10);
+  for (let n = currentNum - 1; n >= 1; n--) {
+    const pad = String(n).padStart(2, "0");
+    const testUrl = url.replace(
+      /((?:jaw|model|upper|lower)(?:%20|\s)*-(?:%20|\s)*)0*([1-9]\d?)/i,
+      `$1${pad}`,
+    );
+    try {
+      const res = await fetchStl(testUrl, signal);
+      if (res.ok) {
+        return res.buffer;
+      }
+    } catch {
+      // Continue searching backwards
+    }
+  }
+  return null;
+}
+
 /**
  * Loads models for a stage in parallel (from URLs, ArchAssets, or Files).
  * Supports dual-arch (both upper and lower) as well as single-arch (upper only or lower only).
- * Returns an error if an arch is specified but fails to load, or if neither arch is specified.
+ * If one arch completes earlier than the other (e.g. Upper has 23 stages, Lower stopped at 18),
+ * seamlessly holds the completed arch at its final stage without failing playback or throwing errors.
  */
 export async function loadStageModels(
   upper?: ModelSource | null,
@@ -87,18 +127,68 @@ export async function loadStageModels(
       lower ? resolveStlBuffer(lower, "Lower jaw", signal) : Promise.resolve(null),
     ]);
 
+    let finalUpperBuffer: ArrayBuffer | null =
+      upperResult && upperResult.ok ? upperResult.buffer : null;
+    let finalLowerBuffer: ArrayBuffer | null =
+      lowerResult && lowerResult.ok ? lowerResult.buffer : null;
+
+    const isNotFoundError = (reason?: string) =>
+      Boolean(reason && /400|404|not found|Object not found/i.test(reason));
+
     if (upper && upperResult && !upperResult.ok) {
-      return { ok: false, reason: `Upper jaw: ${upperResult.reason}` };
+      if (
+        lowerResult &&
+        lowerResult.ok &&
+        isNotFoundError(upperResult.reason)
+      ) {
+        const fallback =
+          lastKnownValidUpperBuffer ||
+          (await probePreviousArchBuffer(upper, signal));
+        if (fallback) {
+          console.info(
+            "Upper jaw model not found for this stage (upper arch reached final stage earlier than lower). Holding upper arch at final stage.",
+          );
+          finalUpperBuffer = fallback;
+          lastKnownValidUpperBuffer = fallback;
+        } else {
+          return { ok: false, reason: `Upper jaw: ${upperResult.reason}` };
+        }
+      } else {
+        return { ok: false, reason: `Upper jaw: ${upperResult.reason}` };
+      }
     }
+
     if (lower && lowerResult && !lowerResult.ok) {
-      return { ok: false, reason: `Lower jaw: ${lowerResult.reason}` };
+      if (
+        upperResult &&
+        upperResult.ok &&
+        isNotFoundError(lowerResult.reason)
+      ) {
+        const fallback =
+          lastKnownValidLowerBuffer ||
+          (await probePreviousArchBuffer(lower, signal));
+        if (fallback) {
+          console.info(
+            "Lower jaw model not found for this stage (lower arch reached final stage earlier than upper). Holding lower arch at final stage.",
+          );
+          finalLowerBuffer = fallback;
+          lastKnownValidLowerBuffer = fallback;
+        } else {
+          return { ok: false, reason: `Lower jaw: ${lowerResult.reason}` };
+        }
+      } else {
+        return { ok: false, reason: `Lower jaw: ${lowerResult.reason}` };
+      }
     }
+
+    if (finalUpperBuffer) lastKnownValidUpperBuffer = finalUpperBuffer;
+    if (finalLowerBuffer) lastKnownValidLowerBuffer = finalLowerBuffer;
 
     return {
       ok: true,
       models: {
-        upperStl: upperResult && upperResult.ok ? upperResult.buffer : null,
-        lowerStl: lowerResult && lowerResult.ok ? lowerResult.buffer : null,
+        upperStl: finalUpperBuffer,
+        lowerStl: finalLowerBuffer,
       },
     };
   } catch (error) {
@@ -260,6 +350,8 @@ export function clearStlBufferCache(): void {
   rawGlbCache.clear();
   inFlightFetches.clear();
   clearStageGeometryCache();
+  lastKnownValidUpperBuffer = null;
+  lastKnownValidLowerBuffer = null;
 }
 
 function calibrateGeometryColors(geom: BufferGeometry): void {
