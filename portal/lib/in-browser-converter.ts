@@ -875,8 +875,8 @@ export async function processDentalZipInBrowser(
             for (const child of parsed.children) {
               if (!(child as THREE.Mesh).isMesh) continue;
               const geom = (child as THREE.Mesh).geometry;
-              // Orthodontic composite resin (warm ivory matching teeth: 0.82, 0.76, 0.68)
-              mergeGeometry(geom, 0.82, 0.76, 0.68, attVertexMap, attPositions, attColors, attIndices);
+              // Orthodontic composite resin: vibrant clinical contrast amber-orange (#F97316: 0.96, 0.52, 0.16)
+              mergeGeometry(geom, 0.96, 0.52, 0.16, attVertexMap, attPositions, attColors, attIndices);
             }
           }
         }

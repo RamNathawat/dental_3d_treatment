@@ -597,8 +597,9 @@ export function createTreatmentApp(
     () => toggleAttachments(),
     "tv-ba-btn tv-dock-tool-btn",
   );
-  attachmentsBtn.title = "Toggle visibility of orthodontic composite attachments (engagers/buttons)";
+  attachmentsBtn.title = "Toggle visibility of orthodontic composite attachments (contrast amber-orange engagers)";
   attachmentsBtn.setAttribute("aria-pressed", "false");
+  attachmentsBtn.dataset.tool = "attachments";
 
   // Feature 11: IPR toggle button (default: toggled off)
   const iprBtn = makeBtn(

@@ -15,6 +15,7 @@ import {
   isStageGeomCached,
   prioritizeStage,
   prewarmAllStageGeometries,
+  applyAttachmentContrastColor,
 } from "../src/treatment-viewer/model-loader";
 import {
   createTreatmentApp,
@@ -898,6 +899,47 @@ describe("Treatment Viewer Application", () => {
       expect(label?.textContent).not.toContain("Loading 3D model…");
 
       app.togglePlay();
+      app.dispose();
+    });
+
+    it("paints attachment geometry in vibrant contrast amber-orange (#F97316)", () => {
+      const geom = new BufferGeometry();
+      const positions = new Float32Array([
+        0, 0, 0,
+        1, 0, 0,
+        0, 1, 0,
+      ]);
+      geom.setAttribute("position", new BufferAttribute(positions, 3));
+      applyAttachmentContrastColor(geom);
+
+      const colorAttr = geom.getAttribute("color");
+      expect(colorAttr).toBeDefined();
+      expect(colorAttr.count).toBe(3);
+
+      const r = colorAttr.getX(0);
+      const g = colorAttr.getY(0);
+      const b = colorAttr.getZ(0);
+
+      // Contrast amber-orange criteria:
+      // r > 0.85, g in [0.35, 0.72], b < 0.28
+      expect(r).toBeGreaterThan(0.85);
+      expect(g).toBeGreaterThan(0.35);
+      expect(g).toBeLessThan(0.72);
+      expect(b).toBeLessThan(0.28);
+    });
+
+    it("attaches data-tool='attachments' to attachments dock button for orange styling", () => {
+      const app = createTreatmentApp(root, {
+        createViewport: () => fakeViewport,
+        autoLoad: false,
+      });
+
+      const attachmentsBtn = Array.from(root.querySelectorAll<HTMLButtonElement>("button")).find(
+        (b) => b.textContent?.trim() === "Attachments",
+      );
+      expect(attachmentsBtn).toBeDefined();
+      expect(attachmentsBtn?.dataset.tool).toBe("attachments");
+
       app.dispose();
     });
   });

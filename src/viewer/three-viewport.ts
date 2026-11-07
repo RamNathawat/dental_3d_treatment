@@ -336,8 +336,20 @@ class ThreeViewport implements Viewport {
           "#include <lights_physical_fragment>",
           `#include <lights_physical_fragment>
           #if defined( USE_COLOR )
-            bool isGum = (vColor.r > 0.35 && (vColor.r - vColor.g) > 0.10);
-            if (isGum) {
+            // Distinguish Gum vs Attachment vs Tooth Enamel:
+            // Attachment: Vibrant clinical contrast amber-orange (r > 0.85, g in [0.35, 0.72], b < 0.28)
+            bool isAttachment = (vColor.r > 0.85 && vColor.g > 0.35 && vColor.g < 0.72 && vColor.b < 0.28);
+            // Gum: rich vascular oral mucosa (r > 0.35, r - g > 0.10, not attachment)
+            bool isGum = (!isAttachment && vColor.r > 0.35 && (vColor.r - vColor.g) > 0.10);
+
+            if (isAttachment) {
+              // Clinical composite resin engager / attachment finish (crisp semi-gloss surface, clean reflections)
+              material.roughness = 0.20;
+              #ifdef USE_CLEARCOAT
+                material.clearcoat = 0.55;
+                material.clearcoatRoughness = 0.12;
+              #endif
+            } else if (isGum) {
               // Moist biological oral mucosa (wet saliva clearcoat)
               material.roughness = 0.32;
               #ifdef USE_CLEARCOAT

@@ -12,7 +12,7 @@
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import type { BufferGeometry, Mesh } from "three";
+import { BufferAttribute, type BufferGeometry, type Mesh } from "three";
 import { get as idbGet, set as idbSet, createStore } from "idb-keyval";
 import { computeAnatomicalColors } from "../viewer/three-viewport";
 import { capPlanarOpenings } from "../viewer/cap-planar";
@@ -289,6 +289,10 @@ function calibrateGeometryColors(geom: BufferGeometry): void {
     const b = arr[cIdx + 2]!;
     const y = pos ? pos.getY(i) : 0;
 
+    // Attachments: vibrant contrast amber-orange (#F97316) - preserve and omit from arch stats
+    const isAttachment = r > 0.85 && g > 0.35 && g < 0.72 && b < 0.28;
+    if (isAttachment) continue;
+
     const isGum = (r > 0.35 && (r - g) > 0.08) || (r > 0.40 && g < 0.35 && b < 0.35);
     if (isGum) {
       gumSumY += y;
@@ -328,6 +332,12 @@ function calibrateGeometryColors(geom: BufferGeometry): void {
     const r = arr[cIdx]!;
     const g = arr[cIdx + 1]!;
     const b = arr[cIdx + 2]!;
+
+    // 0. Orthodontic attachments: preserve vibrant clinical contrast amber-orange (#F97316)
+    const isAttachment = r > 0.85 && g > 0.35 && g < 0.72 && b < 0.28;
+    if (isAttachment) {
+      continue;
+    }
 
     // 1. Remove green CAD labels (e.g., "NIYA 1", "NIYA 2") from models:
     if (g > 0.30 && g > r * 1.20) {
@@ -408,6 +418,47 @@ function calibrateGeometryColors(geom: BufferGeometry): void {
   colorAttr.needsUpdate = true;
 }
 
+/**
+ * Applies a vibrant clinical contrast amber-orange (#F97316 / #FA8228) to attachment vertices.
+ * This makes orthodontic composite engagers and buttons immediately distinct against the warm ivory teeth,
+ * with subtle micro-depth highlights along attachment facets.
+ */
+export function applyAttachmentContrastColor(geom: BufferGeometry): void {
+  const posAttr = geom.getAttribute("position");
+  if (!posAttr) return;
+  const count = posAttr.count;
+  if (count === 0) return;
+
+  if (!geom.getAttribute("normal")) {
+    geom.computeVertexNormals();
+  }
+  const normAttr = geom.getAttribute("normal");
+  let colorAttr = geom.getAttribute("color");
+  if (!colorAttr || colorAttr.count !== count) {
+    const colors = new Float32Array(count * 3);
+    geom.setAttribute("color", new BufferAttribute(colors, 3));
+    colorAttr = geom.getAttribute("color");
+  }
+
+  const arr = colorAttr.array as Float32Array;
+
+  // Vibrant aesthetic amber-orange (RGB ~ 0.96, 0.52, 0.16)
+  for (let i = 0; i < count; i++) {
+    const idx = i * 3;
+    let factor = 1.0;
+    if (normAttr) {
+      const nz = normAttr.getZ(i);
+      const ny = normAttr.getY(i);
+      // Subtle faceted shading: catch top and front light
+      factor = 0.92 + 0.12 * Math.max(0, nz) + 0.06 * Math.max(0, ny);
+    }
+    arr[idx] = Math.min(1.0, 0.96 * factor);
+    arr[idx + 1] = Math.min(1.0, 0.52 * factor);
+    arr[idx + 2] = Math.min(1.0, 0.16 * factor);
+  }
+  colorAttr.needsUpdate = true;
+}
+
 export interface ExtractedGlbGeometries {
   readonly full: BufferGeometry;
   readonly noAttachments: BufferGeometry;
@@ -451,12 +502,27 @@ export async function extractGeometriesFromGlb(
         ? attGeoms[0]!
         : mergeGeometries(attGeoms, false) || attGeoms[0]!;
 
+    // Ensure baseGeom has vertex colors before merging with colored attGeom
+    if (!baseGeom.getAttribute("color")) {
+      const pos = baseGeom.getAttribute("position");
+      if (pos) {
+        const count = pos.count;
+        const colors = new Float32Array(count * 3);
+        // Default warm ivory enamel (0.76, 0.71, 0.63)
+        for (let i = 0; i < count; i++) {
+          colors[i * 3] = 0.76;
+          colors[i * 3 + 1] = 0.71;
+          colors[i * 3 + 2] = 0.63;
+        }
+        baseGeom.setAttribute("color", new BufferAttribute(colors, 3));
+      }
+    }
+
     calibrateGeometryColors(baseGeom);
-    calibrateGeometryColors(attGeom);
+    applyAttachmentContrastColor(attGeom);
 
     const fullGeom =
       mergeGeometries([baseGeom.clone(), attGeom.clone()], false) || baseGeom;
-    calibrateGeometryColors(fullGeom);
 
     return {
       full: fullGeom,
