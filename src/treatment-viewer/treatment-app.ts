@@ -1903,7 +1903,44 @@ export function createTreatmentApp(
           ]),
         );
       }
+      const counts = notes?.aligner_counts;
+      const upperStages = counts?.upper ?? state.manifest.upperStagesCount;
+      const lowerStages = counts?.lower ?? state.manifest.lowerStagesCount;
+      if (upperStages && lowerStages) {
+        const isUnequal = upperStages !== lowerStages;
+        chips.push(
+          div("tv-notes-guideline-chip", [
+            span("tv-notes-guideline-label", "Prescribed Trays"),
+            span(
+              "tv-notes-guideline-val",
+              isUnequal
+                ? `Upper: ${upperStages} · Lower: ${lowerStages} (${upperStages + lowerStages} Total)`
+                : `${upperStages} Each (${upperStages + lowerStages} Total)`,
+            ),
+          ]),
+        );
+      }
       notesDrawerGuidelinesEl.appendChild(div("tv-notes-guidelines-wrap", chips));
+    } else if (notes?.aligner_counts || (state.manifest.upperStagesCount && state.manifest.lowerStagesCount)) {
+      const counts = notes?.aligner_counts;
+      const upperStages = counts?.upper ?? state.manifest.upperStagesCount;
+      const lowerStages = counts?.lower ?? state.manifest.lowerStagesCount;
+      if (upperStages && lowerStages) {
+        const isUnequal = upperStages !== lowerStages;
+        notesDrawerGuidelinesEl.appendChild(
+          div("tv-notes-guidelines-wrap", [
+            div("tv-notes-guideline-chip", [
+              span("tv-notes-guideline-label", "Prescribed Trays"),
+              span(
+                "tv-notes-guideline-val",
+                isUnequal
+                  ? `Upper: ${upperStages} · Lower: ${lowerStages} (${upperStages + lowerStages} Total)`
+                  : `${upperStages} Each (${upperStages + lowerStages} Total)`,
+              ),
+            ]),
+          ]),
+        );
+      }
     }
 
     // 3. General Treatment Instructions

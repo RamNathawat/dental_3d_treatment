@@ -122,6 +122,16 @@ export default function EditCaseModal({
   const currentStages = caseItem.total_stages || 1;
   const isUpperOnly = caseItem.patient_name.includes("[Upper]");
   const isLowerOnly = caseItem.patient_name.includes("[Lower]");
+  const existingUpperStages =
+    caseItem.upper_stages ??
+    caseItem.doctor_notes?.aligner_counts?.upper ??
+    currentStages;
+  const existingLowerStages =
+    caseItem.lower_stages ??
+    caseItem.doctor_notes?.aligner_counts?.lower ??
+    currentStages;
+  const isUnequalStages =
+    !isUpperOnly && !isLowerOnly && existingUpperStages !== existingLowerStages;
   const hasExistingUpper = !isLowerOnly;
   const hasExistingLower = !isUpperOnly;
   const archLabel = isUpperOnly ? "Upper Arch Only" : isLowerOnly ? "Lower Arch Only" : "Dual-Arch Alignment";
@@ -260,6 +270,17 @@ export default function EditCaseModal({
           patient_age: resolvedAge,
           patient_sex: resolvedSex,
           total_stages: result.totalStages || caseItem.total_stages || 1,
+          upper_stages: result.upperStages ?? caseItem.upper_stages ?? null,
+          lower_stages: result.lowerStages ?? caseItem.lower_stages ?? null,
+          doctor_notes: {
+            ...(caseItem.doctor_notes || {}),
+            aligner_counts: {
+              upper: result.upperStages ?? caseItem.upper_stages,
+              lower: result.lowerStages ?? caseItem.lower_stages,
+              total: result.totalAligners,
+              is_unequal: result.isUnequal,
+            },
+          },
           updated_at: new Date().toISOString(),
         };
 
@@ -383,7 +404,9 @@ export default function EditCaseModal({
               <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <span>Edit Case & Re-enter Models</span>
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-[#ffd166]">
-                  {currentStages} Stages
+                  {isUnequalStages
+                    ? `${existingUpperStages + existingLowerStages} Trays (U: ${existingUpperStages} · L: ${existingLowerStages})`
+                    : `${currentStages} Stages`}
                 </span>
               </h2>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -444,7 +467,9 @@ export default function EditCaseModal({
                     </span>
                   </div>
                   <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
-                    Current: {currentStages} stages ({archLabel})
+                    {isUnequalStages
+                      ? `Current: Upper: ${existingUpperStages} stg · Lower: ${existingLowerStages} stg (${existingUpperStages + existingLowerStages} Total Trays)`
+                      : `Current: ${currentStages} stages (${archLabel})`}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
@@ -572,7 +597,7 @@ export default function EditCaseModal({
                             <>
                               <Check className="w-4 h-4 mx-auto text-emerald-500" />
                               <p className="font-semibold text-emerald-700 dark:text-emerald-400 text-[11px]">
-                                Keeping Upper Models ({currentStages} stg)
+                                Keeping Upper Models ({existingUpperStages} stg)
                               </p>
                               <p className="text-[9px] text-slate-400">Drop new ZIP to replace</p>
                             </>
@@ -708,7 +733,7 @@ export default function EditCaseModal({
                             <>
                               <Check className="w-4 h-4 mx-auto text-emerald-500" />
                               <p className="font-semibold text-emerald-700 dark:text-emerald-400 text-[11px]">
-                                Keeping Lower Models ({currentStages} stg)
+                                Keeping Lower Models ({existingLowerStages} stg)
                               </p>
                               <p className="text-[9px] text-slate-400">Drop new ZIP to replace</p>
                             </>

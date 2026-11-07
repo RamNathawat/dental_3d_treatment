@@ -75,6 +75,13 @@ export interface DoctorNotes {
   readonly wearHoursPerDay?: number;
   /** Recommended days per aligner stage (typically 7-14) */
   readonly daysPerStage?: number;
+  /** Breakdown of manufactured aligner tray counts for upper and lower arches */
+  readonly aligner_counts?: {
+    readonly upper: number;
+    readonly lower: number;
+    readonly total: number;
+    readonly is_unequal: boolean;
+  };
   /** ISO date or formatted date when remarks were last updated */
   readonly updatedAt?: string;
 }
@@ -98,6 +105,14 @@ export interface CaseManifest {
   readonly hasUpper?: boolean;
   /** Whether lower arch assets exist in this case. */
   readonly hasLower?: boolean;
+  /** Number of upper arch stages/trays manufactured */
+  readonly upperStagesCount?: number;
+  /** Number of lower arch stages/trays manufactured */
+  readonly lowerStagesCount?: number;
+  /** Total physical aligner trays manufactured (upper + lower) */
+  readonly totalAligners?: number;
+  /** Whether upper and lower arch have an unequal number of stages */
+  readonly isUnequalArchStages?: boolean;
   /** Planned Interproximal Reduction (IPR) prescriptions */
   readonly ipr?: readonly IprEntry[];
   /** Treating doctor notes, treatment instructions, and stage remarks */

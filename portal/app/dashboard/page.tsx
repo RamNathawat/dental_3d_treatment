@@ -16,6 +16,8 @@ export interface DentalCase {
   ipr?: any[] | null;
   doctor_notes?: any | null;
   total_stages: number;
+  upper_stages?: number | null;
+  lower_stages?: number | null;
   share_token: string;
   status: "ready" | "processing" | "archived";
   created_at: string;

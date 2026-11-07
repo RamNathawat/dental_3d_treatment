@@ -16,6 +16,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { DentalCase } from "./page";
+import { getCaseTrayInfo } from "./DashboardClient";
 import { createClient } from "@/lib/supabase/client";
 import {
   getSavedClinicEmails,
@@ -52,10 +53,8 @@ export default function ShareModal({
   const supabase = createClient();
 
   const stages = caseItem.total_stages || 1;
-  const isUpperOnly = caseItem.patient_name.includes("[Upper]");
-  const isLowerOnly = caseItem.patient_name.includes("[Lower]");
+  const trayInfo = getCaseTrayInfo(caseItem);
   const displayName = caseItem.patient_name.replace(/\s*\[(Upper|Lower|Dual)\]/i, "").trim();
-  const archLabel = isUpperOnly ? "Upper Arch Only" : isLowerOnly ? "Lower Arch Only" : "Dual-Arch Alignment";
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const shareUrl = `${origin}/treatment?case=${caseItem.share_token}`;
@@ -97,7 +96,9 @@ export default function ShareModal({
 
   if (!isOpen) return null;
 
-  const emailSubject = `[3D Treatment Progression] ${displayName} (${stages} Stages) - Clinical Review Link`;
+  const emailSubject = trayInfo.isUnequal
+    ? `[3D Treatment Progression] ${displayName} (Upper: ${trayInfo.upper} · Lower: ${trayInfo.lower} · ${trayInfo.total} Trays) - Clinical Review Link`
+    : `[3D Treatment Progression] ${displayName} (${stages} Stages · ${trayInfo.total} Trays) - Clinical Review Link`;
 
   const emailBody = `Dear ${caseItem.clinic_name || "Hope you are doing well"},
 
@@ -105,7 +106,8 @@ The interactive 3D orthodontic treatment progression plan for ${displayName} is 
 
 • Patient Name: ${displayName}
 • Patient ID: ${caseItem.patient_id || "N/A"}
-• Treatment Stages: ${stages} Aligner Stages (${archLabel})
+• Treatment Trays: ${trayInfo.metadataBadgeText}
+• Progression Stages: ${stages} Stages (${trayInfo.archBadgeText})
 ${caseItem.clinic_name ? `• Clinic / Practice: ${caseItem.clinic_name}\n` : ""}${caseItem.patient_age ? `• Patient Age: ${caseItem.patient_age} yrs\n` : ""}
 🔗 Interactive 3D Progression Link:
 ${shareUrl}
@@ -258,7 +260,7 @@ Orthodontic 3D Clinical Studio`;
                   </span>
                 )}
                 <span>•</span>
-                <span>{stages} Aligner Stages ({archLabel})</span>
+                <span>{trayInfo.metadataBadgeText}</span>
               </div>
             </div>
 

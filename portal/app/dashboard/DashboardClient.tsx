@@ -34,6 +34,8 @@ import EditIprModal from "./EditIprModal";
 import EditNotesModal from "./EditNotesModal";
 import ShareModal from "./ShareModal";
 import EditCaseModal from "./EditCaseModal";
+import { getCaseTrayInfo } from "@/lib/case-tray-info";
+export { getCaseTrayInfo };
 
 interface DashboardClientProps {
   email: string;
@@ -57,9 +59,114 @@ export default function DashboardClient({
   const [selectedEditCase, setSelectedEditCase] = useState<DentalCase | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isDark, setIsDark] = useState<boolean>(false);
+  const [archCountsMap, setArchCountsMap] = useState<
+    Record<string, { upper: number; lower: number; total: number; isUnequal: boolean }>
+  >({});
 
   const router = useRouter();
   const supabase = createClient();
+
+  // Self-healing: load and cache upper & lower aligner stage counts for dual-arch cases
+  useEffect(() => {
+    const casesNeedingCounts = cases.filter((c) => {
+      const isSingle = c.patient_name.includes("[Upper]") || c.patient_name.includes("[Lower]");
+      if (isSingle) return false;
+      const hasDbCounts = c.upper_stages != null && c.lower_stages != null;
+      const hasNoteCounts = Boolean(c.doctor_notes?.aligner_counts);
+      const hasMapCounts = Boolean(archCountsMap[c.id]);
+      return !hasDbCounts && !hasNoteCounts && !hasMapCounts;
+    });
+
+    if (casesNeedingCounts.length === 0) return;
+
+    let isMounted = true;
+
+    async function resolveArchCounts() {
+      for (const c of casesNeedingCounts) {
+        try {
+          const res = await fetch(
+            `https://yrjulcwnabnhgtqebrtn.supabase.co/storage/v1/object/public/treatment-models/${c.id}/manifest.json?t=${Date.now()}`
+          );
+          if (!res.ok) continue;
+          const manifest = await res.json();
+
+          let upper = (manifest.upperStagesCount as number) || 0;
+          let lower = (manifest.lowerStagesCount as number) || 0;
+
+          if (manifest.doctorNotes?.aligner_counts) {
+            upper = manifest.doctorNotes.aligner_counts.upper ?? upper;
+            lower = manifest.doctorNotes.aligner_counts.lower ?? lower;
+          }
+
+          if (!upper || !lower) {
+            if (Array.isArray(manifest.treatmentStages)) {
+              let uCount = 0;
+              let lCount = 0;
+              for (const st of manifest.treatmentStages) {
+                if (st.upper) uCount++;
+                if (st.lower) lCount++;
+              }
+              if (!upper && uCount > 0) upper = uCount;
+              if (!lower && lCount > 0) lower = lCount;
+            }
+          }
+
+          if (!upper) upper = c.total_stages || 1;
+          if (!lower) lower = c.total_stages || 1;
+
+          const isUnequal = upper !== lower;
+          const total = upper + lower;
+
+          if (isMounted) {
+            setArchCountsMap((prev) => ({
+              ...prev,
+              [c.id]: { upper, lower, total, isUnequal },
+            }));
+          }
+
+          // Silently cache in Supabase doctor_notes if not yet present
+          if (!c.doctor_notes?.aligner_counts) {
+            const currentNotes =
+              c.doctor_notes && typeof c.doctor_notes === "object" ? c.doctor_notes : {};
+            const updatedNotes = {
+              ...currentNotes,
+              aligner_counts: {
+                upper,
+                lower,
+                total,
+                is_unequal: isUnequal,
+              },
+            };
+            supabase
+              .from("cases")
+              .update({
+                upper_stages: upper,
+                lower_stages: lower,
+                doctor_notes: updatedNotes,
+              })
+              .eq("id", c.id)
+              .then(({ error }) => {
+                if (error) {
+                  // Fallback to doctor_notes only if columns do not exist
+                  supabase
+                    .from("cases")
+                    .update({ doctor_notes: updatedNotes })
+                    .eq("id", c.id);
+                }
+              });
+          }
+        } catch (err) {
+          console.warn(`Could not resolve arch counts for case ${c.id}:`, err);
+        }
+      }
+    }
+
+    void resolveArchCounts();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [cases, archCountsMap, supabase]);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("dental_theme");
@@ -408,11 +515,8 @@ export default function DashboardClient({
                 const minWeeks = Math.round((stages * 10) / 7);
                 const maxWeeks = Math.round((stages * 14) / 7);
 
-                const isUpperOnly = item.patient_name.includes("[Upper]");
-                const isLowerOnly = item.patient_name.includes("[Lower]");
+                const trayInfo = getCaseTrayInfo(item, archCountsMap[item.id]);
                 const displayName = item.patient_name.replace(/\s*\[(Upper|Lower|Dual)\]/i, "").trim();
-                const archLabel = isUpperOnly ? "Upper Arch Only" : isLowerOnly ? "Lower Arch Only" : "Dual-Arch";
-                const stepperLabel = isUpperOnly ? "Upper Arch Alignment" : isLowerOnly ? "Lower Arch Alignment" : "Dual-Arch Alignment";
 
                 return (
                   <div
@@ -470,19 +574,25 @@ export default function DashboardClient({
                         <div className="flex items-center gap-1.5 flex-wrap justify-end">
                           <span
                             className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1.5 border ${
-                              isUpperOnly
+                              trayInfo.isSingle && trayInfo.archType === "upper"
                                 ? "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-200/70 dark:border-sky-800/50"
-                                : isLowerOnly
+                                : trayInfo.isSingle && trayInfo.archType === "lower"
                                 ? "bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200/70 dark:border-purple-800/50"
+                                : trayInfo.isUnequal
+                                ? "bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-[#ffd166] border-amber-300 dark:border-amber-700/60 shadow-2xs"
                                 : "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-[#ffd166] border-amber-200/70 dark:border-amber-800/50"
                             }`}
                           >
                             <span
                               className={`w-1.5 h-1.5 rounded-full ${
-                                isUpperOnly ? "bg-sky-500" : isLowerOnly ? "bg-purple-500" : "bg-amber-500"
+                                trayInfo.isSingle && trayInfo.archType === "upper"
+                                  ? "bg-sky-500"
+                                  : trayInfo.isSingle && trayInfo.archType === "lower"
+                                  ? "bg-purple-500"
+                                  : "bg-amber-500"
                               }`}
                             />
-                            {archLabel}
+                            {trayInfo.archBadgeText}
                           </span>
                           <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200/70 dark:border-emerald-800/50 inline-flex items-center gap-1.5">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
@@ -509,8 +619,16 @@ export default function DashboardClient({
                       <div className="pt-2">
                         <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1.5">
                           <span>Stage 01 (Initial)</span>
-                          <span className="text-slate-400 dark:text-slate-500 font-normal">{stepperLabel}</span>
-                          <span>Stage {String(item.total_stages).padStart(2, "0")} (Final)</span>
+                          <span
+                            className={`text-center px-1 truncate max-w-[200px] sm:max-w-none ${
+                              trayInfo.isUnequal
+                                ? "text-amber-700 dark:text-[#ffd166] font-semibold"
+                                : "text-slate-400 dark:text-slate-500 font-normal"
+                            }`}
+                          >
+                            {trayInfo.stepperCenterText}
+                          </span>
+                          <span>{trayInfo.stepperFinalText}</span>
                         </div>
                         {/* Segmented Track */}
                         <div className="flex items-center gap-1">
@@ -526,9 +644,21 @@ export default function DashboardClient({
 
                       {/* Clinical Metadata Badges */}
                       <div className="flex flex-wrap items-center gap-2 pt-1">
-                        <span className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-100 dark:bg-[#1A2234] text-slate-700 dark:text-slate-200 border border-slate-200/70 dark:border-slate-700/60 inline-flex items-center gap-1.5">
-                          <Layers className="w-3.5 h-3.5 text-slate-500 dark:text-[#ffd166]" />
-                          {stages} Aligner Stages
+                        <span
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border inline-flex items-center gap-1.5 ${
+                            trayInfo.isUnequal
+                              ? "bg-amber-50/90 dark:bg-amber-950/40 text-amber-800 dark:text-[#ffd166] border-amber-300 dark:border-amber-700/60 shadow-2xs"
+                              : "bg-slate-100 dark:bg-[#1A2234] text-slate-700 dark:text-slate-200 border-slate-200/70 dark:border-slate-700/60"
+                          }`}
+                        >
+                          <Layers
+                            className={`w-3.5 h-3.5 ${
+                              trayInfo.isUnequal
+                                ? "text-amber-600 dark:text-[#ffd166]"
+                                : "text-slate-500 dark:text-[#ffd166]"
+                            }`}
+                          />
+                          {trayInfo.metadataBadgeText}
                         </span>
                         <span className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-100 dark:bg-[#1A2234] text-slate-700 dark:text-slate-200 border border-slate-200/70 dark:border-slate-700/60 inline-flex items-center gap-1.5">
                           <Calendar className="w-3.5 h-3.5 text-slate-500 dark:text-[#ffd166]" />

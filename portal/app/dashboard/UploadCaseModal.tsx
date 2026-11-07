@@ -274,6 +274,16 @@ export default function UploadCaseModal({
         patient_age: resolvedAge ?? null,
         patient_sex: resolvedSex ?? null,
         total_stages: result.totalStages || Math.max(upperMeta?.totalStages || 1, lowerMeta?.totalStages || 1),
+        upper_stages: result.upperStages ?? (archType === "lower" ? 0 : upperMeta?.totalStages || null),
+        lower_stages: result.lowerStages ?? (archType === "upper" ? 0 : lowerMeta?.totalStages || null),
+        doctor_notes: {
+          aligner_counts: {
+            upper: result.upperStages,
+            lower: result.lowerStages,
+            total: result.totalAligners,
+            is_unequal: result.isUnequal,
+          },
+        },
         share_token: result.shareToken || "",
         status: "ready",
         created_at: new Date().toISOString(),

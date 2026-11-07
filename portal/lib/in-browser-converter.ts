@@ -19,6 +19,10 @@ export interface IngestResult {
   caseId?: string;
   shareToken?: string;
   totalStages?: number;
+  upperStages?: number;
+  lowerStages?: number;
+  totalAligners?: number;
+  isUnequal?: boolean;
   archType?: "both" | "upper" | "lower";
   hasUpper?: boolean;
   hasLower?: boolean;
@@ -823,12 +827,26 @@ export async function processDentalZipInBrowser(
     const availableStages = Array.from(allStageSet).sort((a, b) => a - b);
 
     const totalStages = availableStages.length;
+    const upperCount = hasUpper ? (upperStages.size || existingUpperAssets.size) : 0;
+    const lowerCount = hasLower ? (lowerStages.size || existingLowerAssets.size) : 0;
+    const isUnequal = hasUpper && hasLower && upperCount > 0 && lowerCount > 0 && upperCount !== lowerCount;
+    const totalAligners = upperCount + lowerCount;
+
+    const alignerCountsObj = {
+      upper: upperCount,
+      lower: lowerCount,
+      total: totalAligners,
+      is_unequal: isUnequal,
+    };
+
     const archDescription =
       archType === "both"
-        ? "Dual-Arch (Upper & Lower)"
+        ? isUnequal
+          ? `Dual-Arch (Upper: ${upperCount} stages, Lower: ${lowerCount} stages)`
+          : `Dual-Arch (${upperCount} stages each)`
         : archType === "upper"
-        ? "Single-Arch (Upper only)"
-        : "Single-Arch (Lower only)";
+        ? `Single-Arch (Upper only · ${upperCount} stages)`
+        : `Single-Arch (Lower only · ${lowerCount} stages)`;
 
     onProgress(
       `Detected ${totalStages} clinical treatment stages · ${archDescription}. Generating 3D meshes...`,
@@ -885,6 +903,8 @@ export async function processDentalZipInBrowser(
       const updatePayload: Record<string, unknown> = {
         patient_name: dbPatientName,
         total_stages: totalStages,
+        upper_stages: upperCount,
+        lower_stages: lowerCount,
         updated_at: new Date().toISOString(),
         patient_id: effectivePatientId,
       };
@@ -897,14 +917,11 @@ export async function processDentalZipInBrowser(
       }
       if (patientSex !== undefined) updatePayload.patient_sex = patientSex?.trim() || null;
       if (Array.isArray(ipr)) updatePayload.ipr = ipr;
-      if (doctorNotes) {
-        updatePayload.doctor_notes = {
-          ...doctorNotes,
-          ...(effectiveClinicEmail ? { clinic_email: effectiveClinicEmail } : {}),
-        };
-      } else if (effectiveClinicEmail) {
-        updatePayload.doctor_notes = { clinic_email: effectiveClinicEmail };
-      }
+      updatePayload.doctor_notes = {
+        ...(doctorNotes || {}),
+        aligner_counts: alignerCountsObj,
+        ...(effectiveClinicEmail ? { clinic_email: effectiveClinicEmail } : {}),
+      };
 
       const { error: updateErr } = await supabase
         .from("cases")
@@ -920,6 +937,8 @@ export async function processDentalZipInBrowser(
           updateErr.code === "42703")
       ) {
         delete updatePayload.clinic_email;
+        delete updatePayload.upper_stages;
+        delete updatePayload.lower_stages;
         const retry = await supabase
           .from("cases")
           .update(updatePayload)
@@ -936,9 +955,16 @@ export async function processDentalZipInBrowser(
         dentist_id: userId,
         patient_name: dbPatientName,
         total_stages: totalStages,
+        upper_stages: upperCount,
+        lower_stages: lowerCount,
         share_token: shareToken,
         status: "ready",
         patient_id: effectivePatientId,
+        doctor_notes: {
+          ...(doctorNotes || {}),
+          aligner_counts: alignerCountsObj,
+          ...(effectiveClinicEmail ? { clinic_email: effectiveClinicEmail } : {}),
+        },
       };
       if (clinicName?.trim()) insertPayload.clinic_name = clinicName.trim();
       if (effectiveClinicEmail) insertPayload.clinic_email = effectiveClinicEmail;
@@ -947,14 +973,6 @@ export async function processDentalZipInBrowser(
       }
       if (patientSex?.trim()) insertPayload.patient_sex = patientSex.trim();
       if (Array.isArray(ipr) && ipr.length > 0) insertPayload.ipr = ipr;
-      if (doctorNotes) {
-        insertPayload.doctor_notes = {
-          ...doctorNotes,
-          ...(effectiveClinicEmail ? { clinic_email: effectiveClinicEmail } : {}),
-        };
-      } else if (effectiveClinicEmail) {
-        insertPayload.doctor_notes = { clinic_email: effectiveClinicEmail };
-      }
 
       let caseRow: any = null;
       let { data: insertedData, error: caseErr } = await supabase
@@ -970,6 +988,8 @@ export async function processDentalZipInBrowser(
           caseErr.code === "42703")
       ) {
         delete insertPayload.clinic_email;
+        delete insertPayload.upper_stages;
+        delete insertPayload.lower_stages;
         const retry = await supabase.from("cases").insert(insertPayload).select().single();
         if (retry.error || !retry.data) {
           const fallbackPayload = {
@@ -1178,8 +1198,17 @@ export async function processDentalZipInBrowser(
       archType,
       hasUpper,
       hasLower,
+      totalStages,
+      upperStagesCount: upperCount,
+      lowerStagesCount: lowerCount,
+      totalAligners,
+      isUnequalArchStages: isUnequal,
       ipr: Array.isArray(ipr) ? ipr : [],
-      doctorNotes: doctorNotes || undefined,
+      doctorNotes: {
+        ...(doctorNotes || {}),
+        aligner_counts: alignerCountsObj,
+        ...(effectiveClinicEmail ? { clinic_email: effectiveClinicEmail } : {}),
+      },
       treatmentStages: availableStages.map((stageNum) => {
         const pad = String(stageNum).padStart(2, "0");
 
@@ -1267,6 +1296,10 @@ export async function processDentalZipInBrowser(
       caseId,
       shareToken,
       totalStages,
+      upperStages: upperCount,
+      lowerStages: lowerCount,
+      totalAligners,
+      isUnequal,
       archType,
       hasUpper,
       hasLower,
