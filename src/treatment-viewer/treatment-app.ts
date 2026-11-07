@@ -2358,11 +2358,12 @@ export function createTreatmentApp(
       const proj = viewport.projectPoint({ x: pt[0], y: pt[1], z: pt[2] });
       if (!proj || !proj.visible) continue;
 
-      const offsetY = isUpper ? -58 : 58;
-      const fanX = (pt[0] > 0 ? 1 : -1) * Math.min(22, Math.abs(pt[0]) * 0.35);
+      const offsetY = isUpper ? -108 : 108;
+      const lateralDir = pt[0] >= 0 ? 1 : -1;
+      const fanX = lateralDir * Math.min(65, Math.max(16, Math.abs(pt[0]) * 0.9));
 
-      const bx = proj.x + fanX;
-      const by = proj.y + offsetY;
+      const bx = Math.max(30, Math.min(width - 30, proj.x + fanX));
+      const by = Math.max(30, Math.min(height - 35, proj.y + offsetY));
 
       // Leader line
       const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
@@ -2370,22 +2371,24 @@ export function createTreatmentApp(
       line.setAttribute("y1", String(proj.y));
       line.setAttribute("x2", String(bx));
       line.setAttribute("y2", String(by));
-      line.setAttribute("stroke", "rgba(255, 255, 255, 0.85)");
-      line.setAttribute("stroke-width", "1.5");
-      line.setAttribute("stroke-dasharray", "3,2");
+      line.setAttribute("stroke", "#38bdf8");
+      line.setAttribute("stroke-width", "2");
+      line.setAttribute("stroke-dasharray", "4,2.5");
+      line.setAttribute("filter", "drop-shadow(0 1px 2px rgba(0,0,0,0.65))");
       iprSvgOverlay.appendChild(line);
 
       // Contact point anchor
       const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       dot.setAttribute("cx", String(proj.x));
       dot.setAttribute("cy", String(proj.y));
-      dot.setAttribute("r", "2.8");
-      dot.setAttribute("fill", "#ffd166");
-      dot.setAttribute("stroke", "#0f172a");
-      dot.setAttribute("stroke-width", "1");
+      dot.setAttribute("r", "3.5");
+      dot.setAttribute("fill", "#2563eb");
+      dot.setAttribute("stroke", "#ffffff");
+      dot.setAttribute("stroke-width", "1.5");
+      dot.setAttribute("filter", "drop-shadow(0 1px 3px rgba(0,0,0,0.7))");
       iprSvgOverlay.appendChild(dot);
 
-      // Diamond Badge
+      // Diamond Badge (enlarged & clinical contrast blue)
       const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
       g.setAttribute("transform", `translate(${bx}, ${by})`);
       g.setAttribute("class", "tv-ipr-badge");
@@ -2393,25 +2396,26 @@ export function createTreatmentApp(
       g.style.pointerEvents = "auto";
 
       const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-      rect.setAttribute("x", "-11");
-      rect.setAttribute("y", "-11");
-      rect.setAttribute("width", "22");
-      rect.setAttribute("height", "22");
-      rect.setAttribute("rx", "3.5");
+      rect.setAttribute("x", "-14");
+      rect.setAttribute("y", "-14");
+      rect.setAttribute("width", "28");
+      rect.setAttribute("height", "28");
+      rect.setAttribute("rx", "4.5");
       rect.setAttribute("transform", "rotate(45)");
-      rect.setAttribute("fill", "#ffffff");
-      rect.setAttribute("stroke", "#0f172a");
-      rect.setAttribute("stroke-width", "1.5");
-      rect.setAttribute("filter", "drop-shadow(0 2px 4px rgba(0,0,0,0.35))");
+      rect.setAttribute("fill", "#2563eb");
+      rect.setAttribute("stroke", "#ffffff");
+      rect.setAttribute("stroke-width", "1.8");
+      rect.setAttribute("filter", "drop-shadow(0 3px 6px rgba(0,0,0,0.55)) drop-shadow(0 1px 3px rgba(37,99,235,0.45))");
 
       const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
       text.setAttribute("text-anchor", "middle");
       text.setAttribute("dominant-baseline", "central");
       text.setAttribute("font-family", "system-ui, -apple-system, sans-serif");
-      text.setAttribute("font-size", "11");
+      text.setAttribute("font-size", "13");
       text.setAttribute("font-weight", "800");
-      text.setAttribute("fill", "#0f172a");
-      const valStr = item.amountMm.toFixed(1).replace(/^0/, "");
+      text.setAttribute("letter-spacing", "-0.3px");
+      text.setAttribute("fill", "#ffffff");
+      const valStr = (Number.isInteger(item.amountMm * 10) ? item.amountMm.toFixed(1) : item.amountMm.toFixed(2)).replace(/^0/, "");
       text.textContent = valStr;
 
       g.append(rect, text);
@@ -2423,7 +2427,10 @@ export function createTreatmentApp(
         tooltipNameEl.textContent = `Contact Tooth ${item.contact}`;
         tooltipDeltaEl.textContent = `Reduction: ${item.amountMm.toFixed(2)} mm`;
         toothTooltipEl.style.left = `${Math.max(10, Math.min(window.innerWidth - 250, bx - 120))}px`;
-        toothTooltipEl.style.top = `${by + (isUpper ? -75 : 25)}px`;
+        const tooltipTop = isUpper
+          ? (by - 75 < 60 ? by + 28 : by - 75)
+          : (by + 28 > window.innerHeight - 120 ? by - 75 : by + 28);
+        toothTooltipEl.style.top = `${tooltipTop}px`;
         toothTooltipEl.hidden = false;
       });
       g.addEventListener("mouseleave", () => {
