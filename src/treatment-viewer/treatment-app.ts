@@ -44,7 +44,7 @@ import {
   setModelProgressCallback,
   getLastKnownValidArchStages,
 } from "./model-loader";
-import { applyBiteContacts } from "./bite-contacts";
+import { applyBiteContacts, clearBiteContacts } from "./bite-contacts";
 import {
   identifyToothAtPoint,
   computeToothCentroids,
@@ -1293,6 +1293,9 @@ export function createTreatmentApp(
         const targetLower = state.attachmentsVisible
           ? cached.lower
           : (cached.lowerNoAttachments || cached.lower);
+        if (!state.contactsActive) {
+          clearBiteContacts(targetUpper, targetLower);
+        }
         if (targetUpper && activeUpperId) {
           viewport.setLayerGeometry(activeUpperId, targetUpper);
           viewport.setLayerOpacity(activeUpperId, 1);
@@ -1406,6 +1409,9 @@ export function createTreatmentApp(
       const targetLower = state.attachmentsVisible
         ? cached.lower
         : (cached.lowerNoAttachments || cached.lower);
+      if (!state.contactsActive) {
+        clearBiteContacts(targetUpper, targetLower);
+      }
       if (targetUpper && activeUpperId) {
         viewport.setLayerGeometry(activeUpperId, targetUpper);
         viewport.setLayerOpacity(activeUpperId, 1);
@@ -1987,6 +1993,9 @@ export function createTreatmentApp(
     } else {
       contactsLegendEl.hidden = true;
       viewport.setSeparation(0);
+      const upperGeom = viewport.getLayerGeometry?.(activeUpperId);
+      const lowerGeom = viewport.getLayerGeometry?.(activeLowerId);
+      clearBiteContacts(upperGeom, lowerGeom);
       viewport.setLayerColour(activeUpperId, UPPER_ARCH_COLOUR);
       viewport.setLayerColour(activeLowerId, LOWER_ARCH_COLOUR);
     }
@@ -2109,6 +2118,10 @@ export function createTreatmentApp(
     const targetLower = state.attachmentsVisible
       ? cached.lower
       : (cached.lowerNoAttachments || cached.lower);
+
+    if (!state.contactsActive) {
+      clearBiteContacts(targetUpper, targetLower);
+    }
 
     if (targetUpper && activeUpperId && viewport.setLayerGeometry) {
       viewport.setLayerGeometry(activeUpperId, targetUpper);

@@ -257,9 +257,9 @@ export function computeAnatomicalColors(
   const nckR = 0.68, nckG = 0.61, nckB = 0.50; // Cervical neck warmth (natural dentin depth)
   const shdR = 0.46, shdG = 0.40, shdB = 0.32; // Interproximal shadow & occlusal fissure depth
 
-  const gumMarginR = 0.68, gumMarginG = 0.18, gumMarginB = 0.24;
-  const gumAttachR = 0.60, gumAttachG = 0.14, gumAttachB = 0.20;
-  const gumDeepR   = 0.50, gumDeepG   = 0.10, gumDeepB   = 0.14;
+  const gumMarginR = 0.52, gumMarginG = 0.095, gumMarginB = 0.13;
+  const gumAttachR = 0.50, gumAttachG = 0.085, gumAttachB = 0.11;
+  const gumDeepR   = 0.485, gumDeepG  = 0.075, gumDeepB  = 0.095;
 
   let minX = Infinity, maxX = -Infinity;
   let minZ = Infinity, maxZ = -Infinity;

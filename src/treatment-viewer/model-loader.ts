@@ -642,6 +642,37 @@ export interface ExtractedGlbGeometries {
   readonly hasAttachments: boolean;
 }
 
+function safeMergeGeometries(g1: BufferGeometry, g2: BufferGeometry): BufferGeometry {
+  const c1 = g1.clone();
+  const c2 = g2.clone();
+
+  const hasIndex1 = Boolean(c1.getIndex());
+  const hasIndex2 = Boolean(c2.getIndex());
+  let b1 = c1;
+  let b2 = c2;
+  if (hasIndex1 !== hasIndex2) {
+    b1 = b1.toNonIndexed();
+    b2 = b2.toNonIndexed();
+  }
+
+  if (!b1.getAttribute("normal")) b1.computeVertexNormals();
+  if (!b2.getAttribute("normal")) b2.computeVertexNormals();
+
+  for (const name of Object.keys(b1.attributes)) {
+    if (name !== "position" && name !== "normal" && name !== "color") {
+      b1.deleteAttribute(name);
+    }
+  }
+  for (const name of Object.keys(b2.attributes)) {
+    if (name !== "position" && name !== "normal" && name !== "color") {
+      b2.deleteAttribute(name);
+    }
+  }
+
+  const merged = mergeGeometries([b1, b2], false);
+  return merged || b1;
+}
+
 /** Extracts native BufferGeometries directly from an in-memory GLB buffer in ~10ms.
  * Safely preserves multi-mesh containers and separates distinct attachment submeshes. */
 export async function extractGeometriesFromGlb(
@@ -698,8 +729,14 @@ export async function extractGeometriesFromGlb(
     calibrateGeometryColors(baseGeom);
     applyAttachmentContrastColor(attGeom);
 
-    const fullGeom =
-      mergeGeometries([baseGeom.clone(), attGeom.clone()], false) || baseGeom;
+    const fullGeom = safeMergeGeometries(baseGeom, attGeom);
+
+    if (fullGeom.getAttribute("color")) {
+      fullGeom.userData.baseColors = fullGeom.getAttribute("color")!.clone();
+    }
+    if (baseGeom.getAttribute("color")) {
+      baseGeom.userData.baseColors = baseGeom.getAttribute("color")!.clone();
+    }
 
     return {
       full: fullGeom,
@@ -715,6 +752,10 @@ export async function extractGeometriesFromGlb(
       ? baseGeoms[0]!
       : mergeGeometries(baseGeoms, false) || baseGeoms[0]!;
   calibrateGeometryColors(baseGeom);
+
+  if (baseGeom.getAttribute("color")) {
+    baseGeom.userData.baseColors = baseGeom.getAttribute("color")!.clone();
+  }
 
   return {
     full: baseGeom,
@@ -958,16 +999,26 @@ export async function loadStageGeometries(
                   stage.upper.filename || `${stage.label} - Upper`,
                 );
               }
+              calibrateGeometryColors(upperGeom);
+              if (upperGeom.getAttribute("color")) {
+                upperGeom.userData.baseColors = upperGeom.getAttribute("color")!.clone();
+              }
               upperHasAtts = false;
               upperNoAttGeom = upperGeom;
             }
           }
         }
         if (upperGeom) {
+          if (upperGeom.getAttribute("color") && !upperGeom.userData.baseColors) {
+            upperGeom.userData.baseColors = upperGeom.getAttribute("color")!.clone();
+          }
           upperGeom.computeBoundingBox();
           upperGeom.computeBoundingSphere();
         }
         if (upperNoAttGeom) {
+          if (upperNoAttGeom.getAttribute("color") && !upperNoAttGeom.userData.baseColors) {
+            upperNoAttGeom.userData.baseColors = upperNoAttGeom.getAttribute("color")!.clone();
+          }
           upperNoAttGeom.computeBoundingBox();
           upperNoAttGeom.computeBoundingSphere();
         }
@@ -1007,16 +1058,26 @@ export async function loadStageGeometries(
                   stage.lower.filename || `${stage.label} - Lower`,
                 );
               }
+              calibrateGeometryColors(lowerGeom);
+              if (lowerGeom.getAttribute("color")) {
+                lowerGeom.userData.baseColors = lowerGeom.getAttribute("color")!.clone();
+              }
               lowerHasAtts = false;
               lowerNoAttGeom = lowerGeom;
             }
           }
         }
         if (lowerGeom) {
+          if (lowerGeom.getAttribute("color") && !lowerGeom.userData.baseColors) {
+            lowerGeom.userData.baseColors = lowerGeom.getAttribute("color")!.clone();
+          }
           lowerGeom.computeBoundingBox();
           lowerGeom.computeBoundingSphere();
         }
         if (lowerNoAttGeom) {
+          if (lowerNoAttGeom.getAttribute("color") && !lowerNoAttGeom.userData.baseColors) {
+            lowerNoAttGeom.userData.baseColors = lowerNoAttGeom.getAttribute("color")!.clone();
+          }
           lowerNoAttGeom.computeBoundingBox();
           lowerNoAttGeom.computeBoundingSphere();
         }

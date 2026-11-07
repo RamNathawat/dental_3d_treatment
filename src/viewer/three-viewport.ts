@@ -1,6 +1,7 @@
 import {
   ACESFilmicToneMapping,
   Box3,
+  BufferAttribute,
   type BufferGeometry,
   Color,
   DirectionalLight,
@@ -485,7 +486,9 @@ class ThreeViewport implements Viewport {
     layer.bounds = boundsOf(geometry);
     layer.triangles = triangleCountOf(geometry);
     if (layer.colour === "anatomical") {
-      if (!geometry.getAttribute("color")) {
+      if (geometry.userData.baseColors instanceof BufferAttribute && !geometry.getAttribute("color")) {
+        geometry.setAttribute("color", geometry.userData.baseColors.clone());
+      } else if (!geometry.getAttribute("color")) {
         computeAnatomicalColors(geometry, layer.label);
       }
       const hasColors = Boolean(geometry.getAttribute("color"));
@@ -513,7 +516,14 @@ class ThreeViewport implements Viewport {
     const layer = this.layerFor(id);
     layer.colour = colour;
     if (colour === "anatomical") {
-      computeAnatomicalColors(layer.geometry, layer.label);
+      // Restore clean base colors if present (e.g. after contacts mode is disabled)
+      if (layer.geometry.userData.baseColors instanceof BufferAttribute) {
+        layer.geometry.setAttribute("color", layer.geometry.userData.baseColors.clone());
+        layer.geometry.attributes["color"]!.needsUpdate = true;
+      } else if (!layer.geometry.getAttribute("color")) {
+        // ONLY compute if no vertex colors exist at all; NEVER overwrite existing vertex colors!
+        computeAnatomicalColors(layer.geometry, layer.label);
+      }
       layer.material.vertexColors = Boolean(layer.geometry.getAttribute("color"));
       layer.material.color.set("#ffffff");
     } else if (colour === "contacts") {

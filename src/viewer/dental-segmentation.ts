@@ -65,10 +65,10 @@ export function computeAnatomicalColors(
   const nckR = 0.68, nckG = 0.61, nckB = 0.50; // Cervical neck warmth (natural dentin depth)
   const shdR = 0.46, shdG = 0.40, shdB = 0.32; // Interproximal shadow / fissure depth
 
-  // Gingival tissue: natural vascular coral-rose.
-  const gumMarginR = 0.68, gumMarginG = 0.18, gumMarginB = 0.24; // Free gingival margin
-  const gumAttachR = 0.60, gumAttachG = 0.14, gumAttachB = 0.20; // Attached gingiva
-  const gumDeepR   = 0.50, gumDeepG   = 0.10, gumDeepB   = 0.14; // Deep alveolar mucosa
+  // Gingival tissue: rich healthy vascular coral-rose.
+  const gumMarginR = 0.52, gumMarginG = 0.095, gumMarginB = 0.13; // Free gingival margin
+  const gumAttachR = 0.50, gumAttachG = 0.085, gumAttachB = 0.11; // Attached gingiva
+  const gumDeepR   = 0.485, gumDeepG  = 0.075, gumDeepB  = 0.095; // Deep alveolar mucosa
 
   // ── Step 1: Compute Arch Extents and Center in (X, Z) ──────────────────────
   let minX = Infinity, maxX = -Infinity;
@@ -186,9 +186,11 @@ export function computeAnatomicalColors(
     // Gingival outward slope:
     // In lower jaw: gingiva slopes downward towards mandibular base (ny < 0).
     // In upper jaw: gingiva slopes upward towards maxillary base (ny > 0).
+    // Slope contribution only applies near the cervical margin to prevent crown facial facets from turning pink.
     const gingivalSlope = isUpper ? ny : -ny;
+    const slopeContribution = distFromTip > baseCrownHeight * 0.70 ? gingivalSlope * 0.45 : 0;
     const marginScore =
-      distFromTip - effectiveCrownHeight + gingivalSlope * 0.45;
+      distFromTip - effectiveCrownHeight + slopeContribution;
 
     const marginHalfWidth = 0.35; // mm transition zone
 

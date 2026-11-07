@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BufferAttribute, BufferGeometry } from "three";
-import { applyBiteContacts } from "../src/treatment-viewer/bite-contacts";
+import { applyBiteContacts, clearBiteContacts } from "../src/treatment-viewer/bite-contacts";
 
 describe("Bite Contacts Calculation", () => {
   it("computes heavy, medium, and light contact points based on vertical clearance", () => {
@@ -45,5 +45,56 @@ describe("Bite Contacts Calculation", () => {
     // Clear point should be colored normal enamel ivory: R ~ 0.91, G ~ 0.88, B ~ 0.84
     expect(lowerColors.getX(3)).toBeCloseTo(0.91, 1);
     expect(lowerColors.getY(3)).toBeCloseTo(0.88, 1);
+  });
+
+  it("preserves native model base colors and cleanly restores them when contacts are cleared", () => {
+    const upperGeom = new BufferGeometry();
+    upperGeom.setAttribute(
+      "position",
+      new BufferAttribute(new Float32Array([0, 10.0, 0, 5, 10.0, 0]), 3),
+    );
+    // Distinctive warm enamel and amber attachment colors
+    upperGeom.setAttribute(
+      "color",
+      new BufferAttribute(new Float32Array([0.82, 0.76, 0.68, 0.96, 0.52, 0.16]), 3),
+    );
+
+    const lowerGeom = new BufferGeometry();
+    lowerGeom.setAttribute(
+      "position",
+      new BufferAttribute(new Float32Array([0, 9.85, 0, 5, 5.0, 0]), 3),
+    );
+    // Distinctive vascular gingiva and enamel
+    lowerGeom.setAttribute(
+      "color",
+      new BufferAttribute(new Float32Array([0.50, 0.09, 0.12, 0.76, 0.71, 0.63]), 3),
+    );
+
+    // 1. Apply bite contacts
+    applyBiteContacts(upperGeom, lowerGeom);
+
+    // Contact heatmap was applied: point 0 on lower is heavy contact (<0.25mm) -> Crimson Red
+    const lowerContactColors = lowerGeom.getAttribute("color");
+    expect(lowerContactColors.getX(0)).toBeCloseTo(0.94, 1);
+    expect(lowerContactColors.getY(0)).toBeCloseTo(0.22, 1);
+
+    // Original base colors must be backed up on userData
+    expect(lowerGeom.userData.baseColors).toBeDefined();
+    expect((lowerGeom.userData.baseColors as BufferAttribute).getX(0)).toBeCloseTo(0.50, 2);
+
+    // 2. Clear contacts
+    clearBiteContacts(upperGeom, lowerGeom);
+
+    // Verify original colors are cleanly restored!
+    const restoredLower = lowerGeom.getAttribute("color");
+    expect(restoredLower.getX(0)).toBeCloseTo(0.50, 2);
+    expect(restoredLower.getY(0)).toBeCloseTo(0.09, 2);
+    expect(restoredLower.getZ(0)).toBeCloseTo(0.12, 2);
+
+    const restoredUpper = upperGeom.getAttribute("color");
+    // Amber attachment restored: 0.96, 0.52, 0.16
+    expect(restoredUpper.getX(1)).toBeCloseTo(0.96, 2);
+    expect(restoredUpper.getY(1)).toBeCloseTo(0.52, 2);
+    expect(restoredUpper.getZ(1)).toBeCloseTo(0.16, 2);
   });
 });

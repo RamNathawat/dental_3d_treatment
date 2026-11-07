@@ -48,11 +48,22 @@ export interface SurfaceLayer extends NamedLayer {
 /** Puts the layer back to its own colour, with nothing measured showing on it. */
 export function showOwnColour(layer: SurfaceLayer): void {
   layer.mesh.material = layer.material;
-  layer.geometry.deleteAttribute("color");
+  if (layer.geometry.userData.baseColors instanceof BufferAttribute) {
+    layer.geometry.setAttribute("color", layer.geometry.userData.baseColors.clone());
+    layer.geometry.attributes["color"]!.needsUpdate = true;
+  } else if (layer.geometry.userData.preMeasureColors instanceof BufferAttribute) {
+    layer.geometry.setAttribute("color", layer.geometry.userData.preMeasureColors.clone());
+    layer.geometry.attributes["color"]!.needsUpdate = true;
+  } else {
+    layer.geometry.deleteAttribute("color");
+  }
 }
 
 /** Colours the layer's corners by what the thread measured, and shows them unlit. */
 export function showMeasured(layer: SurfaceLayer, colours: Float32Array): void {
+  if (!layer.geometry.userData.preMeasureColors && layer.geometry.getAttribute("color")) {
+    layer.geometry.userData.preMeasureColors = layer.geometry.getAttribute("color")!.clone();
+  }
   layer.geometry.setAttribute("color", new BufferAttribute(colours, 3));
   layer.mesh.material = layer.measuredMaterial;
 }

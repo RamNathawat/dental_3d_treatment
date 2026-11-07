@@ -45,17 +45,22 @@ export function applyBiteContacts(
     }
   }
 
-  // 2. Prepare color buffers: copy existing anatomical colors if present, otherwise default to ivory
+  // 2. Prepare color buffers: preserve clean native base colors before applying contact heatmaps
   const existingLowerColors = lowerGeometry.getAttribute("color");
+  if (!lowerGeometry.userData.baseColors && existingLowerColors) {
+    lowerGeometry.userData.baseColors = existingLowerColors.clone();
+  }
+  const sourceLowerColors = (lowerGeometry.userData.baseColors as BufferAttribute) || existingLowerColors;
+
   const lCount = lowerPos.count;
   const lowerColors = new Float32Array(lCount * 3);
   const IVORY_R = 0.91;
   const IVORY_G = 0.88;
   const IVORY_B = 0.84;
 
-  if (existingLowerColors && existingLowerColors.count === lCount) {
+  if (sourceLowerColors && sourceLowerColors.count === lCount) {
     for (let i = 0; i < lCount * 3; i++) {
-      lowerColors[i] = existingLowerColors.array[i]!;
+      lowerColors[i] = sourceLowerColors.array[i]!;
     }
   } else {
     for (let i = 0; i < lCount; i++) {
@@ -128,10 +133,15 @@ export function applyBiteContacts(
   }
 
   const existingUpperColors = upperGeometry.getAttribute("color");
+  if (!upperGeometry.userData.baseColors && existingUpperColors) {
+    upperGeometry.userData.baseColors = existingUpperColors.clone();
+  }
+  const sourceUpperColors = (upperGeometry.userData.baseColors as BufferAttribute) || existingUpperColors;
+
   const upperColors = new Float32Array(uCount * 3);
-  if (existingUpperColors && existingUpperColors.count === uCount) {
+  if (sourceUpperColors && sourceUpperColors.count === uCount) {
     for (let i = 0; i < uCount * 3; i++) {
-      upperColors[i] = existingUpperColors.array[i]!;
+      upperColors[i] = sourceUpperColors.array[i]!;
     }
   } else {
     for (let i = 0; i < uCount; i++) {
@@ -175,4 +185,28 @@ export function applyBiteContacts(
   upperGeometry.attributes["color"]!.needsUpdate = true;
 
   return { heavyCount: heavy, mediumCount: medium, lightCount: light };
+}
+
+/**
+ * Restores original unmutated dental base vertex colors (enamel, vascular gingiva, amber attachments)
+ * when bite contacts mode is disabled.
+ */
+export function clearBiteContacts(
+  upperGeometry?: BufferGeometry | null,
+  lowerGeometry?: BufferGeometry | null,
+): void {
+  if (upperGeometry) {
+    const baseColors = upperGeometry.userData.baseColors as BufferAttribute | undefined;
+    if (baseColors instanceof BufferAttribute) {
+      upperGeometry.setAttribute("color", baseColors.clone());
+      upperGeometry.attributes["color"]!.needsUpdate = true;
+    }
+  }
+  if (lowerGeometry) {
+    const baseColors = lowerGeometry.userData.baseColors as BufferAttribute | undefined;
+    if (baseColors instanceof BufferAttribute) {
+      lowerGeometry.setAttribute("color", baseColors.clone());
+      lowerGeometry.attributes["color"]!.needsUpdate = true;
+    }
+  }
 }
