@@ -112,3 +112,61 @@ export function getCaseTrayInfo(
   };
 }
 
+export function buildWhatsAppShareText({
+  patientName,
+  patientId,
+  stages,
+  metadataBadgeText,
+  archBadgeText,
+  clinicName,
+  shareUrl,
+}: {
+  patientName: string;
+  patientId?: string | null;
+  stages: number;
+  metadataBadgeText?: string;
+  archBadgeText?: string;
+  clinicName?: string | null;
+  shareUrl: string;
+}): string {
+  const lines: string[] = [
+    `🦷 *Orthodontic 3D Treatment Progression*`,
+    `*Patient:* ${patientName}${patientId ? ` (#${patientId})` : ""}`,
+  ];
+
+  if (metadataBadgeText) {
+    lines.push(`*Prescription:* ${metadataBadgeText}`);
+  }
+  if (stages) {
+    lines.push(`*Stages:* ${stages} Stages${archBadgeText ? ` (${archBadgeText})` : ""}`);
+  }
+  if (clinicName) {
+    lines.push(`*Clinic:* ${clinicName}`);
+  }
+
+  lines.push(
+    ``,
+    `🔗 *Interactive 3D Progression Link:*`,
+    `${shareUrl}`,
+    ``,
+    `_Open in your browser to inspect 3D tooth movements, aligner stages & attachments._`
+  );
+
+  return lines.join("\n");
+}
+
+export function getWhatsAppShareUrl({
+  text,
+  phoneNumber,
+}: {
+  text: string;
+  phoneNumber?: string;
+}): string {
+  const encodedText = encodeURIComponent(text);
+  const cleanPhone = (phoneNumber || "").replace(/[^\d]/g, "");
+  if (cleanPhone) {
+    return `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedText}`;
+  }
+  return `https://api.whatsapp.com/send?text=${encodedText}`;
+}
+

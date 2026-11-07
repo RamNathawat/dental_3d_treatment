@@ -685,11 +685,11 @@ export default function DashboardClient({
                         <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 dark:text-slate-900" />
                       </a>
 
-                      {/* Secondary CTA: Share Link (Opens popup with Copy Link & Clinic Mailbox) */}
+                      {/* Secondary CTA: Share Link (Opens popup with Copy Link, WhatsApp & Clinic Mailbox) */}
                       <button
                         onClick={() => setSelectedShareCase(item)}
                         className="py-2.5 px-3.5 rounded-xl text-xs font-semibold border transition-all flex items-center justify-center gap-1.5 active:scale-98 bg-white dark:bg-[#1A2234] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-[#232D42] border-slate-200 dark:border-slate-700 shadow-2xs hover:dark:border-[#e0b457]/40"
-                        title="Share 3D progression: copy patient link or email to clinic"
+                        title="Share 3D progression: copy patient link, send on WhatsApp, or email to clinic"
                       >
                         <Share2 className="w-4 h-4 text-slate-500 dark:text-slate-400" />
                         <span>Share</span>

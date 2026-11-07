@@ -16,7 +16,12 @@ import {
   Sparkles,
 } from "lucide-react";
 import { DentalCase } from "./page";
-import { getCaseTrayInfo } from "./DashboardClient";
+import {
+  getCaseTrayInfo,
+  buildWhatsAppShareText,
+  getWhatsAppShareUrl,
+} from "@/lib/case-tray-info";
+import WhatsAppIcon from "./WhatsAppIcon";
 import { createClient } from "@/lib/supabase/client";
 import {
   getSavedClinicEmails,
@@ -155,6 +160,23 @@ Orthodontic 3D Clinical Studio`;
     setTimeout(() => setCopiedLink(false), 2500);
   }
 
+  function handleShareWhatsApp() {
+    const text = buildWhatsAppShareText({
+      patientName: displayName,
+      patientId: caseItem.patient_id,
+      stages,
+      metadataBadgeText: trayInfo.metadataBadgeText,
+      archBadgeText: trayInfo.archBadgeText,
+      clinicName: caseItem.clinic_name,
+      shareUrl,
+    });
+    const url = getWhatsAppShareUrl({ text });
+    window.open(url, "_blank", "noopener,noreferrer");
+    if (onToast) {
+      onToast("WhatsApp opened with 3D progression link");
+    }
+  }
+
   function handleOpenMailClient() {
     const to = recipientEmail.trim();
     if (!to) {
@@ -275,8 +297,8 @@ Orthodontic 3D Clinical Studio`;
             </a>
           </div>
 
-          {/* ── Section 1: Copy Share Link ──────────────────────────────────── */}
-          <div className="space-y-2">
+          {/* ── Section 1: Copy Share Link & WhatsApp Direct ─────────────── */}
+          <div className="space-y-3">
             <label className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
                 <Share2 className="w-3.5 h-3.5 text-amber-500 dark:text-[#ffd166]" />
@@ -285,7 +307,8 @@ Orthodontic 3D Clinical Studio`;
               <span className="text-[10px] font-normal text-slate-400">Ready to share</span>
             </label>
 
-            <div className="flex items-center gap-2">
+            {/* Link input + Copy Link & Quick WhatsApp buttons */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
               <div className="relative flex-1 min-w-0">
                 <input
                   type="text"
@@ -296,31 +319,40 @@ Orthodontic 3D Clinical Studio`;
                 />
               </div>
 
-              <button
-                type="button"
-                onClick={handleCopyDirectLink}
-                className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 active:scale-95 flex-shrink-0 ${
-                  copiedLink
-                    ? "bg-emerald-600 text-white shadow-sm"
-                    : "bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:to-[#c49a45] text-white dark:text-slate-950 hover:brightness-105 shadow-sm"
-                }`}
-              >
-                {copiedLink ? (
-                  <>
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Copied!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>Copy Link</span>
-                  </>
-                )}
-              </button>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={handleCopyDirectLink}
+                  className={`flex-1 sm:flex-initial px-3.5 py-2 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 active:scale-95 ${
+                    copiedLink
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : "bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:to-[#c49a45] text-white dark:text-slate-950 hover:brightness-105 shadow-sm"
+                  }`}
+                >
+                  {copiedLink ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy Link</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleShareWhatsApp}
+                  className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl text-xs font-semibold bg-[#154D38] hover:bg-[#1b5e45] text-white active:scale-95 transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-[#154D38]/25"
+                  title="Share 3D progression directly via WhatsApp (choose any chat or group)"
+                >
+                  <WhatsAppIcon className="w-4 h-4 fill-white" />
+                  <span>WhatsApp</span>
+                </button>
+              </div>
             </div>
-            <p className="text-[10px] text-slate-400 dark:text-slate-500">
-              Anyone with this link can view the interactive 3D progression in their browser.
-            </p>
           </div>
 
           {/* ── Divider ──────────────────────────────────────────────────────── */}

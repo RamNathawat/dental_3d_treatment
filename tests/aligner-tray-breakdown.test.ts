@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { getCaseTrayInfo, type TrayBreakdownCase } from "../portal/lib/case-tray-info";
+import {
+  getCaseTrayInfo,
+  buildWhatsAppShareText,
+  getWhatsAppShareUrl,
+  type TrayBreakdownCase,
+} from "../portal/lib/case-tray-info";
 
 describe("Aligner Tray Breakdown for Equal & Unequal Arch Stages", () => {
   it("formats unequal dual-arch cases with explicit Upper and Lower tray counts", () => {
@@ -118,5 +123,43 @@ describe("Aligner Tray Breakdown for Equal & Unequal Arch Stages", () => {
     expect(info.archType).toBe("lower");
     expect(info.metadataBadgeText).toBe("12 Aligner Trays (Lower Arch Only)");
     expect(info.stepperCenterText).toBe("Lower Arch Alignment • 12 Trays");
+  });
+
+  it("builds formatted WhatsApp share message with patient details, tray count, and link", () => {
+    const text = buildWhatsAppShareText({
+      patientName: "00 Segmented",
+      patientId: "PT-2026",
+      stages: 23,
+      metadataBadgeText: "41 Total Trays (Upper: 23 · Lower: 18)",
+      archBadgeText: "Dual-Arch (U: 23 · L: 18)",
+      clinicName: "Smile Dental Clinic",
+      shareUrl: "https://example.com/treatment?case=tok123",
+    });
+
+    expect(text).toContain("🦷 *Orthodontic 3D Treatment Progression*");
+    expect(text).toContain("*Patient:* 00 Segmented (#PT-2026)");
+    expect(text).toContain("*Prescription:* 41 Total Trays (Upper: 23 · Lower: 18)");
+    expect(text).toContain("*Stages:* 23 Stages (Dual-Arch (U: 23 · L: 18))");
+    expect(text).toContain("*Clinic:* Smile Dental Clinic");
+    expect(text).toContain("https://example.com/treatment?case=tok123");
+  });
+
+  it("generates WhatsApp URL for picking any contact when no phone number is provided", () => {
+    const url = getWhatsAppShareUrl({
+      text: "Hello 3D Link: https://example.com",
+    });
+    expect(url).toBe(
+      "https://api.whatsapp.com/send?text=Hello%203D%20Link%3A%20https%3A%2F%2Fexample.com",
+    );
+  });
+
+  it("generates WhatsApp URL with direct target phone number when provided", () => {
+    const url = getWhatsAppShareUrl({
+      text: "Review 3D: https://example.com",
+      phoneNumber: "+91 70342 24326",
+    });
+    expect(url).toBe(
+      "https://api.whatsapp.com/send?phone=917034224326&text=Review%203D%3A%20https%3A%2F%2Fexample.com",
+    );
   });
 });
