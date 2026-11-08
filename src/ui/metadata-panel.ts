@@ -92,7 +92,7 @@ function showProject(
 
 function notesBlock(notes: string): HTMLElement {
   return el("div", { class: "notes" }, [
-    el("span", { class: "notes__caption", text: "Notes" }),
+    el("span", { class: "notes__caption", text: "Treatment Plan" }),
     el("pre", { class: "notes__body", text: notes }),
   ]);
 }

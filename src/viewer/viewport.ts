@@ -124,6 +124,8 @@ export interface Viewport {
   setGridVisible(visible: boolean): void;
   setGridTheme?(isDark: boolean): void;
   setBackgroundColor?(color: number | string): void;
+  setExposure?(exposure: number): void;
+  getExposure?(): number;
 
   /** Where the camera is now, for remembering a session. */
   getCamera(): CameraView;

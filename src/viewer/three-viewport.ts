@@ -163,7 +163,7 @@ class ThreeViewport implements Viewport {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.toneMappingExposure = 0.78;
 
     this.camera = new PerspectiveCamera(45, 1, 0.1, 10_000);
     this.camera.up.set(0, 0, 1);
@@ -321,12 +321,12 @@ class ThreeViewport implements Viewport {
 
     const material = new MeshPhysicalMaterial({
       color: new Color(baseColor),
-      roughness: 0.32,
+      roughness: 0.35,
       metalness: 0.01,
-      clearcoat: 0.65,
-      clearcoatRoughness: 0.14,
-      ior: 1.55,
-      envMapIntensity: 0.30,
+      clearcoat: 0.42,
+      clearcoatRoughness: 0.18,
+      ior: 1.50,
+      envMapIntensity: 0.18,
       vertexColors: isAnatomical && Boolean(geometry.getAttribute("color")),
       side: DoubleSide,
     });
@@ -338,34 +338,34 @@ class ThreeViewport implements Viewport {
           `#include <lights_physical_fragment>
           #if defined( USE_COLOR )
             // Distinguish Gum vs Attachment vs Tooth Enamel:
-            // Attachment: Vibrant clinical contrast amber-orange (r > 0.85, g in [0.35, 0.72], b < 0.28)
-            bool isAttachment = (vColor.r > 0.85 && vColor.g > 0.35 && vColor.g < 0.72 && vColor.b < 0.28);
+            // Attachment: Deep contrast orange
+            bool isAttachment = ((vColor.r > 0.75 && vColor.g > 0.16 && vColor.g < 0.55 && vColor.b < 0.18) || (vColor.r > 0.85 && vColor.g > 0.35 && vColor.g < 0.72 && vColor.b < 0.28));
             // Gum: rich vascular oral mucosa (r > 0.35, r - g > 0.10, not attachment)
             bool isGum = (!isAttachment && vColor.r > 0.35 && (vColor.r - vColor.g) > 0.10);
 
             if (isAttachment) {
-              // Clinical composite resin engager / attachment finish (crisp semi-gloss surface, clean reflections)
-              material.roughness = 0.20;
+              // Clinical composite resin engager / attachment finish (deep contrast, semi-gloss, clean reflections)
+              material.roughness = 0.24;
               #ifdef USE_CLEARCOAT
-                material.clearcoat = 0.55;
-                material.clearcoatRoughness = 0.12;
+                material.clearcoat = 0.45;
+                material.clearcoatRoughness = 0.15;
               #endif
             } else if (isGum) {
-              // Moist biological oral mucosa (wet saliva clearcoat)
-              material.roughness = 0.32;
+              // Moist biological oral mucosa (controlled wet saliva clearcoat without bleaching)
+              material.roughness = 0.36;
               #ifdef USE_CLEARCOAT
-                material.clearcoat = 0.88;
-                material.clearcoatRoughness = 0.08;
+                material.clearcoat = 0.65;
+                material.clearcoatRoughness = 0.12;
               #endif
             } else {
-              // Glazed dental ceramic enamel
-              material.roughness = 0.28;
+              // Glazed natural dental enamel
+              material.roughness = 0.32;
               #ifdef USE_CLEARCOAT
-                material.clearcoat = 0.35;
-                material.clearcoatRoughness = 0.18;
+                material.clearcoat = 0.28;
+                material.clearcoatRoughness = 0.20;
               #endif
               // Occlusal fissure & groove depth enhancement based on normal derivative curvature
-              float crevice = clamp((length(dxy) - 0.04) * 1.6, 0.0, 0.38);
+              float crevice = clamp((length(dxy) - 0.04) * 1.8, 0.0, 0.42);
               material.diffuseColor *= (1.0 - crevice);
             }
           #endif
@@ -755,29 +755,54 @@ class ThreeViewport implements Viewport {
     this.geometryCache.clear();
   }
 
-  private addLights(): void {
-    // Balanced studio lighting calibrated for clinical CAD models:
-    // Retains warm ivory/off-white enamel and deep fissure contrast without diffuse bleaching/blowout
-    this.scene.add(new HemisphereLight(0xfff8ee, 0x141824, 0.22));
+  setExposure(exposure: number): void {
+    this.renderer.toneMappingExposure = Math.max(0.2, Math.min(2.0, exposure));
+  }
 
-    // Primary key light: crisp form, depth, and specular contour (calibrated to preserve ivory enamel tone)
-    const key = new DirectionalLight(0xfffbf2, 0.65);
-    key.position.set(35, -65, 80);
+  getExposure(): number {
+    return this.renderer.toneMappingExposure;
+  }
+
+  private addLights(): void {
+    // 1. Soft balanced ambient hemisphere (warm dental studio ceiling, dark neutral base)
+    this.scene.add(new HemisphereLight(0xfff8ee, 0x141824, 0.14));
+
+    // 2. Primary Clinical Key Light (Anterior-Superior-Right):
+    // Positioned at ~35° elevation and ~28° azimuth from front-right (+X, +Y, +Z).
+    // Casts natural anatomical micro-shadows into embrasures, developmental grooves,
+    // and attachment borders to give sculpted 3D definition without harsh glare.
+    const key = new DirectionalLight(0xfffbf2, 0.40);
+    key.position.set(40, 55, 75);
     this.scene.add(key);
 
-    // Daylight fill light: lifts contralateral shadows while preserving occlusal grooves
-    const fill = new DirectionalLight(0xeef4ff, 0.25);
-    fill.position.set(-55, -45, 35);
+    // 3. Bilateral Contralateral Fill Light (Anterior-Superior-Left):
+    // Positioned at ~30° elevation from front-left (-X, +Y, +Z).
+    // Balances the key light so the patient's right quadrant (Q1/Q4) is fully legible
+    // and free of heavy pitch-black shadows.
+    const fill = new DirectionalLight(0xeef4ff, 0.22);
+    fill.position.set(-45, 45, 65);
     this.scene.add(fill);
 
-    // Incisal rim light: highlights incisal crowns and silhouettes against dark canvas
-    const rim = new DirectionalLight(0xffffff, 0.28);
-    rim.position.set(0, 75, 55);
-    this.scene.add(rim);
+    // 4. Overhead Occlusal & Incisal Crest Key Light (Superior-Overhead):
+    // Positioned directly above (+Y) slightly anterior (+Z).
+    // Illuminates the occlusal tables, masticatory groove patterns, cusp inclines,
+    // and incisal edges with crisp definition.
+    const overhead = new DirectionalLight(0xffffff, 0.20);
+    overhead.position.set(0, 85, 20);
+    this.scene.add(overhead);
 
-    // Subtle upward bounce: prevents lingual undercuts from turning pitch black
-    const bounce = new DirectionalLight(0xf5f3ee, 0.10);
-    bounce.position.set(0, -40, -50);
+    // 5. Lingual / Palatal Depth Light (Posterior-Superior):
+    // Situated behind the dental arches (-Z) and elevated (+Y).
+    // Ensures that when orbiting to inspect lingual surfaces, lingual attachments,
+    // or the palatal vault, surfaces remain well-defined and clearly illuminated.
+    const lingual = new DirectionalLight(0xf5f3ee, 0.16);
+    lingual.position.set(-15, 50, -70);
+    this.scene.add(lingual);
+
+    // 6. Subtle Lower Mandibular Bounce:
+    // Gentle upward bounce (-Y) preventing the lowest mandibular base from turning pitch black.
+    const bounce = new DirectionalLight(0xedf2f7, 0.06);
+    bounce.position.set(0, -60, 25);
     this.scene.add(bounce);
   }
 

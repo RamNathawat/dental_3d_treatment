@@ -184,14 +184,14 @@ export default function EditNotesModal({
         );
       } catch {}
 
-      setSuccessMsg("Doctor remarks saved successfully!");
+      setSuccessMsg("Treatment plan saved successfully!");
       onSaved?.();
       setTimeout(() => {
         onClose();
       }, 700);
     } catch (err) {
       console.error("Error saving doctor notes:", err);
-      setErrorMsg(err instanceof Error ? err.message : "Failed to save doctor remarks.");
+      setErrorMsg(err instanceof Error ? err.message : "Failed to save treatment plan.");
     } finally {
       setSaving(false);
     }
@@ -208,7 +208,7 @@ export default function EditNotesModal({
             </div>
             <div>
               <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                <span>Doctor’s Notes & Remarks</span>
+                <span>Treatment Plan</span>
                 <span className="text-xs font-normal text-slate-400">
                   · {caseItem.patient_name} {caseItem.patient_id ? `(#${caseItem.patient_id})` : ""}{" "}
                   {[caseItem.patient_sex, caseItem.patient_age != null ? `${caseItem.patient_age} yrs` : null].filter(Boolean).length > 0
@@ -217,7 +217,7 @@ export default function EditNotesModal({
                 </span>
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Prescribe wear guidelines, general instructions, and stage remarks for the patient
+                Prescribe wear guidelines, treatment plan instructions, and stage remarks for the patient
               </p>
             </div>
           </div>
@@ -248,7 +248,7 @@ export default function EditNotesModal({
           {loading ? (
             <div className="py-16 flex flex-col items-center justify-center gap-3 text-slate-400">
               <Loader2 className="w-6 h-6 animate-spin text-amber-500 dark:text-[#ffd166]" />
-              <span>Loading case remarks...</span>
+              <span>Loading treatment plan...</span>
             </div>
           ) : (
             <>
@@ -319,7 +319,7 @@ export default function EditNotesModal({
               {/* General Treatment Instructions */}
               <div className="space-y-1.5">
                 <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                  <span>General Treatment Instructions & Patient Remarks</span>
+                  <span>General Treatment Plan & Instructions</span>
                   <span className="text-[10px] font-normal text-slate-400">Visible to patient in 3D viewer</span>
                 </label>
                 <textarea
@@ -336,7 +336,7 @@ export default function EditNotesModal({
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                     <Calendar className="w-3.5 h-3.5 text-amber-500 dark:text-[#ffd166]" />
-                    Stage-Specific Notes & Milestones
+                    Stage-Specific Treatment Plan & Milestones
                   </span>
                   <span className="text-[10px] text-slate-400">Optional notes assigned to specific aligner stages</span>
                 </div>
@@ -375,7 +375,7 @@ export default function EditNotesModal({
                     className="px-3 py-2 bg-slate-900 dark:bg-[#e0b457] hover:bg-slate-800 dark:hover:bg-[#f3c875] text-white dark:text-slate-950 font-bold rounded-lg text-xs flex items-center justify-center shrink-0 cursor-pointer shadow-xs gap-1"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Add Note</span>
+                    <span>Add Plan Note</span>
                   </button>
                 </div>
 
@@ -399,7 +399,7 @@ export default function EditNotesModal({
                             type="button"
                             onClick={() => handleRemoveStageRemark(item.stage)}
                             className="p-1 text-slate-400 hover:text-red-500 rounded-md transition-colors"
-                            title="Delete note"
+                            title="Delete plan note"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -418,7 +418,7 @@ export default function EditNotesModal({
             {hasUnsavedChanges && (
               <span className="text-[11px] font-semibold text-amber-600 dark:text-[#ffd166] flex items-center gap-1.5 animate-pulse">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-[#ffd166]" />
-                <span>Unsaved changes — click &quot;Save Remarks&quot; to apply to 3D viewer</span>
+                <span>Unsaved changes — click &quot;Save Treatment Plan&quot; to apply to 3D viewer</span>
               </span>
             )}
           </div>
@@ -444,12 +444,12 @@ export default function EditNotesModal({
               {saving ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Saving Remarks...</span>
+                  <span>Saving Treatment Plan...</span>
                 </>
               ) : (
                 <>
                   <Check className="w-3.5 h-3.5" />
-                  <span>Save Remarks</span>
+                  <span>Save Treatment Plan</span>
                 </>
               )}
             </button>

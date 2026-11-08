@@ -376,10 +376,10 @@ export function createTreatmentApp(
       div("tv-notes-drawer__title-wrap", [
         (() => {
           const h3 = document.createElement("h3");
-          h3.textContent = "Doctor's Notes & Remarks";
+          h3.textContent = "Treatment Plan & Remarks";
           return h3;
         })(),
-        span("tv-notes-drawer__sub", "Treating Orthodontist Guidance"),
+        span("tv-notes-drawer__sub", "Treating Doctor Guidance"),
       ]),
       makeBtn("✕", () => toggleNotesDrawer(), "tv-notes-drawer__close"),
     ]),
@@ -399,13 +399,13 @@ export function createTreatmentApp(
   notesDrawerEl.style.display = "none";
   notesDrawerEl.style.visibility = "hidden";
 
-  // Doctor's Notes button in header
+  // Treatment Plan button in header
   const notesHeaderBtn = makeBtn(
-    "Notes",
+    "Treatment Plan",
     () => toggleNotesDrawer(),
     "tv-btn--tool tv-btn--notes",
   );
-  notesHeaderBtn.title = "View treating doctor's instructions & case remarks";
+  notesHeaderBtn.title = "View treatment plan, instructions & case remarks";
 
   // Quick tools in top bar
   let isGridVisible = false;
@@ -637,7 +637,7 @@ export function createTreatmentApp(
     () => toggleAttachments(),
     "tv-ba-btn tv-dock-tool-btn",
   );
-  attachmentsBtn.title = "Toggle visibility of orthodontic composite attachments (contrast amber-orange engagers)";
+  attachmentsBtn.title = "Toggle visibility of orthodontic composite attachments (contrast deep orange engagers)";
   attachmentsBtn.setAttribute("aria-pressed", "false");
   attachmentsBtn.dataset.tool = "attachments";
 
@@ -1947,7 +1947,7 @@ export function createTreatmentApp(
     notesDrawerGeneralEl.replaceChildren();
     if (notes?.general) {
       const gCard = div("tv-notes-card", [
-        div("tv-notes-card__title", ["Treatment Instructions"]),
+        div("tv-notes-card__title", ["Treatment Plan Instructions"]),
         div("tv-notes-card__text", [notes.general]),
       ]);
       notesDrawerGeneralEl.appendChild(gCard);
@@ -1958,9 +1958,9 @@ export function createTreatmentApp(
 
       const empty = div("tv-notes-empty", [
         emptyIconEl,
-        div("tv-notes-empty__title", ["No Doctor Remarks Yet"]),
+        div("tv-notes-empty__title", ["No Treatment Plan Remarks Yet"]),
         div("tv-notes-empty__sub", [
-          "The treating doctor has not posted specific remarks for this case.",
+          "The treating doctor has not posted specific remarks for this treatment plan.",
         ]),
       ]);
       notesDrawerGeneralEl.appendChild(empty);
@@ -1990,7 +1990,7 @@ export function createTreatmentApp(
       });
     } else {
       const noStageNotes = div("tv-notes-stage-empty", [
-        "No stage-specific remarks recorded.",
+        "No stage-specific remarks recorded in treatment plan.",
       ]);
       notesDrawerStageListEl.appendChild(noStageNotes);
     }

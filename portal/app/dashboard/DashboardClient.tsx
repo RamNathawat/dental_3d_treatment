@@ -711,14 +711,14 @@ export default function DashboardClient({
                         <span>IPR</span>
                       </button>
 
-                      {/* Quaternary CTA: Doctor's Remarks / Notes */}
+                      {/* Quaternary CTA: Treatment Plan / Doctor Remarks */}
                       <button
                         onClick={() => setSelectedNotesCase(item)}
                         className="py-2.5 px-3 rounded-xl text-xs font-semibold border transition-all flex items-center justify-center gap-1.5 active:scale-98 bg-white dark:bg-[#1A2234] text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-950/30 border-slate-200 dark:border-slate-700 hover:border-amber-300 dark:hover:border-amber-700 hover:text-amber-800 dark:hover:text-[#ffd166] shadow-2xs"
-                        title="Doctor's notes, instructions & case remarks"
+                        title="Treatment plan, instructions & case remarks"
                       >
                         <FileText className="w-3.5 h-3.5 text-amber-500 dark:text-[#ffd166]" />
-                        <span>Notes</span>
+                        <span>Treatment Plan</span>
                       </button>
                     </div>
                   </div>
@@ -760,7 +760,7 @@ export default function DashboardClient({
           doctorDefaultName={email !== "Doctor" ? email.split("@")[0] : undefined}
           onSaved={() =>
             showToast(
-              `Doctor remarks updated for ${selectedNotesCase.patient_name}`,
+              `Treatment plan updated for ${selectedNotesCase.patient_name}`,
             )
           }
         />

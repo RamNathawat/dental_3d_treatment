@@ -841,10 +841,10 @@ describe("Treatment Viewer Application", () => {
       expect(drawer.hidden).toBe(false);
 
       // Verify content populated from manifest
-      expect(drawer.textContent).toContain("Doctor's Notes & Remarks");
+      expect(drawer.textContent).toContain("Treatment Plan & Remarks");
       expect(drawer.textContent).toContain("Dr. Sarath Kumar");
       expect(drawer.textContent).toContain("22 hrs / day");
-      expect(drawer.textContent).toContain("Treatment Instructions");
+      expect(drawer.textContent).toContain("Treatment Plan Instructions");
       expect(drawer.textContent).toContain("Wear aligners for a minimum of 20 to 22 hours per day");
       expect(drawer.textContent).toContain("Stage 1");
       expect(drawer.textContent).toContain("Stage 2");
@@ -906,7 +906,7 @@ describe("Treatment Viewer Application", () => {
       app.dispose();
     });
 
-    it("paints attachment geometry in vibrant contrast amber-orange (#F97316)", () => {
+    it("paints attachment geometry in vibrant contrast deep orange", () => {
       const geom = new BufferGeometry();
       const positions = new Float32Array([
         0, 0, 0,
@@ -924,12 +924,12 @@ describe("Treatment Viewer Application", () => {
       const g = colorAttr.getY(0);
       const b = colorAttr.getZ(0);
 
-      // Contrast amber-orange criteria:
-      // r > 0.85, g in [0.35, 0.72], b < 0.28
-      expect(r).toBeGreaterThan(0.85);
-      expect(g).toBeGreaterThan(0.35);
-      expect(g).toBeLessThan(0.72);
-      expect(b).toBeLessThan(0.28);
+      // Contrast deep orange criteria:
+      // r > 0.80, g in [0.20, 0.45], b < 0.15
+      expect(r).toBeGreaterThan(0.80);
+      expect(g).toBeGreaterThan(0.20);
+      expect(g).toBeLessThan(0.45);
+      expect(b).toBeLessThan(0.15);
     });
 
     it("attaches data-tool='attachments' to attachments dock button for orange styling", () => {

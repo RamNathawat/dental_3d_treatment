@@ -466,8 +466,8 @@ function calibrateGeometryColors(geom: BufferGeometry): void {
     const b = arr[cIdx + 2]!;
     const y = pos ? pos.getY(i) : 0;
 
-    // Attachments: vibrant contrast amber-orange (#F97316) - preserve and omit from arch stats
-    const isAttachment = r > 0.85 && g > 0.35 && g < 0.72 && b < 0.28;
+    // Attachments: deep contrast orange (#E04C0A / #EA580C) - preserve and omit from arch stats
+    const isAttachment = (r > 0.75 && g > 0.16 && g < 0.55 && b < 0.18) || (r > 0.85 && g > 0.35 && g < 0.72 && b < 0.28);
     if (isAttachment) continue;
 
     const isGum = (r > 0.35 && (r - g) > 0.08) || (r > 0.40 && g < 0.35 && b < 0.35);
@@ -510,8 +510,8 @@ function calibrateGeometryColors(geom: BufferGeometry): void {
     const g = arr[cIdx + 1]!;
     const b = arr[cIdx + 2]!;
 
-    // 0. Orthodontic attachments: preserve vibrant clinical contrast amber-orange (#F97316)
-    const isAttachment = r > 0.85 && g > 0.35 && g < 0.72 && b < 0.28;
+    // 0. Orthodontic attachments: preserve deep contrast orange (#E04C0A / #EA580C)
+    const isAttachment = (r > 0.75 && g > 0.16 && g < 0.55 && b < 0.18) || (r > 0.85 && g > 0.35 && g < 0.72 && b < 0.28);
     if (isAttachment) {
       continue;
     }
@@ -596,9 +596,9 @@ function calibrateGeometryColors(geom: BufferGeometry): void {
 }
 
 /**
- * Applies a vibrant clinical contrast amber-orange (#F97316 / #FA8228) to attachment vertices.
- * This makes orthodontic composite engagers and buttons immediately distinct against the warm ivory teeth,
- * with subtle micro-depth highlights along attachment facets.
+ * Applies a deep, vibrant contrast orange (~#E04C0A / #EA580C) to attachment vertices.
+ * This makes orthodontic composite engagers and buttons immediately distinct and punchy against warm ivory teeth,
+ * with subtle micro-depth highlights along attachment facets without bleaching under illumination.
  */
 export function applyAttachmentContrastColor(geom: BufferGeometry): void {
   const posAttr = geom.getAttribute("position");
@@ -619,7 +619,7 @@ export function applyAttachmentContrastColor(geom: BufferGeometry): void {
 
   const arr = colorAttr.array as Float32Array;
 
-  // Vibrant aesthetic amber-orange (RGB ~ 0.96, 0.52, 0.16)
+  // Deep contrast burnt orange (RGB ~ 0.88, 0.30, 0.04)
   for (let i = 0; i < count; i++) {
     const idx = i * 3;
     let factor = 1.0;
@@ -627,11 +627,11 @@ export function applyAttachmentContrastColor(geom: BufferGeometry): void {
       const nz = normAttr.getZ(i);
       const ny = normAttr.getY(i);
       // Subtle faceted shading: catch top and front light
-      factor = 0.92 + 0.12 * Math.max(0, nz) + 0.06 * Math.max(0, ny);
+      factor = 0.90 + 0.14 * Math.max(0, nz) + 0.06 * Math.max(0, ny);
     }
-    arr[idx] = Math.min(1.0, 0.96 * factor);
-    arr[idx + 1] = Math.min(1.0, 0.52 * factor);
-    arr[idx + 2] = Math.min(1.0, 0.16 * factor);
+    arr[idx] = Math.min(1.0, 0.88 * factor);
+    arr[idx + 1] = Math.min(1.0, 0.30 * factor);
+    arr[idx + 2] = Math.min(1.0, 0.04 * factor);
   }
   colorAttr.needsUpdate = true;
 }
