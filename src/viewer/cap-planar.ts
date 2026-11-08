@@ -1,4 +1,5 @@
 import {
+  BufferAttribute,
   type BufferGeometry,
   Float32BufferAttribute,
   ShapeUtils,
@@ -36,8 +37,8 @@ export function capPlanarOpenings(
   const posAttr = geometry.getAttribute("position");
   if (!posAttr) return geometry;
 
-  const count = posAttr.count;
-  const numTriangles = count / 3;
+  const index = geometry.getIndex();
+  const numTriangles = index ? index.count / 3 : posAttr.count / 3;
 
   const edgeMap = new Map<string, EdgeEntry>();
 
@@ -50,11 +51,9 @@ export function capPlanarOpenings(
 
   // Find extreme Y bounds to isolate the base planar cut plane
   let minY = Infinity, maxY = -Infinity;
-  for (let i = 0; i < count; i += 3) {
-    const y0 = posAttr.getY(i), y1 = posAttr.getY(i + 1), y2 = posAttr.getY(i + 2);
-    if (y0 < minY) minY = y0; if (y0 > maxY) maxY = y0;
-    if (y1 < minY) minY = y1; if (y1 > maxY) maxY = y1;
-    if (y2 < minY) minY = y2; if (y2 > maxY) maxY = y2;
+  for (let i = 0; i < posAttr.count; i++) {
+    const y = posAttr.getY(i);
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
   }
 
   const cutY = isUpper ? maxY : minY;
@@ -62,10 +61,13 @@ export function capPlanarOpenings(
 
   const pts = new Map<string, Point3D>();
   for (let i = 0; i < numTriangles; i++) {
-    const i3 = i * 3;
-    const y0 = posAttr.getY(i3);
-    const y1 = posAttr.getY(i3 + 1);
-    const y2 = posAttr.getY(i3 + 2);
+    const i0 = index ? index.getX(i * 3) : i * 3;
+    const i1 = index ? index.getX(i * 3 + 1) : i * 3 + 1;
+    const i2 = index ? index.getX(i * 3 + 2) : i * 3 + 2;
+
+    const y0 = posAttr.getY(i0);
+    const y1 = posAttr.getY(i1);
+    const y2 = posAttr.getY(i2);
 
     // Fast reject: triangles nowhere near the cut plane can never form the base cap
     if (
@@ -78,19 +80,19 @@ export function capPlanarOpenings(
 
     const v: Point3D[] = [
       {
-        x: posAttr.getX(i3),
+        x: posAttr.getX(i0),
         y: y0,
-        z: posAttr.getZ(i3),
+        z: posAttr.getZ(i0),
       },
       {
-        x: posAttr.getX(i3 + 1),
+        x: posAttr.getX(i1),
         y: y1,
-        z: posAttr.getZ(i3 + 1),
+        z: posAttr.getZ(i1),
       },
       {
-        x: posAttr.getX(i3 + 2),
+        x: posAttr.getX(i2),
         y: y2,
-        z: posAttr.getZ(i3 + 2),
+        z: posAttr.getZ(i2),
       },
     ];
 
@@ -217,6 +219,18 @@ export function capPlanarOpenings(
   }
 
   geometry.setAttribute("position", new Float32BufferAttribute(newPositions, 3));
+
+  if (index) {
+    const oldIndices = index.array;
+    const newIndices = new Uint32Array(oldIndices.length + capTriangles.length);
+    newIndices.set(oldIndices, 0);
+    const baseIdx = oldPositions.length / 3;
+    for (let i = 0; i < capTriangles.length; i++) {
+      newIndices[oldIndices.length + i] = baseIdx + i;
+    }
+    geometry.setIndex(new BufferAttribute(newIndices, 1) as any);
+  }
+
   geometry.computeVertexNormals();
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();

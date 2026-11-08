@@ -678,8 +678,11 @@ export function normalizeManifestStages(
 
   const mutableStages = manifest.treatmentStages as StageDefinition[];
 
-  const isExplicitLowerOnly = Boolean(manifest.patientName?.includes("[Lower]"));
-  const isExplicitUpperOnly = Boolean(manifest.patientName?.includes("[Upper]"));
+  const hasUpperInStages = mutableStages.some((st) => Boolean(st.upper));
+  const hasLowerInStages = mutableStages.some((st) => Boolean(st.lower));
+
+  const isExplicitLowerOnly = Boolean(manifest.patientName?.includes("[Lower]")) && !hasUpperInStages;
+  const isExplicitUpperOnly = Boolean(manifest.patientName?.includes("[Upper]")) && !hasLowerInStages;
 
   const allowUpperRestore = !isExplicitLowerOnly;
   const allowLowerRestore = !isExplicitUpperOnly;
@@ -691,11 +694,15 @@ export function normalizeManifestStages(
     let effUpper = s.upperStageNumber ?? nominalStage;
     let effLower = s.lowerStageNumber ?? nominalStage;
 
-    if (maxExistingUpper > 0 && effUpper > maxExistingUpper) {
-      effUpper = maxExistingUpper;
-    }
-    if (maxExistingLower > 0 && effLower > maxExistingLower) {
-      effLower = maxExistingLower;
+    // Only clamp an arch if that specific arch legitimately finished earlier than the other (unequal dual-arch, e.g. 23 upper vs 18 lower)
+    const isUnequalArches = maxExistingUpper > 0 && maxExistingLower > 0 && maxExistingUpper !== maxExistingLower;
+    if (isUnequalArches) {
+      if (maxExistingUpper < maxExistingLower && effUpper > maxExistingUpper) {
+        effUpper = maxExistingUpper;
+      }
+      if (maxExistingLower < maxExistingUpper && effLower > maxExistingLower) {
+        effLower = maxExistingLower;
+      }
     }
 
     let updatedUpper = isExplicitLowerOnly ? undefined : s.upper;

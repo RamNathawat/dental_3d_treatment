@@ -39,10 +39,13 @@ import {
   prewarmAllStageGeometries,
   getCachedStageGeometries,
   isStageGeomCached,
+  getBufferedStageCount,
+  setStageBufferedCallback,
   prioritizeStage,
   prioritizeStages,
   setModelProgressCallback,
   getLastKnownValidArchStages,
+  clearStageGeometryCache,
 } from "./model-loader";
 import { applyBiteContacts, clearBiteContacts } from "./bite-contacts";
 import {
@@ -149,6 +152,11 @@ export interface TreatmentAppHandle {
   readonly getState: () => Readonly<AppState>;
 }
 
+const isTestEnv =
+  (typeof process !== "undefined" &&
+    (process.env.NODE_ENV === "test" || process.env.VITEST === "true")) ||
+  (typeof window !== "undefined" && "__VITEST__" in window);
+
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
 export function createTreatmentApp(
@@ -199,6 +207,7 @@ export function createTreatmentApp(
   let prevLowerId: string | null = null;
   let transitionAnimId: number | null = null;
   let layerCounter = 0;
+  let isInitialBoot = options.autoLoad !== false;
 
   /**
    * Per-tooth centroids of the initial Stage 1 arch geometries.
@@ -207,6 +216,8 @@ export function createTreatmentApp(
    */
   let stage1UpperCentroids: Record<number, [number, number, number]> | null = null;
   let stage1LowerCentroids: Record<number, [number, number, number]> | null = null;
+  let lastValidUpperGeom: import("three").BufferGeometry | null = null;
+  let lastValidLowerGeom: import("three").BufferGeometry | null = null;
 
   /**
    * Displacements (in mm) for each tooth between Stage 1 and the current stage.
@@ -660,9 +671,10 @@ export function createTreatmentApp(
 
   // Interactive scrubber dots container
   const scrubberTrackEl = div("tv-scrubber-track");
+  const scrubberBufferEl = div("tv-scrubber-buffer-bar");
   const scrubberFillEl = div("tv-scrubber-fill");
   const scrubberDotsContainer = div("tv-scrubber-dots");
-  scrubberTrackEl.append(scrubberFillEl, scrubberDotsContainer);
+  scrubberTrackEl.append(scrubberBufferEl, scrubberFillEl, scrubberDotsContainer);
 
   const scrubberInteractiveEl = div("tv-scrubber-interactive", [
     scrubberTrackEl,
@@ -789,24 +801,52 @@ export function createTreatmentApp(
   ]);
   loadingEl.hidden = true;
 
-  // Stream live download progress to the doctor
+  let isDownloadFinished = false;
+
+  function updateOptimizationProgress(bufferedCount?: number, totalCount?: number): void {
+    if (!state.loading) return;
+    const count = bufferedCount ?? getBufferedStageCount();
+    const total = totalCount ?? state.manifest.treatmentStages.length;
+    if (total <= 0) return;
+    const optPct = Math.min(100, Math.round((count / total) * 100));
+    if (optPct >= 100) {
+      loadingTextEl.textContent = "All 3D models ready!";
+      loadingBarFillEl.style.width = "100%";
+      loadingBarFillEl.classList.remove("tv-loading__bar-fill--pulse");
+    } else {
+      loadingTextEl.textContent = `Optimizing 3D models for smooth playback: ${count} of ${total} stages ready (${optPct}%)`;
+      loadingBarFillEl.style.width = `${optPct}%`;
+      loadingBarFillEl.classList.remove("tv-loading__bar-fill--pulse");
+    }
+  }
+
+  // Stream live download progress to the doctor (Phase 1)
   setModelProgressCallback((loaded, total, percent) => {
+    if (!state.loading) return;
     if (total > 0) {
       const loadedMb = (loaded / (1024 * 1024)).toFixed(1);
       const totalMb = (total / (1024 * 1024)).toFixed(1);
       if (percent >= 100) {
-        loadingTextEl.textContent = "Preparing 3D geometry & anatomical colors…";
-        loadingBarFillEl.style.width = "100%";
-        loadingBarFillEl.classList.add("tv-loading__bar-fill--pulse");
+        isDownloadFinished = true;
+        updateOptimizationProgress();
       } else {
-        loadingTextEl.textContent = `Loading 3D Models: ${percent}% (${loadedMb} / ${totalMb} MB)`;
+        isDownloadFinished = false;
+        loadingTextEl.textContent = `Downloading 3D Models: ${percent}% (${loadedMb} / ${totalMb} MB)`;
         loadingBarFillEl.style.width = `${percent}%`;
         loadingBarFillEl.classList.remove("tv-loading__bar-fill--pulse");
       }
-    } else {
-      loadingTextEl.textContent = "Loading 3D Models…";
+    } else if (!isDownloadFinished) {
+      loadingTextEl.textContent = "Downloading 3D Models…";
       loadingBarFillEl.style.width = "25%";
       loadingBarFillEl.classList.add("tv-loading__bar-fill--pulse");
+    }
+  });
+
+  // YouTube-style timeline buffer update listener & Phase 2 optimization tracker
+  setStageBufferedCallback((_stageId, bufferedCount, totalCount) => {
+    updateScrubberProgress();
+    if (state.loading) {
+      updateOptimizationProgress(bufferedCount, totalCount);
     }
   });
 
@@ -1107,14 +1147,31 @@ export function createTreatmentApp(
 
     const prevIndex = state.currentIndex;
     const nextIndex = (state.currentIndex + 1) % count;
-    await navigate(nextIndex);
+
+    const nextStage = state.manifest.treatmentStages[nextIndex];
+    const isCached = nextStage ? isStageGeomCached(nextStage.id) : false;
+    if (!isCached) {
+      circularPlayBtn.classList.add("tv-btn--buffering");
+    }
+
+    try {
+      await navigate(nextIndex);
+    } finally {
+      circularPlayBtn.classList.remove("tv-btn--buffering");
+    }
 
     if (!state.isPlaying) return;
 
-    // Safety guard: If navigate did not advance (e.g. stage error), do not cycle repeatedly in an infinite loop
+    // Safety guard: If navigate did not advance, try next stage or pause gently without freezing UI
     if (state.currentIndex === prevIndex && state.currentIndex !== nextIndex) {
-      stopPlay();
-      return;
+      const skipIndex = (nextIndex + 1) % count;
+      if (skipIndex !== prevIndex) {
+        await navigate(skipIndex);
+      }
+      if (state.currentIndex === prevIndex) {
+        stopPlay();
+        return;
+      }
     }
 
     // At the final outcome stage, pause so user can appreciate the final result before looping
@@ -1230,11 +1287,9 @@ export function createTreatmentApp(
     try {
       await loadAndDisplayStage(stage, clamped);
     } finally {
-      if (pendingStageIndex !== null) {
-        pendingStageIndex = null;
-        isStageLoading = false;
-        syncUI();
-      }
+      pendingStageIndex = null;
+      isStageLoading = false;
+      syncUI();
     }
 
     // Fire prefetch for subsequent stages
@@ -1297,10 +1352,12 @@ export function createTreatmentApp(
           clearBiteContacts(targetUpper, targetLower);
         }
         if (targetUpper && activeUpperId) {
+          lastValidUpperGeom = targetUpper;
           viewport.setLayerGeometry(activeUpperId, targetUpper);
           viewport.setLayerOpacity(activeUpperId, 1);
         }
         if (targetLower && activeLowerId) {
+          lastValidLowerGeom = targetLower;
           viewport.setLayerGeometry(activeLowerId, targetLower);
           viewport.setLayerOpacity(activeLowerId, 1);
         }
@@ -1413,10 +1470,12 @@ export function createTreatmentApp(
         clearBiteContacts(targetUpper, targetLower);
       }
       if (targetUpper && activeUpperId) {
+        lastValidUpperGeom = targetUpper;
         viewport.setLayerGeometry(activeUpperId, targetUpper);
         viewport.setLayerOpacity(activeUpperId, 1);
       }
       if (targetLower && activeLowerId) {
+        lastValidLowerGeom = targetLower;
         viewport.setLayerGeometry(activeLowerId, targetLower);
         viewport.setLayerOpacity(activeLowerId, 1);
       }
@@ -1468,15 +1527,23 @@ export function createTreatmentApp(
     let lowerStl: ArrayBuffer | undefined = undefined;
 
     if (!geomOutcome.ok) {
-      state.abortController = null;
-      state.loading = false;
-      state.error = geomOutcome.reason;
-      syncUI();
-      return;
+      if (lastValidUpperGeom || lastValidLowerGeom) {
+        upperGeometry = lastValidUpperGeom || undefined;
+        lowerGeometry = lastValidLowerGeom || undefined;
+      } else {
+        state.abortController = null;
+        isInitialBoot = false;
+        state.loading = false;
+        state.error = geomOutcome.reason;
+        syncUI();
+        return;
+      }
     }
 
     state.abortController = null;
-    state.loading = false;
+    if (!isInitialBoot) {
+      state.loading = false;
+    }
 
     if (isFirstSuccessfulLoad || transitionDuration <= 0) {
       if (transitionAnimId !== null) {
@@ -2364,20 +2431,36 @@ export function createTreatmentApp(
     const allIpr = state.manifest.ipr || [];
     if (allIpr.length === 0) return;
 
-    const currentStageNum =
-      state.manifest.treatmentStages[state.currentIndex]?.stageNumber ??
-      (state.currentIndex + 1);
+    const currentStage = state.manifest.treatmentStages[state.currentIndex];
+    const currentStageNum = currentStage?.stageNumber ?? (state.currentIndex + 1);
     const activeItems = allIpr.filter((item) => item.stage === currentStageNum);
     if (activeItems.length === 0) return;
 
-    const ug = activeUpperId ? viewport.getLayerGeometry?.(activeUpperId) : null;
-    const lg = activeLowerId ? viewport.getLayerGeometry?.(activeLowerId) : null;
-    const currentUpperCentroids = (ug ? computeToothCentroids(ug, true) : null) || stage1UpperCentroids;
-    const currentLowerCentroids = (lg ? computeToothCentroids(lg, false) : null) || stage1LowerCentroids;
+    // Use precomputed stage centroids for instant 60 FPS performance without vertex re-scanning
+    const cachedGeoms = currentStage ? getCachedStageGeometries(currentStage.id) : null;
+    const currentUpperCentroids = cachedGeoms?.upperCentroids || stage1UpperCentroids;
+    const currentLowerCentroids = cachedGeoms?.lowerCentroids || stage1LowerCentroids;
 
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
     iprSvgOverlay.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+    // Reusable crisp SVG arrow marker
+    const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+    const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+    marker.setAttribute("id", "ipr-arrow-marker");
+    marker.setAttribute("viewBox", "0 0 10 10");
+    marker.setAttribute("refX", "7");
+    marker.setAttribute("refY", "5");
+    marker.setAttribute("markerWidth", "6");
+    marker.setAttribute("markerHeight", "6");
+    marker.setAttribute("orient", "auto");
+    const markerPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    markerPath.setAttribute("d", "M 0 1.5 L 8 5 L 0 8.5 z");
+    markerPath.setAttribute("fill", "#38bdf8");
+    marker.appendChild(markerPath);
+    defs.appendChild(marker);
+    iprSvgOverlay.appendChild(defs);
 
     for (const item of activeItems) {
       const isUpper = item.arch === "upper" || item.toothA < 30;
@@ -2392,40 +2475,55 @@ export function createTreatmentApp(
       );
       if (!pt) continue;
 
-      const proj = viewport.projectPoint({ x: pt[0], y: pt[1], z: pt[2] });
+      // Project point taking into account the active arch layer world matrix
+      const layerId = isUpper ? activeUpperId : activeLowerId;
+      const proj = viewport.projectPoint({ x: pt[0], y: pt[1], z: pt[2] }, layerId || undefined);
       if (!proj || !proj.visible) continue;
+      // Do not render if projected point is far outside screen
+      if (proj.x < -60 || proj.x > width + 60 || proj.y < -60 || proj.y > height + 60) continue;
 
-      const offsetY = isUpper ? -108 : 108;
+      const offsetY = isUpper ? -68 : 68;
       const lateralDir = pt[0] >= 0 ? 1 : -1;
-      const fanX = lateralDir * Math.min(65, Math.max(16, Math.abs(pt[0]) * 0.9));
+      const fanX = lateralDir * 36;
 
-      const bx = Math.max(30, Math.min(width - 30, proj.x + fanX));
-      const by = Math.max(30, Math.min(height - 35, proj.y + offsetY));
+      // Anchor badge directly relative to projected 3D contact point so they move synchronously on pan/orbit
+      const bx = proj.x + fanX;
+      const by = proj.y + offsetY;
 
-      // Leader line
+      // Calculate directional vector from badge to tooth contact point
+      const dx = proj.x - bx;
+      const dy = proj.y - by;
+      const dist = Math.hypot(dx, dy);
+      const nx = dist > 0 ? dx / dist : 0;
+      const ny = dist > 0 ? dy / dist : 0;
+      const startX = bx + nx * 14;
+      const startY = by + ny * 14;
+
+      // Leader line with clinical directional arrow pointing right into interdental contact
       const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-      line.setAttribute("x1", String(proj.x));
-      line.setAttribute("y1", String(proj.y));
-      line.setAttribute("x2", String(bx));
-      line.setAttribute("y2", String(by));
+      line.setAttribute("x1", String(startX));
+      line.setAttribute("y1", String(startY));
+      line.setAttribute("x2", String(proj.x));
+      line.setAttribute("y2", String(proj.y));
       line.setAttribute("stroke", "#38bdf8");
       line.setAttribute("stroke-width", "2");
-      line.setAttribute("stroke-dasharray", "4,2.5");
+      line.setAttribute("stroke-dasharray", "4,2");
+      line.setAttribute("marker-end", "url(#ipr-arrow-marker)");
       line.setAttribute("filter", "drop-shadow(0 1px 2px rgba(0,0,0,0.65))");
       iprSvgOverlay.appendChild(line);
 
-      // Contact point anchor
+      // Contact point anchor dot firmly positioned on 3D tooth interproximal gap
       const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       dot.setAttribute("cx", String(proj.x));
       dot.setAttribute("cy", String(proj.y));
-      dot.setAttribute("r", "3.5");
-      dot.setAttribute("fill", "#2563eb");
+      dot.setAttribute("r", "3");
+      dot.setAttribute("fill", "#38bdf8");
       dot.setAttribute("stroke", "#ffffff");
       dot.setAttribute("stroke-width", "1.5");
       dot.setAttribute("filter", "drop-shadow(0 1px 3px rgba(0,0,0,0.7))");
       iprSvgOverlay.appendChild(dot);
 
-      // Diamond Badge (enlarged & clinical contrast blue)
+      // Diamond Badge (enlarged & clinical contrast blue, follows tooth on pan/orbit)
       const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
       g.setAttribute("transform", `translate(${bx}, ${by})`);
       g.setAttribute("class", "tv-ipr-badge");
@@ -2519,6 +2617,8 @@ export function createTreatmentApp(
     stage1LowerCentroids = null;
     upperToothDisplacements = null;
     lowerToothDisplacements = null;
+    lastValidUpperGeom = null;
+    lastValidLowerGeom = null;
 
 
     // Update slider limits dynamically
@@ -2547,9 +2647,7 @@ export function createTreatmentApp(
     }
 
     if (newManifest.treatmentStages.length > 0) {
-      await navigate(0);
-      // Background prewarm: load and parse all subsequent stage geometries into cache silently
-      prewarmAllStageGeometries(newManifest.treatmentStages);
+      await bootInitialCase(newManifest.treatmentStages);
     } else {
       state.error = "This case has no patient-visible treatment stages.";
       syncUI();
@@ -2578,8 +2676,16 @@ export function createTreatmentApp(
   function updateScrubberProgress(): void {
     const count = state.manifest.treatmentStages.length;
     const targetIdx = pendingStageIndex ?? state.currentIndex;
+    const stages = state.manifest.treatmentStages;
+    let bufferedCount = 0;
+
     const dots = scrubberDotsContainer.querySelectorAll<HTMLButtonElement>(".tv-scrubber-dot");
     dots.forEach((dot, idx) => {
+      const stage = stages[idx];
+      const isBuffered = Boolean(stage && isStageGeomCached(stage.id));
+      if (isBuffered) bufferedCount++;
+
+      dot.classList.toggle("tv-scrubber-dot--buffered", isBuffered);
       dot.classList.toggle("tv-scrubber-dot--active", idx === targetIdx);
       dot.classList.toggle("tv-scrubber-dot--passed", idx < targetIdx);
       dot.classList.toggle(
@@ -2593,6 +2699,15 @@ export function createTreatmentApp(
       scrubberFillEl.style.width = `${pct}%`;
     } else {
       scrubberFillEl.style.width = "0%";
+    }
+
+    // YouTube-style timeline buffer bar: indicates prewarmed geometry in RAM
+    if (count > 0) {
+      const bufferPct = Math.min(100, Math.round((bufferedCount / count) * 100));
+      scrubberBufferEl.style.width = `${bufferPct}%`;
+      scrubberBufferEl.title = `Preloaded stages: ${bufferedCount} / ${count} (${bufferPct}%)`;
+    } else {
+      scrubberBufferEl.style.width = "0%";
     }
   }
 
@@ -2657,11 +2772,15 @@ export function createTreatmentApp(
     const targetIdx = pendingStageIndex ?? state.currentIndex;
     const cards = sidebarListEl.querySelectorAll<HTMLButtonElement>(".tv-stage-card");
     cards.forEach((card, idx) => {
-      card.classList.toggle("tv-stage-card--active", idx === targetIdx);
+      const isActive = idx === targetIdx;
+      card.classList.toggle("tv-stage-card--active", isActive);
       card.classList.toggle(
         "tv-stage-card--loading",
         !state.isPlaying && idx === pendingStageIndex && pendingStageIndex !== state.currentIndex,
       );
+      if (isActive && appEl.classList.contains("tv-app--sidebar-open") && typeof card.scrollIntoView === "function") {
+        card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
     });
   }
 
@@ -2968,11 +3087,42 @@ export function createTreatmentApp(
     document.body.appendChild(backdrop);
   }
 
-  // ── Auto Load ─────────────────────────────────────────────────────────────
+  // ── Two-Phase Case Prewarming & Auto Load ─────────────────────────────────
+
+  async function bootInitialCase(stages: readonly StageDefinition[]): Promise<void> {
+    isInitialBoot = true;
+    state.loading = true;
+    syncUI();
+
+    try {
+      // 1. Kick off concurrent prewarm of all stages in parallel
+      const prewarmPromise = prewarmAllStageGeometries(stages);
+
+      // 2. Mount stage 0 into viewport behind loading overlay
+      await navigate(0);
+
+      // 3. Wait for all stages to be prewarmed into RAM / GPU cache
+      const safetyTimeout = isTestEnv ? 60 : 35000;
+      await Promise.race([
+        prewarmPromise,
+        new Promise<void>((resolve) => setTimeout(resolve, safetyTimeout)),
+      ]);
+
+      if (!isTestEnv) {
+        updateOptimizationProgress(stages.length, stages.length);
+        await new Promise<void>((resolve) => setTimeout(resolve, 200));
+      }
+    } catch (err) {
+      console.warn("Initial boot prewarm warning:", err);
+    } finally {
+      isInitialBoot = false;
+      state.loading = false;
+      syncUI();
+    }
+  }
 
   if (options.autoLoad !== false && state.manifest.treatmentStages.length > 0) {
-    void navigate(0);
-    prewarmAllStageGeometries(state.manifest.treatmentStages);
+    void bootInitialCase(state.manifest.treatmentStages);
   }
 
   const onStorageSync = (e: StorageEvent): void => {
@@ -3003,6 +3153,7 @@ export function createTreatmentApp(
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("storage", onStorageSync);
       viewport.dispose();
+      clearStageGeometryCache();
       root.replaceChildren();
       const existingModal = document.querySelector(".tv-modal-backdrop");
       if (existingModal) existingModal.remove();

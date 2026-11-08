@@ -127,8 +127,8 @@ class ThreeViewport implements Viewport {
   private readonly camera: PerspectiveCamera;
   private readonly controls: OrbitControls;
   private readonly grid: GridHelper;
-  private readonly roomEnvironment: RoomEnvironment;
-  private readonly environment: Texture;
+  private roomEnvironment: RoomEnvironment;
+  private environment: Texture;
   private readonly content = new Group();
   private readonly layers = new Map<string, RenderedLayer>();
   private readonly resizeObserver: ResizeObserver;
@@ -153,14 +153,68 @@ class ThreeViewport implements Viewport {
    * to do that is to leave the camera — and so what it looks at — exactly where it was.
    */
   private readonly orbitCentre = new Vector3();
+  private readonly canvas: HTMLCanvasElement;
+  private isDisposed = false;
+
+  private readonly handleContextLost = (event: Event): void => {
+    event.preventDefault();
+    console.warn("ThreeViewport: WebGL context lost. Rendering suspended.");
+    try {
+      this.renderer.setAnimationLoop(null);
+    } catch {}
+  };
+
+  private readonly handleContextRestored = (): void => {
+    if (this.isDisposed) return;
+    console.info("ThreeViewport: WebGL context restored. Rebuilding GPU resources.");
+    try {
+      this.roomEnvironment?.dispose();
+      this.environment?.dispose();
+      this.roomEnvironment = new RoomEnvironment();
+      const pmrem = new PMREMGenerator(this.renderer);
+      this.environment = pmrem.fromScene(this.roomEnvironment, 0.04).texture;
+      pmrem.dispose();
+      this.scene.environment = this.environment;
+      this.renderer.setAnimationLoop(this.render);
+    } catch (e) {
+      console.warn("ThreeViewport: Error restoring context resources:", e);
+    }
+  };
 
   constructor(canvas: HTMLCanvasElement, options: ViewportOptions = {}) {
     this.options = options;
-    this.renderer = new WebGLRenderer({
-      canvas,
-      antialias: true,
-      alpha: options.transparentBackground ?? false,
-    });
+    this.canvas = canvas;
+
+    canvas.addEventListener("webglcontextlost", this.handleContextLost, false);
+    canvas.addEventListener("webglcontextrestored", this.handleContextRestored, false);
+
+    let renderer: WebGLRenderer;
+    try {
+      renderer = new WebGLRenderer({
+        canvas,
+        antialias: true,
+        alpha: options.transparentBackground ?? false,
+        powerPreference: "high-performance",
+      });
+    } catch (err) {
+      console.warn("ThreeViewport: Primary WebGL context creation failed, retrying with fallback options:", err);
+      try {
+        renderer = new WebGLRenderer({
+          canvas,
+          antialias: false,
+          alpha: options.transparentBackground ?? false,
+          powerPreference: "default",
+          precision: "mediump",
+        });
+      } catch (fallbackErr) {
+        throw new Error(
+          "WebGL context could not be created: " +
+            (fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr))
+        );
+      }
+    }
+
+    this.renderer = renderer;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.78;
@@ -179,10 +233,9 @@ class ThreeViewport implements Viewport {
     this.addLights();
 
     this.roomEnvironment = new RoomEnvironment();
-    this.environment = new PMREMGenerator(this.renderer).fromScene(
-      this.roomEnvironment,
-      0.04,
-    ).texture;
+    const pmrem = new PMREMGenerator(this.renderer);
+    this.environment = pmrem.fromScene(this.roomEnvironment, 0.04).texture;
+    pmrem.dispose();
     this.scene.environment = this.environment;
 
     this.grid = new GridHelper(
@@ -461,19 +514,29 @@ class ThreeViewport implements Viewport {
     return this.layers.get(id)?.geometry ?? null;
   }
 
-  projectPoint(point: { x: number; y: number; z: number }): { x: number; y: number; visible: boolean } | null {
+  projectPoint(
+    point: { x: number; y: number; z: number },
+    layerId?: string,
+  ): { x: number; y: number; visible: boolean; depth?: number } | null {
     const width = this.lastSize?.width || this.renderer.domElement.clientWidth;
     const height = this.lastSize?.height || this.renderer.domElement.clientHeight;
     if (width <= 0 || height <= 0) return null;
 
     const v = new Vector3(point.x, point.y, point.z);
+    if (layerId) {
+      const layer = this.layers.get(layerId);
+      if (layer) {
+        layer.mesh.updateWorldMatrix(true, false);
+        v.applyMatrix4(layer.mesh.matrixWorld);
+      }
+    }
     v.project(this.camera);
 
-    const visible = v.z < 1.0;
+    const visible = v.z < 1.0 && v.z > -1.0;
     const x = (v.x * 0.5 + 0.5) * width;
     const y = (-v.y * 0.5 + 0.5) * height;
 
-    return { x, y, visible };
+    return { x, y, visible, depth: v.z };
   }
 
   setLayerGeometry(id: string, geometry: BufferGeometry): void {
@@ -736,7 +799,15 @@ class ThreeViewport implements Viewport {
   }
 
   dispose(): void {
-    this.renderer.setAnimationLoop(null);
+    if (this.isDisposed) return;
+    this.isDisposed = true;
+
+    this.canvas.removeEventListener("webglcontextlost", this.handleContextLost);
+    this.canvas.removeEventListener("webglcontextrestored", this.handleContextRestored);
+
+    try {
+      this.renderer.setAnimationLoop(null);
+    } catch {}
     this.timer.dispose();
     this.resizeObserver.disconnect();
     this.controls.removeEventListener("end", this.handleCameraSettled);
@@ -745,14 +816,30 @@ class ThreeViewport implements Viewport {
     this.orbitMarker.dispose();
     this.grid.geometry.dispose();
     this.grid.material.dispose();
-    this.roomEnvironment.dispose();
-    this.environment.dispose();
+    try {
+      this.roomEnvironment.dispose();
+    } catch {}
+    try {
+      this.environment.dispose();
+    } catch {}
     this.controls.dispose();
-    this.renderer.dispose();
+
     for (const geom of this.geometryCache.values()) {
-      geom.dispose();
+      try {
+        geom.dispose();
+      } catch {}
     }
     this.geometryCache.clear();
+
+    // Explicitly force context loss to immediately release the WebGL context slot back to browser pool
+    try {
+      if (typeof (this.renderer as any).forceContextLoss === "function") {
+        (this.renderer as any).forceContextLoss();
+      }
+    } catch {}
+    try {
+      this.renderer.dispose();
+    } catch {}
   }
 
   setExposure(exposure: number): void {
@@ -1026,6 +1113,13 @@ class ThreeViewport implements Viewport {
   };
 
   private readonly render = (timestamp: number): void => {
+    if (this.isDisposed) return;
+    try {
+      const gl = this.renderer.getContext();
+      if (gl && typeof gl.isContextLost === "function" && gl.isContextLost()) {
+        return;
+      }
+    } catch {}
     this.timer.update(timestamp);
     const elapsed = this.timer.getDelta();
     this.controls.update();

@@ -184,6 +184,139 @@ export default function EditCaseModal({
     }
   }
 
+  async function handleIncomingFiles(
+    files: FileList | File[] | null,
+    targetArchHint?: "upper" | "lower"
+  ) {
+    if (!files || files.length === 0) return;
+
+    const zipFiles = Array.from(files).filter((f) =>
+      f.name.toLowerCase().endsWith(".zip")
+    );
+
+    if (zipFiles.length === 0) {
+      setErrorMsg("Please upload .ZIP archives containing CAD model exports.");
+      return;
+    }
+
+    setErrorMsg("");
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Scenario A: 2 or more files selected or dropped simultaneously
+    // ──────────────────────────────────────────────────────────────────────────
+    if (zipFiles.length >= 2) {
+      const fileA = zipFiles[0]!;
+      const fileB = zipFiles[1]!;
+
+      const isUpperName = (name: string) =>
+        /(?:upper|maxill|maxillary|\bupper\b|[._-]u\b|[._-]u[._-])/i.test(name);
+      const isLowerName = (name: string) =>
+        /(?:lower|mandib|mandibular|\blower\b|[._-]l\b|[._-]l[._-])/i.test(name);
+
+      let uFile: File | null = null;
+      let lFile: File | null = null;
+
+      if (isUpperName(fileA.name) && isLowerName(fileB.name)) {
+        uFile = fileA;
+        lFile = fileB;
+      } else if (isLowerName(fileA.name) && isUpperName(fileB.name)) {
+        uFile = fileB;
+        lFile = fileA;
+      } else if (isUpperName(fileA.name) && !isUpperName(fileB.name)) {
+        uFile = fileA;
+        lFile = fileB;
+      } else if (isLowerName(fileA.name) && !isLowerName(fileB.name)) {
+        lFile = fileA;
+        uFile = fileB;
+      } else if (isUpperName(fileB.name) && !isUpperName(fileA.name)) {
+        uFile = fileB;
+        lFile = fileA;
+      } else if (isLowerName(fileB.name) && !isLowerName(fileA.name)) {
+        lFile = fileB;
+        uFile = fileA;
+      } else {
+        try {
+          const [metaA, metaB] = await Promise.all([
+            extractDentalZipMetadata(fileA),
+            extractDentalZipMetadata(fileB),
+          ]);
+          if (metaA.hasUpper && !metaA.hasLower && metaB.hasLower && !metaB.hasUpper) {
+            uFile = fileA;
+            lFile = fileB;
+          } else if (metaB.hasUpper && !metaB.hasLower && metaA.hasLower && !metaA.hasUpper) {
+            uFile = fileB;
+            lFile = fileA;
+          } else {
+            if (targetArchHint === "lower") {
+              lFile = fileA;
+              uFile = fileB;
+            } else {
+              uFile = fileA;
+              lFile = fileB;
+            }
+          }
+        } catch {
+          uFile = fileA;
+          lFile = fileB;
+        }
+      }
+
+      if (uFile && lFile) {
+        await Promise.all([handleUpperSelect(uFile), handleLowerSelect(lFile)]);
+      } else if (uFile) {
+        await handleUpperSelect(uFile);
+      } else if (lFile) {
+        await handleLowerSelect(lFile);
+      }
+      return;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Scenario B: Exactly 1 file selected or dropped
+    // ──────────────────────────────────────────────────────────────────────────
+    const file = zipFiles[0]!;
+    const isUpper = /(?:upper|maxill|maxillary|\bupper\b|[._-]u\b|[._-]u[._-])/i.test(file.name);
+    const isLower = /(?:lower|mandib|mandibular|\blower\b|[._-]l\b|[._-]l[._-])/i.test(file.name);
+
+    if (targetArchHint === "lower") {
+      await handleLowerSelect(file);
+      return;
+    }
+    if (targetArchHint === "upper") {
+      await handleUpperSelect(file);
+      return;
+    }
+
+    if (isLower && !isUpper) {
+      await handleLowerSelect(file);
+      return;
+    }
+    if (isUpper && !isLower) {
+      await handleUpperSelect(file);
+      return;
+    }
+
+    try {
+      const meta = await extractDentalZipMetadata(file);
+      if (meta.hasUpper && meta.hasLower) {
+        await handleUpperSelect(file);
+        await handleLowerSelect(file);
+        return;
+      } else if (meta.hasLower && !meta.hasUpper) {
+        await handleLowerSelect(file);
+        return;
+      }
+    } catch {
+      // Fallback
+    }
+
+    if (!upperFile) {
+      await handleUpperSelect(file);
+    } else {
+      await handleLowerSelect(file);
+    }
+  }
+
   async function handleSave() {
     if (!patientName.trim()) {
       setErrorMsg("Patient / Case name cannot be blank.");
@@ -285,6 +418,16 @@ export default function EditCaseModal({
         };
 
         onCaseUpdated(updatedCase);
+        if (typeof window !== "undefined") {
+          localStorage.setItem(
+            "dental_viewer_sync",
+            JSON.stringify({
+              caseId: caseItem.id,
+              updatedAt: new Date().toISOString(),
+              action: "case_updated",
+            })
+          );
+        }
         setIsProcessing(false);
         if (onToast) {
           onToast(
@@ -332,7 +475,14 @@ export default function EditCaseModal({
 
       if (dbErr && (dbErr.message?.includes("column") || dbErr.code === "PGRST204" || dbErr.code === "42703")) {
         delete updatePayload.clinic_email;
-        await supabase.from("cases").update(updatePayload).eq("id", caseItem.id);
+        const retry = await supabase.from("cases").update(updatePayload).eq("id", caseItem.id);
+        if (retry.error) {
+          const fallbackPayload = {
+            patient_name: dbName,
+            updated_at: new Date().toISOString(),
+          };
+          await supabase.from("cases").update(fallbackPayload).eq("id", caseItem.id);
+        }
       } else if (dbErr) {
         throw new Error(dbErr.message);
       }
@@ -377,6 +527,16 @@ export default function EditCaseModal({
       };
 
       onCaseUpdated(updatedCase);
+      if (typeof window !== "undefined") {
+        localStorage.setItem(
+          "dental_viewer_sync",
+          JSON.stringify({
+            caseId: caseItem.id,
+            updatedAt: new Date().toISOString(),
+            action: "case_updated",
+          })
+        );
+      }
       setIsProcessing(false);
       if (onToast) {
         onToast(`Case "${dbName}" updated successfully`);
@@ -389,10 +549,26 @@ export default function EditCaseModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-sm animate-fadeIn">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-sm animate-fadeIn"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          handleIncomingFiles(e.dataTransfer.files);
+        }
+      }}
+    >
       <div
         className="w-full max-w-xl bg-white dark:bg-[#131A26] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh] transition-colors"
         onClick={(e) => e.stopPropagation()}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            handleIncomingFiles(e.dataTransfer.files);
+          }
+        }}
       >
         {/* Modal Header */}
         <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
@@ -475,6 +651,9 @@ export default function EditCaseModal({
                 <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
                   Drop new CAD export ZIP files below only if you want to replace the current models.
                   The existing share link will stay the same. If left empty, existing 3D models are kept.
+                  <span className="text-[10px] text-amber-600 dark:text-[#ffd166] font-medium block pt-0.5">
+                    Tip: You can select or drop both Upper &amp; Lower ZIPs simultaneously.
+                  </span>
                 </p>
 
                 {/* Dropzones for Upper & Lower Jaw */}
@@ -528,9 +707,7 @@ export default function EditCaseModal({
                       onDrop={(e) => {
                         e.preventDefault();
                         setDragOverUpper(false);
-                        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                          handleUpperSelect(e.dataTransfer.files[0]);
-                        }
+                        handleIncomingFiles(e.dataTransfer.files, "upper");
                       }}
                       onClick={() => (!upperFile ? upperInputRef.current?.click() : null)}
                       className={`border-2 border-dashed rounded-xl p-3 text-center transition-all min-h-[90px] flex flex-col justify-center cursor-pointer ${
@@ -547,11 +724,11 @@ export default function EditCaseModal({
                         ref={upperInputRef}
                         type="file"
                         accept=".zip"
+                        multiple
                         className="hidden"
                         onChange={(e) => {
-                          if (e.target.files && e.target.files[0]) {
-                            handleUpperSelect(e.target.files[0]);
-                          }
+                          handleIncomingFiles(e.target.files, "upper");
+                          e.target.value = "";
                         }}
                       />
                       {upperFile ? (
@@ -664,9 +841,7 @@ export default function EditCaseModal({
                       onDrop={(e) => {
                         e.preventDefault();
                         setDragOverLower(false);
-                        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                          handleLowerSelect(e.dataTransfer.files[0]);
-                        }
+                        handleIncomingFiles(e.dataTransfer.files, "lower");
                       }}
                       onClick={() => (!lowerFile ? lowerInputRef.current?.click() : null)}
                       className={`border-2 border-dashed rounded-xl p-3 text-center transition-all min-h-[90px] flex flex-col justify-center cursor-pointer ${
@@ -683,11 +858,11 @@ export default function EditCaseModal({
                         ref={lowerInputRef}
                         type="file"
                         accept=".zip"
+                        multiple
                         className="hidden"
                         onChange={(e) => {
-                          if (e.target.files && e.target.files[0]) {
-                            handleLowerSelect(e.target.files[0]);
-                          }
+                          handleIncomingFiles(e.target.files, "lower");
+                          e.target.value = "";
                         }}
                       />
                       {lowerFile ? (

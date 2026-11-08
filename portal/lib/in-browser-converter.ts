@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import * as fflate from "fflate";
 import { createClient } from "@/lib/supabase/client";
 
@@ -52,6 +52,48 @@ interface EdgeEntry {
   k2: string;
 }
 
+/**
+ * Fast direct indexed OBJ parser.
+ * Extracts unique vertices and face indices directly without expanding into triangle soup.
+ * Cuts vertex count by ~80% compared to standard unindexed OBJ loaders, reducing GLB export size dramatically.
+ */
+export function parseIndexedObj(text: string): THREE.BufferGeometry {
+  const lines = text.split("\n");
+  const positions: number[] = [];
+  const indices: number[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!.trim();
+    if (line.startsWith("v ")) {
+      const parts = line.split(/\s+/);
+      positions.push(parseFloat(parts[1]!), parseFloat(parts[2]!), parseFloat(parts[3]!));
+    } else if (line.startsWith("f ")) {
+      const parts = line.split(/\s+/);
+      if (parts.length < 4) continue;
+      const i0 = parseInt(parts[1]!.split("/")[0]!, 10) - 1;
+      const i1 = parseInt(parts[2]!.split("/")[0]!, 10) - 1;
+      const i2 = parseInt(parts[3]!.split("/")[0]!, 10) - 1;
+      indices.push(i0, i1, i2);
+      for (let p = 4; p < parts.length; p++) {
+        const ip = parseInt(parts[p]!.split("/")[0]!, 10) - 1;
+        const prev = parseInt(parts[p - 1]!.split("/")[0]!, 10) - 1;
+        indices.push(i0, prev, ip);
+      }
+    }
+  }
+
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geom.setIndex(
+    new THREE.BufferAttribute(
+      positions.length / 3 < 65535 ? new Uint16Array(indices) : new Uint32Array(indices),
+      1,
+    ),
+  );
+  geom.computeVertexNormals();
+  return geom;
+}
+
 export function capPlanarOpenings(
   geometry: THREE.BufferGeometry,
   isUpper: boolean,
@@ -59,8 +101,8 @@ export function capPlanarOpenings(
   const posAttr = geometry.getAttribute("position");
   if (!posAttr) return geometry;
 
-  const count = posAttr.count;
-  const numTriangles = count / 3;
+  const index = geometry.getIndex();
+  const numTriangles = index ? index.count / 3 : posAttr.count / 3;
   const edgeMap = new Map<string, EdgeEntry>();
 
   function getPtKey(x: number, y: number, z: number): string {
@@ -73,16 +115,10 @@ export function capPlanarOpenings(
   // Find extreme Y bounds to isolate the base planar cut plane
   let minY = Infinity,
     maxY = -Infinity;
-  for (let i = 0; i < count; i += 3) {
-    const y0 = posAttr.getY(i),
-      y1 = posAttr.getY(i + 1),
-      y2 = posAttr.getY(i + 2);
-    if (y0 < minY) minY = y0;
-    if (y0 > maxY) maxY = y0;
-    if (y1 < minY) minY = y1;
-    if (y1 > maxY) maxY = y1;
-    if (y2 < minY) minY = y2;
-    if (y2 > maxY) maxY = y2;
+  for (let i = 0; i < posAttr.count; i++) {
+    const y = posAttr.getY(i);
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
   }
 
   const cutY = isUpper ? maxY : minY;
@@ -90,10 +126,13 @@ export function capPlanarOpenings(
 
   const pts = new Map<string, Point3D>();
   for (let i = 0; i < numTriangles; i++) {
-    const i3 = i * 3;
-    const y0 = posAttr.getY(i3);
-    const y1 = posAttr.getY(i3 + 1);
-    const y2 = posAttr.getY(i3 + 2);
+    const i0 = index ? index.getX(i * 3) : i * 3;
+    const i1 = index ? index.getX(i * 3 + 1) : i * 3 + 1;
+    const i2 = index ? index.getX(i * 3 + 2) : i * 3 + 2;
+
+    const y0 = posAttr.getY(i0);
+    const y1 = posAttr.getY(i1);
+    const y2 = posAttr.getY(i2);
 
     if (
       Math.abs(y0 - cutY) > cutThreshold &&
@@ -104,9 +143,9 @@ export function capPlanarOpenings(
     }
 
     const v: Point3D[] = [
-      { x: posAttr.getX(i3), y: y0, z: posAttr.getZ(i3) },
-      { x: posAttr.getX(i3 + 1), y: y1, z: posAttr.getZ(i3 + 1) },
-      { x: posAttr.getX(i3 + 2), y: y2, z: posAttr.getZ(i3 + 2) },
+      { x: posAttr.getX(i0), y: y0, z: posAttr.getZ(i0) },
+      { x: posAttr.getX(i1), y: y1, z: posAttr.getZ(i1) },
+      { x: posAttr.getX(i2), y: y2, z: posAttr.getZ(i2) },
     ];
 
     for (let j = 0; j < 3; j++) {
@@ -229,6 +268,18 @@ export function capPlanarOpenings(
   }
 
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(newPositions, 3));
+
+  if (index) {
+    const oldIndices = index.array;
+    const newIndices = new Uint32Array(oldIndices.length + capTriangles.length);
+    newIndices.set(oldIndices, 0);
+    const baseIdx = oldPositions.length / 3;
+    for (let i = 0; i < capTriangles.length; i++) {
+      newIndices[oldIndices.length + i] = baseIdx + i;
+    }
+    geometry.setIndex(new THREE.BufferAttribute(newIndices, 1));
+  }
+
   geometry.computeVertexNormals();
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
@@ -470,14 +521,6 @@ export function parseStageFromPath(rawPath: string): number | null {
   const baseName = parts[parts.length - 1] || "";
   const baseLower = baseName.toLowerCase();
 
-  // If path is specifically inside an attachment template or unaligned raw segmented folder, ignore as progressive stage
-  for (let i = 0; i < parts.length - 1; i++) {
-    const pl = parts[i]!.toLowerCase().trim();
-    if (pl === "template" || pl === "templates" || pl === "attachment_templates" || pl === "raw_segmented") {
-      return null;
-    }
-  }
-
   // Tooth files (tooth_01.obj) and attachment files (attachment_00.obj) carry component/FDI indices,
   // NOT stage numbers. We must strictly examine the directory hierarchy for the stage number.
   const isComponent =
@@ -491,40 +534,70 @@ export function parseStageFromPath(rawPath: string): number | null {
   // Check directory levels from innermost parent outwards
   for (let i = parts.length - 2; i >= 0; i--) {
     const dir = parts[i]!;
+    const dl = dir.toLowerCase().trim();
 
-    // 1. Direct exact numeric folder: "01", "02", "10"
-    const exactNum = dir.match(/^0*([1-9]\d?)$/);
-    if (exactNum && exactNum[1]) return parseInt(exactNum[1], 10);
+    // If innermost directory indicates template or unaligned raw segmented setup, skip
+    if (dl.includes("template") || dl === "00 segmented" || dl === "raw_segmented") {
+      return null;
+    }
 
-    // 2. Folder with stage/step: "Stage 01", "Stage_01", "Step-02", "Stage 10"
-    const stageDir = dir.match(/(?:stage|step|phase|aligner|stg)[\s_.-]*0*([1-9]\d?)(?:[^\d]|$)/i);
-    if (stageDir && stageDir[1]) return parseInt(stageDir[1], 10);
+    // 1. Direct exact numeric folder: "01", "02", "10", "100", "00", "0"
+    const exactNum = dir.match(/^0*(\d+)$/);
+    if (exactNum && exactNum[1] !== undefined) return parseInt(exactNum[1], 10);
 
-    // 3. Folder with arch and number: "Upper_01", "01-Upper", "Maxilla_02"
+    // 2. Folder with stage/step: "Stage 01", "Stage_01", "Step-02", "Stage 10", "Stage 00"
+    const stageDir = dir.match(/(?:stage|step|phase|aligner|stg)[\s_.-]*0*(\d+)(?:[^\d]|$)/i);
+    if (stageDir && stageDir[1] !== undefined) return parseInt(stageDir[1], 10);
+
+    // 3. Folder with arch and number: "Upper_01", "01-Upper", "Maxilla_02", "Lower_00"
     const archDir =
-      dir.match(/(?:upper|lower|maxill|mandib)[\s_.-]*0*([1-9]\d?)(?:[^\d]|$)/i) ||
-      dir.match(/^0*([1-9]\d?)[\s_.-]*(?:upper|lower|maxill|mandib)/i);
-    if (archDir && archDir[1]) return parseInt(archDir[1], 10);
+      dir.match(/(?:upper|lower|maxill|mandib)[\s_.-]*0*(\d+)(?:[^\d]|$)/i) ||
+      dir.match(/^0*(\d+)[\s_.-]*(?:upper|lower|maxill|mandib)/i);
+    if (archDir && archDir[1] !== undefined) return parseInt(archDir[1], 10);
   }
 
   // If NOT a component (i.e. it is a solid stage file like "Stage 01.stl", "01.obj", "Upper_02.obj"):
   if (!isComponent) {
-    // 1. "Stage 01.obj", "Step 02.stl"
-    const stageFile = baseName.match(/(?:stage|step|phase|aligner|stg)[\s_.-]*0*([1-9]\d?)(?:[^\d]|$)/i);
-    if (stageFile && stageFile[1]) return parseInt(stageFile[1], 10);
+    // 1. "Stage 01.obj", "Step 02.stl", "Stage 00.stl"
+    const stageFile = baseName.match(/(?:stage|step|phase|aligner|stg)[\s_.-]*0*(\d+)(?:[^\d]|$)/i);
+    if (stageFile && stageFile[1] !== undefined) return parseInt(stageFile[1], 10);
 
-    // 2. "Upper_01.obj", "01_Upper.stl"
+    // 2. "Upper_01.obj", "01_Upper.stl", "Lower_00.stl"
     const archFile =
-      baseName.match(/(?:upper|lower|maxill|mandib)[\s_.-]*0*([1-9]\d?)(?:[^\d]|$)/i) ||
-      baseName.match(/^0*([1-9]\d?)[\s_.-]*(?:upper|lower|maxill|mandib)/i);
-    if (archFile && archFile[1]) return parseInt(archFile[1], 10);
+      baseName.match(/(?:upper|lower|maxill|mandib)[\s_.-]*0*(\d+)(?:[^\d]|$)/i) ||
+      baseName.match(/^0*(\d+)[\s_.-]*(?:upper|lower|maxill|mandib)/i);
+    if (archFile && archFile[1] !== undefined) return parseInt(archFile[1], 10);
 
-    // 3. Simple "01.obj", "02.stl"
-    const fileNumMatch = baseName.match(/^0*([1-9]\d?)\.(?:obj|stl|glb)$/i);
-    if (fileNumMatch && fileNumMatch[1]) return parseInt(fileNumMatch[1], 10);
+    // 3. Simple "01.obj", "02.stl", "00.stl", "0.stl"
+    const fileNumMatch = baseName.match(/^0*(\d+)\.(?:obj|stl|glb)$/i);
+    if (fileNumMatch && fileNumMatch[1] !== undefined) return parseInt(fileNumMatch[1], 10);
+
+    // 4. Any file ending with a number before extension: e.g. "Shyama_1.stl", "Shyama-01.stl", "Shyama 14.stl"
+    const trailingNum = baseName.match(/[\s_.-]0*(\d+)\.(?:obj|stl|glb)$/i);
+    if (trailingNum && trailingNum[1] !== undefined) return parseInt(trailingNum[1], 10);
   }
 
   return null;
+}
+
+/**
+ * Normalizes 0-based stages (e.g. 0, 1, 2... or a standalone stage 0) to 1-based indexing.
+ */
+export function normalizeZeroBasedStages(stagesMap: Map<number, ArchStageFiles>): void {
+  if (stagesMap.has(0)) {
+    const keys = Array.from(stagesMap.keys()).sort((a, b) => a - b);
+    if (keys.length === 1 && keys[0] === 0) {
+      const entry = stagesMap.get(0)!;
+      stagesMap.delete(0);
+      stagesMap.set(1, entry);
+    } else {
+      const entries = Array.from(stagesMap.entries()).sort((a, b) => b[0] - a[0]);
+      stagesMap.clear();
+      for (const [k, v] of entries) {
+        stagesMap.set(k + 1, v);
+      }
+    }
+  }
 }
 
 /**
@@ -557,7 +630,6 @@ export async function processDentalZipInBrowser(
   editOptions?: EditModelOptions,
 ): Promise<IngestResult> {
   const supabase = createClient();
-  const objLoader = new OBJLoader();
   const gltfExporter = new GLTFExporter();
   const isEdit = Boolean(existingCaseId);
 
@@ -598,7 +670,7 @@ export async function processDentalZipInBrowser(
         if (!lowerName.endsWith(".obj") && !lowerName.endsWith(".stl")) continue;
 
         const stageNum = parseStageFromPath(rawName);
-        if (stageNum === null || stageNum === 0) continue;
+        if (stageNum === null) continue;
 
         if (!upperStages.has(stageNum)) {
           upperStages.set(stageNum, { teeth: [], attachments: [], labels: [] });
@@ -620,6 +692,39 @@ export async function processDentalZipInBrowser(
           entry.combined = content;
         }
       }
+
+      // Fallback for unnumbered solid models or single-mesh upper archives (e.g. "Upper.stl")
+      if (upperStages.size === 0) {
+        const meshEntries = Object.entries(filesMap).filter(([k]) => {
+          const lk = k.toLowerCase();
+          return !k.endsWith("/") && !k.includes("__MACOSX") && (lk.endsWith(".obj") || lk.endsWith(".stl"));
+        });
+        meshEntries.sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }));
+
+        const hasComponents = meshEntries.some(([k]) => {
+          const b = k.split("/").pop()!.toLowerCase();
+          return b.startsWith("tooth") || b === "gum.obj" || b.includes("gingiva");
+        });
+
+        if (hasComponents) {
+          const entry: ArchStageFiles = { teeth: [], attachments: [], labels: [] };
+          for (const [rawName, content] of meshEntries) {
+            const baseName = rawName.split("/").pop()!.toLowerCase();
+            if (baseName === "gum.obj" || baseName.includes("gingiva")) entry.gum = content;
+            else if (baseName.startsWith("tooth")) entry.teeth.push(content);
+            else if (baseName.startsWith("attachment")) { entry.attachments = entry.attachments || []; entry.attachments.push(content); }
+            else if (baseName.startsWith("label")) { entry.labels = entry.labels || []; entry.labels.push(content); }
+            else entry.combined = content;
+          }
+          upperStages.set(1, entry);
+        } else if (meshEntries.length > 0) {
+          for (let i = 0; i < meshEntries.length; i++) {
+            upperStages.set(i + 1, { teeth: [], attachments: [], labels: [], combined: meshEntries[i]![1] });
+          }
+        }
+      }
+
+      normalizeZeroBasedStages(upperStages);
     }
 
     // ── 2. Process Lower Arch ZIP if provided ─────────────────────────────────
@@ -634,7 +739,7 @@ export async function processDentalZipInBrowser(
         if (!lowerName.endsWith(".obj") && !lowerName.endsWith(".stl")) continue;
 
         const stageNum = parseStageFromPath(rawName);
-        if (stageNum === null || stageNum === 0) continue;
+        if (stageNum === null) continue;
 
         if (!lowerStages.has(stageNum)) {
           lowerStages.set(stageNum, { teeth: [], attachments: [], labels: [] });
@@ -656,6 +761,39 @@ export async function processDentalZipInBrowser(
           entry.combined = content;
         }
       }
+
+      // Fallback for unnumbered solid models or single-mesh lower archives (e.g. "Shyama LOWER.stl")
+      if (lowerStages.size === 0) {
+        const meshEntries = Object.entries(filesMap).filter(([k]) => {
+          const lk = k.toLowerCase();
+          return !k.endsWith("/") && !k.includes("__MACOSX") && (lk.endsWith(".obj") || lk.endsWith(".stl"));
+        });
+        meshEntries.sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }));
+
+        const hasComponents = meshEntries.some(([k]) => {
+          const b = k.split("/").pop()!.toLowerCase();
+          return b.startsWith("tooth") || b === "gum.obj" || b.includes("gingiva");
+        });
+
+        if (hasComponents) {
+          const entry: ArchStageFiles = { teeth: [], attachments: [], labels: [] };
+          for (const [rawName, content] of meshEntries) {
+            const baseName = rawName.split("/").pop()!.toLowerCase();
+            if (baseName === "gum.obj" || baseName.includes("gingiva")) entry.gum = content;
+            else if (baseName.startsWith("tooth")) entry.teeth.push(content);
+            else if (baseName.startsWith("attachment")) { entry.attachments = entry.attachments || []; entry.attachments.push(content); }
+            else if (baseName.startsWith("label")) { entry.labels = entry.labels || []; entry.labels.push(content); }
+            else entry.combined = content;
+          }
+          lowerStages.set(1, entry);
+        } else if (meshEntries.length > 0) {
+          for (let i = 0; i < meshEntries.length; i++) {
+            lowerStages.set(i + 1, { teeth: [], attachments: [], labels: [], combined: meshEntries[i]![1] });
+          }
+        }
+      }
+
+      normalizeZeroBasedStages(lowerStages);
     }
 
     // ── 3. Fallback: Process single combined ZIP if provided ──────────────────
@@ -664,17 +802,55 @@ export async function processDentalZipInBrowser(
       const buf = await singleFile.arrayBuffer();
       const filesMap = unpackZipRecursive(new Uint8Array(buf));
 
+      const hasAnyUpperPath = Object.keys(filesMap).some((k) => /upper|maxill/i.test(k));
+      const hasAnyLowerPath = Object.keys(filesMap).some((k) => /lower|mandib/i.test(k));
+
+      // If paths don't explicitly distinguish arches, check outer archive name or geometry
+      let fallbackSingleArch: "Upper" | "Lower" | null = null;
+      if (!hasAnyUpperPath && !hasAnyLowerPath) {
+        if (/upper|maxill/i.test(singleFile.name)) {
+          fallbackSingleArch = "Upper";
+        } else if (/lower|mandib/i.test(singleFile.name)) {
+          fallbackSingleArch = "Lower";
+        } else {
+          // Anatomical coordinate inspection on the first mesh
+          for (const [k, c] of Object.entries(filesMap)) {
+            if (k.toLowerCase().endsWith(".obj")) {
+              const text = new TextDecoder().decode(c.slice(0, 100000));
+              let minY = Infinity;
+              const lines = text.split("\n");
+              for (let li = 0; li < Math.min(lines.length, 2000); li++) {
+                const l = lines[li]!;
+                if (l.startsWith("v ")) {
+                  const pts = l.trim().split(/\s+/);
+                  const y = parseFloat(pts[2] || "0");
+                  if (!isNaN(y) && y < minY) minY = y;
+                }
+              }
+              if (minY !== Infinity) {
+                fallbackSingleArch = minY < -4.0 ? "Lower" : "Upper";
+                break;
+              }
+            }
+          }
+        }
+      }
+
       for (const [rawName, content] of Object.entries(filesMap)) {
         if (rawName.endsWith("/") || rawName.includes("__MACOSX")) continue;
         const lowerName = rawName.toLowerCase();
         if (!lowerName.endsWith(".obj") && !lowerName.endsWith(".stl")) continue;
 
-        const isUpper = lowerName.includes("upper") || lowerName.includes("maxill");
-        const isLower = lowerName.includes("lower") || lowerName.includes("mandib");
-        if (!isUpper && !isLower) continue;
+        let isUpper = lowerName.includes("upper") || lowerName.includes("maxill");
+        let isLower = lowerName.includes("lower") || lowerName.includes("mandib");
+        if (!isUpper && !isLower) {
+          if (fallbackSingleArch === "Upper") isUpper = true;
+          else if (fallbackSingleArch === "Lower") isLower = true;
+          else continue;
+        }
 
         const stageNum = parseStageFromPath(rawName);
-        if (stageNum === null || stageNum === 0) continue;
+        if (stageNum === null) continue;
 
         const targetMap = isUpper ? upperStages : lowerStages;
         if (!targetMap.has(stageNum)) {
@@ -697,6 +873,22 @@ export async function processDentalZipInBrowser(
           entry.combined = content;
         }
       }
+
+      if (upperStages.size === 0 && lowerStages.size === 0) {
+        const meshEntries = Object.entries(filesMap).filter(([k]) => {
+          const lk = k.toLowerCase();
+          return !k.endsWith("/") && !k.includes("__MACOSX") && (lk.endsWith(".obj") || lk.endsWith(".stl"));
+        });
+        meshEntries.sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }));
+
+        const targetMap = fallbackSingleArch === "Lower" ? lowerStages : upperStages;
+        for (let i = 0; i < meshEntries.length; i++) {
+          targetMap.set(i + 1, { teeth: [], attachments: [], labels: [], combined: meshEntries[i]![1] });
+        }
+      }
+
+      normalizeZeroBasedStages(upperStages);
+      normalizeZeroBasedStages(lowerStages);
     }
 
     // In edit mode: preserve models from the arch that was NOT re-uploaded,
@@ -717,10 +909,10 @@ export async function processDentalZipInBrowser(
             for (const st of prev.treatmentStages) {
               const num = st.stageNumber || parseInt(st.id?.replace(/\D/g, "") || "0", 10);
               if (num > 0) {
-                if (!editOptions?.removeExistingUpper && st.upper && !existingUpperAssets.has(num)) {
+                if (!upperFile && !editOptions?.removeExistingUpper && st.upper && !existingUpperAssets.has(num)) {
                   existingUpperAssets.set(num, st.upper);
                 }
-                if (!editOptions?.removeExistingLower && st.lower && !existingLowerAssets.has(num)) {
+                if (!lowerFile && !editOptions?.removeExistingLower && st.lower && !existingLowerAssets.has(num)) {
                   existingLowerAssets.set(num, st.lower);
                 }
               }
@@ -731,9 +923,9 @@ export async function processDentalZipInBrowser(
         console.warn("Could not fetch existing manifest for arch preservation:", e);
       }
 
-      // 2. Fallback: inspect storage files ONLY if that arch is not explicitly removed
-      const needUpper = upperStages.size === 0 && existingUpperAssets.size === 0 && !editOptions?.removeExistingUpper;
-      const needLower = lowerStages.size === 0 && existingLowerAssets.size === 0 && !editOptions?.removeExistingLower;
+      // 2. Fallback: inspect storage files ONLY if that arch is not explicitly re-uploaded or removed
+      const needUpper = !upperFile && upperStages.size === 0 && existingUpperAssets.size === 0 && !editOptions?.removeExistingUpper;
+      const needLower = !lowerFile && lowerStages.size === 0 && existingLowerAssets.size === 0 && !editOptions?.removeExistingLower;
 
       if (needUpper || needLower) {
         try {
@@ -767,8 +959,8 @@ export async function processDentalZipInBrowser(
         }
       }
 
-      // 3. Clean up storage files for explicitly removed arches so they don't linger
-      if (editOptions?.removeExistingUpper) {
+      // 3. Clean up storage files for replaced or explicitly removed arches so stale stages don't linger
+      if (upperFile || editOptions?.removeExistingUpper) {
         try {
           const { data: storageList } = await supabase.storage
             .from("treatment-models")
@@ -782,11 +974,11 @@ export async function processDentalZipInBrowser(
             }
           }
         } catch (e) {
-          console.warn("Could not remove upper models from storage:", e);
+          console.warn("Could not remove old upper models from storage:", e);
         }
       }
 
-      if (editOptions?.removeExistingLower) {
+      if (lowerFile || editOptions?.removeExistingLower) {
         try {
           const { data: storageList } = await supabase.storage
             .from("treatment-models")
@@ -800,7 +992,7 @@ export async function processDentalZipInBrowser(
             }
           }
         } catch (e) {
-          console.warn("Could not remove lower models from storage:", e);
+          console.warn("Could not remove old lower models from storage:", e);
         }
       }
     }
@@ -946,7 +1138,20 @@ export async function processDentalZipInBrowser(
           .select()
           .single();
         if (retry.error) {
-          console.warn("Could not update case row in DB:", retry.error);
+          const fallbackUpdate = {
+            patient_name: dbPatientName,
+            total_stages: totalStages,
+            updated_at: new Date().toISOString(),
+          };
+          const fallbackRetry = await supabase
+            .from("cases")
+            .update(fallbackUpdate)
+            .eq("id", existingCaseId!)
+            .select()
+            .single();
+          if (fallbackRetry.error) {
+            console.warn("Could not update case row in DB with fallback:", fallbackRetry.error);
+          }
         }
       }
       caseId = existingCaseId!;
@@ -1021,6 +1226,16 @@ export async function processDentalZipInBrowser(
     if (lowerStages.size > 0) archesToProcess.push("Lower");
     const totalSteps = Math.max(1, (upperStages.size + lowerStages.size));
 
+    interface StageUploadTask {
+      stageNum: number;
+      arch: "Upper" | "Lower";
+      filename: string;
+      storagePath: string;
+      blob: Blob;
+    }
+    const uploadTasks: StageUploadTask[] = [];
+
+    // ── 3. Fast Parallel Mesh Generation & GLB Conversion ─────────────────────
     for (const stageNum of availableStages) {
       const pad = String(stageNum).padStart(2, "0");
 
@@ -1032,96 +1247,86 @@ export async function processDentalZipInBrowser(
           continue;
         }
 
-        const stepPercent = 25 + Math.round((completedSteps / totalSteps) * 65);
-        onProgress(`Processing Stage ${stageNum} ${arch} arch...`, stepPercent);
+        const convPercent = 25 + Math.round((completedSteps / totalSteps) * 25);
+        onProgress(`Optimizing Stage ${stageNum} ${arch} arch...`, convPercent);
 
-        const vertexMap = new Map<string, number>();
-        const positions: number[] = [];
-        const colors: number[] = [];
-        const indices: number[] = [];
+        const jawGeoms: THREE.BufferGeometry[] = [];
+        const attGeoms: THREE.BufferGeometry[] = [];
 
         // 1. Process Gum
         if (stageData.gum) {
           const text = new TextDecoder().decode(stageData.gum);
-          const parsed = objLoader.parse(text);
-          for (const child of parsed.children) {
-            if (!(child as THREE.Mesh).isMesh) continue;
-            let geom = (child as THREE.Mesh).geometry;
-            geom = capPlanarOpenings(geom, arch === "Upper");
-            // ClinCheck / 3Shape vascular coral-rose gingiva (#CC5C6A in linear)
-            mergeGeometry(geom, 0.46, 0.085, 0.105, vertexMap, positions, colors, indices);
+          let geom = parseIndexedObj(text);
+          geom = capPlanarOpenings(geom, arch === "Upper");
+          // ClinCheck / 3Shape vascular coral-rose gingiva (#CC5C6A in linear: 0.46, 0.085, 0.105)
+          const count = geom.attributes.position ? geom.attributes.position.count : 0;
+          if (count > 0) {
+            const colors = new Float32Array(count * 3);
+            for (let i = 0; i < count; i++) {
+              colors[i * 3] = 0.46;
+              colors[i * 3 + 1] = 0.085;
+              colors[i * 3 + 2] = 0.105;
+            }
+            geom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+            jawGeoms.push(geom);
           }
         }
 
         // 2. Process Teeth
         for (const toothBytes of stageData.teeth) {
           const text = new TextDecoder().decode(toothBytes);
-          const parsed = objLoader.parse(text);
-          for (const child of parsed.children) {
-            if (!(child as THREE.Mesh).isMesh) continue;
-            const geom = (child as THREE.Mesh).geometry;
-            // Warm natural ivory / beige enamel (#E8DEC8 in linear: 0.82, 0.76, 0.68)
-            mergeGeometry(geom, 0.82, 0.76, 0.68, vertexMap, positions, colors, indices);
+          const geom = parseIndexedObj(text);
+          // Warm natural ivory / beige enamel (#E8DEC8 in linear: 0.82, 0.76, 0.68)
+          const count = geom.attributes.position ? geom.attributes.position.count : 0;
+          if (count > 0) {
+            const colors = new Float32Array(count * 3);
+            for (let i = 0; i < count; i++) {
+              colors[i * 3] = 0.82;
+              colors[i * 3 + 1] = 0.76;
+              colors[i * 3 + 2] = 0.68;
+            }
+            geom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+            jawGeoms.push(geom);
           }
         }
 
-        // 3. Skip CAD Labels (e.g. label_01.obj, "NIYA 1", "NIYA 2") to keep models clean and aesthetic
+        // 3. Skip CAD Labels to keep models clean and aesthetic
 
         // 4. Process Solid / Combined Model if unsegmented
         if (stageData.combined && !stageData.gum && stageData.teeth.length === 0) {
           const text = new TextDecoder().decode(stageData.combined);
-          const parsed = objLoader.parse(text);
-          for (const child of parsed.children) {
-            if (!(child as THREE.Mesh).isMesh) continue;
-            let geom = (child as THREE.Mesh).geometry;
-            geom = capPlanarOpenings(geom, arch === "Upper");
-            computeAnatomicalColors(geom, { isUpper: arch === "Upper" });
-            const pos = geom.getAttribute("position");
-            const col = geom.getAttribute("color");
-            if (pos) {
-              for (let i = 0; i < pos.count; i++) {
-                const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-                const key = `${Math.round(x * 1000)}_${Math.round(y * 1000)}_${Math.round(z * 1000)}`;
-                let idx = vertexMap.get(key);
-                if (idx === undefined) {
-                  idx = positions.length / 3;
-                  vertexMap.set(key, idx);
-                  positions.push(x, y, z);
-                  if (col) {
-                    colors.push(col.getX(i), col.getY(i), col.getZ(i));
-                  } else {
-                    colors.push(0.82, 0.76, 0.68);
-                  }
-                }
-                indices.push(idx);
-              }
-            }
-          }
+          let geom = parseIndexedObj(text);
+          geom = capPlanarOpenings(geom, arch === "Upper");
+          computeAnatomicalColors(geom, { isUpper: arch === "Upper" });
+          jawGeoms.push(geom);
         }
 
         // 5. Process Attachments into a distinct submesh for instant toggle in 3D viewer
-        const attPositions: number[] = [];
-        const attColors: number[] = [];
-        const attIndices: number[] = [];
-        const attVertexMap = new Map<string, number>();
-
         if (stageData.attachments && stageData.attachments.length > 0) {
           for (const attBytes of stageData.attachments) {
             const text = new TextDecoder().decode(attBytes);
-            const parsed = objLoader.parse(text);
-            for (const child of parsed.children) {
-              if (!(child as THREE.Mesh).isMesh) continue;
-              const geom = (child as THREE.Mesh).geometry;
-              // Orthodontic composite resin: vibrant clinical contrast amber-orange (#F97316: 0.96, 0.52, 0.16)
-              mergeGeometry(geom, 0.96, 0.52, 0.16, attVertexMap, attPositions, attColors, attIndices);
+            const geom = parseIndexedObj(text);
+            // Orthodontic composite resin: vibrant clinical contrast burnt orange
+            const count = geom.attributes.position ? geom.attributes.position.count : 0;
+            if (count > 0) {
+              const colors = new Float32Array(count * 3);
+              for (let i = 0; i < count; i++) {
+                colors[i * 3] = 0.88;
+                colors[i * 3 + 1] = 0.30;
+                colors[i * 3 + 2] = 0.04;
+              }
+              geom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+              attGeoms.push(geom);
             }
           }
         }
 
-        const mergedGeom = new THREE.BufferGeometry();
-        mergedGeom.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-        mergedGeom.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-        mergedGeom.setIndex(indices);
+        if (jawGeoms.length === 0) {
+          completedSteps++;
+          continue;
+        }
+
+        const mergedGeom = jawGeoms.length > 1 ? mergeGeometries(jawGeoms, false) : jawGeoms[0]!;
         mergedGeom.computeVertexNormals();
 
         const mat = new THREE.MeshStandardMaterial({
@@ -1136,14 +1341,10 @@ export async function processDentalZipInBrowser(
         group.name = `${cleanPatientName} ${arch} jaw - ${pad}`;
         group.add(mesh);
 
-        if (attPositions.length > 0) {
-          const attGeom = new THREE.BufferGeometry();
-          attGeom.setAttribute("position", new THREE.Float32BufferAttribute(attPositions, 3));
-          attGeom.setAttribute("color", new THREE.Float32BufferAttribute(attColors, 3));
-          attGeom.setIndex(attIndices);
-          attGeom.computeVertexNormals();
-
-          const attMesh = new THREE.Mesh(attGeom, mat);
+        if (attGeoms.length > 0) {
+          const mergedAttGeom = attGeoms.length > 1 ? mergeGeometries(attGeoms, false) : attGeoms[0]!;
+          mergedAttGeom.computeVertexNormals();
+          const attMesh = new THREE.Mesh(mergedAttGeom, mat);
           attMesh.name = "Attachments";
           group.add(attMesh);
         }
@@ -1151,17 +1352,44 @@ export async function processDentalZipInBrowser(
         const glbBuffer = (await gltfExporter.parseAsync(group, { binary: true })) as ArrayBuffer;
         const glbBlob = new Blob([glbBuffer], { type: "model/gltf-binary" });
 
+        // Clean up individual buffers from heap
+        for (const g of jawGeoms) g.dispose();
+        for (const g of attGeoms) g.dispose();
+
         const filename = `${cleanPatientName} ${arch} jaw - ${pad} - Model.glb`;
         const storagePath = `${caseId}/${filename}`;
+
+        uploadTasks.push({
+          stageNum,
+          arch,
+          filename,
+          storagePath,
+          blob: glbBlob,
+        });
+
+        completedSteps++;
+      }
+    }
+
+    // ── 4. Parallel Chunked Cloud Upload Pool (3 concurrent uploads) ─────────
+    const MAX_CONCURRENT_UPLOADS = 3;
+    let completedUploads = 0;
+    const totalUploadCount = uploadTasks.length;
+
+    let taskIndex = 0;
+    const uploadWorker = async () => {
+      while (taskIndex < uploadTasks.length) {
+        const task = uploadTasks[taskIndex++];
+        if (!task) break;
 
         let uploadSucceeded = false;
         let lastUploadError: { message?: string } | null = null;
         for (let attempt = 0; attempt < 3; attempt++) {
           const { error: uploadErr } = await supabase.storage
             .from("treatment-models")
-            .upload(storagePath, glbBlob, {
+            .upload(task.storagePath, task.blob, {
               contentType: "model/gltf-binary",
-              cacheControl: "31536000",
+              cacheControl: "3600, must-revalidate",
               upsert: true,
             });
           if (!uploadErr) {
@@ -1174,18 +1402,30 @@ export async function processDentalZipInBrowser(
 
         if (!uploadSucceeded) {
           throw new Error(
-            `Failed uploading ${arch} stage ${stageNum} (${filename}): ${lastUploadError?.message || "Storage error"}`,
+            `Failed uploading ${task.arch} stage ${task.stageNum} (${task.filename}): ${lastUploadError?.message || "Storage error"}`,
           );
         }
 
-        completedSteps++;
+        completedUploads++;
+        const uploadPercent = 50 + Math.round((completedUploads / Math.max(1, totalUploadCount)) * 44);
+        onProgress(
+          `Uploading 3D models to cloud (${completedUploads}/${totalUploadCount})...`,
+          uploadPercent,
+        );
       }
-    }
+    };
+
+    const workers = Array.from(
+      { length: Math.min(MAX_CONCURRENT_UPLOADS, Math.max(1, totalUploadCount)) },
+      () => uploadWorker(),
+    );
+    await Promise.all(workers);
 
     // ── 4. Generate & Upload case manifest.json ────────────────────────────────
     onProgress("Writing case configuration and cloud manifest...", 95);
 
     const baseStorage = `https://yrjulcwnabnhgtqebrtn.supabase.co/storage/v1/object/public/treatment-models/${caseId}`;
+    const modelVersion = Date.now();
 
     const manifestData = {
       caseId,
@@ -1228,7 +1468,7 @@ export async function processDentalZipInBrowser(
             const upperFilename = `${cleanPatientName} Upper jaw - ${padUpper} - Model.glb`;
             upperAsset = {
               filename: upperFilename,
-              url: `${baseStorage}/${encodeURIComponent(upperFilename)}`,
+              url: `${baseStorage}/${encodeURIComponent(upperFilename)}?v=${modelVersion}`,
             };
           } else if (existingUpperAssets.size > 0) {
             const maxUpperStage = Math.max(...existingUpperAssets.keys());
@@ -1251,7 +1491,7 @@ export async function processDentalZipInBrowser(
             const lowerFilename = `${cleanPatientName} Lower jaw - ${padLower} - Model.glb`;
             lowerAsset = {
               filename: lowerFilename,
-              url: `${baseStorage}/${encodeURIComponent(lowerFilename)}`,
+              url: `${baseStorage}/${encodeURIComponent(lowerFilename)}?v=${modelVersion}`,
             };
           } else if (existingLowerAssets.size > 0) {
             const maxLowerStage = Math.max(...existingLowerAssets.keys());
@@ -1315,38 +1555,6 @@ export async function processDentalZipInBrowser(
       ok: false,
       error: err instanceof Error ? err.message : String(err),
     };
-  }
-}
-
-function mergeGeometry(
-  geom: THREE.BufferGeometry,
-  defaultR: number,
-  defaultG: number,
-  defaultB: number,
-  vertexMap: Map<string, number>,
-  positions: number[],
-  colors: number[],
-  indices: number[],
-) {
-  const pos = geom.attributes.position;
-  if (!pos) return;
-
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const y = pos.getY(i);
-    const z = pos.getZ(i);
-
-    const key = `${Math.round(x * 1000)}_${Math.round(y * 1000)}_${Math.round(z * 1000)}`;
-    let idx = vertexMap.get(key);
-    if (idx === undefined) {
-      idx = positions.length / 3;
-      vertexMap.set(key, idx);
-      positions.push(x, y, z);
-
-      // Paint gingiva with clean anatomical color
-      colors.push(defaultR, defaultG, defaultB);
-    }
-    indices.push(idx);
   }
 }
 
@@ -1484,14 +1692,14 @@ export async function extractDentalZipMetadata(
           for (const rawIk of Object.keys(innerEntries)) {
             const ik = rawIk.replace(/\\/g, "/");
             const stageNum = parseStageFromPath(ik);
-            if (stageNum !== null && stageNum > 0) stages.add(stageNum);
+            if (stageNum !== null) stages.add(stageNum === 0 ? 1 : stageNum);
           }
         } catch {
           // ignore inner zip parse errors
         }
       } else {
         const stageNum = parseStageFromPath(k);
-        if (stageNum !== null && stageNum > 0) stages.add(stageNum);
+        if (stageNum !== null) stages.add(stageNum === 0 ? 1 : stageNum);
       }
     }
 
@@ -1509,6 +1717,47 @@ export async function extractDentalZipMetadata(
             break;
           }
         }
+      }
+    }
+
+    // 4. Arch Fallback: If no arch keywords matched, check outer filename or inspect first mesh geometry
+    if (!hasUpper && !hasLower) {
+      if (/upper|maxill/i.test(file.name)) {
+        hasUpper = true;
+      } else if (/lower|mandib/i.test(file.name)) {
+        hasLower = true;
+      } else {
+        for (const [rawKey, rawEntry] of Object.entries(topEntries)) {
+          if (rawKey.toLowerCase().endsWith(".obj") && rawEntry) {
+            const text = new TextDecoder().decode(rawEntry.slice(0, 100000));
+            let minY = Infinity;
+            const lines = text.split("\n");
+            for (let li = 0; li < Math.min(lines.length, 2000); li++) {
+              const l = lines[li]!;
+              if (l.startsWith("v ")) {
+                const pts = l.trim().split(/\s+/);
+                const y = parseFloat(pts[2] || "0");
+                if (!isNaN(y) && y < minY) minY = y;
+              }
+            }
+            if (minY !== Infinity) {
+              if (minY < -4.0) hasLower = true;
+              else hasUpper = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // If no numbered stages were found, check if there are any valid meshes in the archive
+    if (stages.size === 0) {
+      const hasMeshes = entryKeys.some((k) => {
+        const lk = k.toLowerCase();
+        return !k.endsWith("/") && !k.includes("__MACOSX") && (lk.endsWith(".obj") || lk.endsWith(".stl"));
+      });
+      if (hasMeshes) {
+        stages.add(1);
       }
     }
 

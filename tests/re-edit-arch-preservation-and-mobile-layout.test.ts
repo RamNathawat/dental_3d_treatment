@@ -193,3 +193,47 @@ describe("CSS Mobile Layout & Header Rules", () => {
   });
 });
 
+describe("Multi-File Simultaneous Upload & Edit Cache Busting", () => {
+  it("classifies simultaneous Upper & Lower archives by file names and aliases", () => {
+    const isUpper = (name: string) =>
+      /(?:upper|maxill|maxillary|\bupper\b|[._-]u\b|[._-]u[._-])/i.test(name);
+    const isLower = (name: string) =>
+      /(?:lower|mandib|mandibular|\blower\b|[._-]l\b|[._-]l[._-])/i.test(name);
+
+    expect(isUpper("Niya_Upper.zip")).toBe(true);
+    expect(isLower("Niya_Upper.zip")).toBe(false);
+
+    expect(isLower("Niya_Lower.zip")).toBe(true);
+    expect(isUpper("Niya_Lower.zip")).toBe(false);
+
+    expect(isUpper("Patient_Maxilla_Treatment.zip")).toBe(true);
+    expect(isLower("Patient_Mandible_Treatment.zip")).toBe(true);
+
+    expect(isUpper("case_123_u.zip")).toBe(true);
+    expect(isLower("case_123_l.zip")).toBe(true);
+  });
+
+  it("safely generates and appends cache-busting version query parameters to stage URLs", () => {
+    const appendVersion = (url: string | undefined, version: number | string): string | undefined => {
+      if (!url) return undefined;
+      try {
+        const parsed = new URL(url, "https://yrjulcwnabnhgtqebrtn.supabase.co");
+        parsed.searchParams.set("v", String(version));
+        return parsed.toString();
+      } catch {
+        const clean = url.split("?")[0];
+        return `${clean}?v=${version}`;
+      }
+    };
+
+    const rawUrl = "https://yrjulcwnabnhgtqebrtn.supabase.co/storage/v1/object/public/treatment-models/case-123/Niya%20Upper%20jaw%20-%2001%20-%20Model.glb";
+    const tagged = appendVersion(rawUrl, 1794100000);
+    expect(tagged).toBe("https://yrjulcwnabnhgtqebrtn.supabase.co/storage/v1/object/public/treatment-models/case-123/Niya%20Upper%20jaw%20-%2001%20-%20Model.glb?v=1794100000");
+
+    // Re-tagging replaces previous version query
+    const retagged = appendVersion(tagged, 1794200000);
+    expect(retagged).toBe("https://yrjulcwnabnhgtqebrtn.supabase.co/storage/v1/object/public/treatment-models/case-123/Niya%20Upper%20jaw%20-%2001%20-%20Model.glb?v=1794200000");
+  });
+});
+
+

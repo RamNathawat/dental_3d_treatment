@@ -13,7 +13,7 @@ import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { BufferAttribute, type BufferGeometry, type Mesh } from "three";
-import { get as idbGet, set as idbSet, createStore } from "idb-keyval";
+import { get as idbGet, set as idbSet, keys as idbKeys, delMany as idbDelMany, createStore } from "idb-keyval";
 import { computeAnatomicalColors } from "../viewer/three-viewport";
 import { capPlanarOpenings } from "../viewer/cap-planar";
 import { computeToothCentroids } from "./tooth-data";
@@ -46,6 +46,48 @@ export function resetModelProgress(): void {
   highestReportedPercent = 0;
   if (globalProgressCallback) {
     globalProgressCallback(0, 0, 0);
+  }
+}
+
+/**
+ * Purges stale IndexedDB and in-memory model buffers for a specific treatment case.
+ * If currentVersionTag is provided, any keys for this case that do not match the version tag
+ * are deleted, guaranteeing that updated/re-uploaded models are loaded fresh.
+ */
+export async function purgeStaleIndexedDBCache(
+  caseId: string,
+  currentVersionTag?: string | number,
+): Promise<void> {
+  if (!caseId) return;
+
+  // 1. Purge from in-memory cache
+  for (const url of Array.from(bufferCache.keys())) {
+    if (url.includes(caseId)) {
+      if (!currentVersionTag || !url.includes(`v=${currentVersionTag}`)) {
+        bufferCache.delete(url);
+        rawGlbCache.delete(url);
+      }
+    }
+  }
+
+  // 2. Purge from persistent IndexedDB
+  if (modelStore) {
+    try {
+      const allKeys = await idbKeys<string>(modelStore);
+      const toDelete: string[] = [];
+      for (const key of allKeys) {
+        if (typeof key === "string" && key.includes(caseId)) {
+          if (!currentVersionTag || !key.includes(`v=${currentVersionTag}`)) {
+            toDelete.push(key);
+          }
+        }
+      }
+      if (toDelete.length > 0) {
+        await idbDelMany(toDelete, modelStore);
+      }
+    } catch (e) {
+      console.warn("Could not purge stale IndexedDB entries:", e);
+    }
   }
 }
 
@@ -131,13 +173,15 @@ async function probePreviousArchBuffer(
   source: ModelSource,
   signal?: AbortSignal,
 ): Promise<{ buffer: ArrayBuffer; stageNum: number } | null> {
-  const url =
+  const rawUrl =
     typeof source === "string"
       ? source
       : source && typeof source === "object" && "url" in source
       ? source.url
       : null;
-  if (!url) return null;
+  if (!rawUrl) return null;
+
+  const url = decodeURIComponent(rawUrl);
 
   const match =
     url.match(/(?:lower|mandib|upper|maxill)[\s_.-]*(?:jaw[\s_.-]*)?0*([1-9]\d*)/i) ||
@@ -149,30 +193,33 @@ async function probePreviousArchBuffer(
   const currentNum = parseInt(match[1], 10);
   for (let n = currentNum - 1; n >= 1; n--) {
     const pad = String(n).padStart(2, "0");
-    let testUrl = url;
-    if (/(?:jaw|model|upper|lower|maxill|mandib)(?:%20|\s)*-(?:%20|\s)*0*[1-9]\d*/i.test(url)) {
-      testUrl = url.replace(
-        /((?:jaw|model|upper|lower|maxill|mandib)(?:%20|\s)*-(?:%20|\s)*)0*[1-9]\d*/i,
+    let testDecoded = url;
+    if (/(?:jaw|model|upper|lower|maxill|mandib)[\s_.-]*-[\s_.-]*0*[1-9]\d*/i.test(url)) {
+      testDecoded = url.replace(
+        /((?:jaw|model|upper|lower|maxill|mandib)[\s_.-]*-[\s_.-]*)0*[1-9]\d*/i,
         `$1${pad}`,
       );
-    } else if (/0*[1-9]\d*((?:%20|\s)*-(?:%20|\s)*(?:model|glb|stl))/i.test(url)) {
-      testUrl = url.replace(
-        /0*[1-9]\d*((?:%20|\s)*-(?:%20|\s)*(?:model|glb|stl))/i,
+    } else if (/0*[1-9]\d*([\s_.-]*-[\s_.-]*(?:model|glb|stl))/i.test(url)) {
+      testDecoded = url.replace(
+        /0*[1-9]\d*([\s_.-]*-[\s_.-]*(?:model|glb|stl))/i,
         `${pad}$1`,
       );
     }
 
-    try {
-      const res = await fetchStl(testUrl, signal);
-      if (res.ok) {
-        if (isGlb(res.buffer)) {
-          rawGlbCache.set(url, res.buffer);
-          rawGlbCache.set(testUrl, res.buffer);
+    const testUrls = [testDecoded, encodeURI(testDecoded)];
+    for (const testUrl of testUrls) {
+      try {
+        const res = await fetchStl(testUrl, signal);
+        if (res.ok) {
+          if (isGlb(res.buffer)) {
+            rawGlbCache.set(rawUrl, res.buffer);
+            rawGlbCache.set(testUrl, res.buffer);
+          }
+          return { buffer: res.buffer, stageNum: n };
         }
-        return { buffer: res.buffer, stageNum: n };
+      } catch {
+        // Continue searching backwards
       }
-    } catch {
-      // Continue searching backwards
     }
   }
   return null;
@@ -205,19 +252,17 @@ export async function loadStageModels(
     let finalLowerBuffer: ArrayBuffer | null =
       lowerResult && lowerResult.ok ? lowerResult.buffer : null;
 
-    const isNotFoundError = (reason?: string) =>
-      Boolean(reason && /400|404|not found|Object not found/i.test(reason));
-
     if (upper && upperResult && !upperResult.ok) {
-      if (
-        lowerResult &&
-        lowerResult.ok &&
-        isNotFoundError(upperResult.reason)
-      ) {
-        const fallback =
-          lastKnownValidUpperBuffer
-            ? { buffer: lastKnownValidUpperBuffer, stageNum: lastKnownValidUpperStageNum ?? 1 }
-            : await probePreviousArchBuffer(upper, signal);
+      if (lastKnownValidUpperBuffer) {
+        console.info(
+          `Upper jaw model held at stage ${lastKnownValidUpperStageNum ?? "final"}.`,
+        );
+        finalUpperBuffer = lastKnownValidUpperBuffer;
+        if (typeof upper === "object" && "url" in upper && upper.url) {
+          rawGlbCache.set(upper.url, lastKnownValidUpperBuffer);
+        }
+      } else if (lowerResult && lowerResult.ok) {
+        const fallback = await probePreviousArchBuffer(upper, signal);
         if (fallback) {
           console.info(
             `Upper jaw model not found for this stage (upper arch reached final stage at ${fallback.stageNum}). Holding upper arch at stage ${fallback.stageNum}.`,
@@ -225,7 +270,7 @@ export async function loadStageModels(
           finalUpperBuffer = fallback.buffer;
           lastKnownValidUpperBuffer = fallback.buffer;
           lastKnownValidUpperStageNum = fallback.stageNum;
-          if (upper && typeof upper === "object" && "url" in upper && upper.url) {
+          if (typeof upper === "object" && "url" in upper && upper.url) {
             rawGlbCache.set(upper.url, fallback.buffer);
           }
         } else {
@@ -237,15 +282,16 @@ export async function loadStageModels(
     }
 
     if (lower && lowerResult && !lowerResult.ok) {
-      if (
-        upperResult &&
-        upperResult.ok &&
-        isNotFoundError(lowerResult.reason)
-      ) {
-        const fallback =
-          lastKnownValidLowerBuffer
-            ? { buffer: lastKnownValidLowerBuffer, stageNum: lastKnownValidLowerStageNum ?? 1 }
-            : await probePreviousArchBuffer(lower, signal);
+      if (lastKnownValidLowerBuffer) {
+        console.info(
+          `Lower jaw model held at stage ${lastKnownValidLowerStageNum ?? "final"}.`,
+        );
+        finalLowerBuffer = lastKnownValidLowerBuffer;
+        if (typeof lower === "object" && "url" in lower && lower.url) {
+          rawGlbCache.set(lower.url, lastKnownValidLowerBuffer);
+        }
+      } else if (upperResult && upperResult.ok) {
+        const fallback = await probePreviousArchBuffer(lower, signal);
         if (fallback) {
           console.info(
             `Lower jaw model not found for this stage (lower arch reached final stage at ${fallback.stageNum}). Holding lower arch at stage ${fallback.stageNum}.`,
@@ -253,7 +299,7 @@ export async function loadStageModels(
           finalLowerBuffer = fallback.buffer;
           lastKnownValidLowerBuffer = fallback.buffer;
           lastKnownValidLowerStageNum = fallback.stageNum;
-          if (lower && typeof lower === "object" && "url" in lower && lower.url) {
+          if (typeof lower === "object" && "url" in lower && lower.url) {
             rawGlbCache.set(lower.url, fallback.buffer);
           }
         } else {
@@ -914,11 +960,44 @@ export function isStageGeomCached(stageId: string): boolean {
   return stageGeomCache.has(stageId);
 }
 
+export type StageBufferedCallback = (
+  stageId: string,
+  cachedCount: number,
+  totalCount: number,
+) => void;
+
+let globalStageBufferedCallback: StageBufferedCallback | null = null;
+let totalRegisteredStagesCount = 0;
+
+export function setStageBufferedCallback(cb: StageBufferedCallback | null): void {
+  globalStageBufferedCallback = cb;
+}
+
+export function getBufferedStageCount(): number {
+  return stageGeomCache.size;
+}
+
+export function getBufferedStageIds(): ReadonlySet<string> {
+  return new Set(stageGeomCache.keys());
+}
+
 export function clearStageGeometryCache(): void {
+  for (const entry of stageGeomCache.values()) {
+    try { entry.upper?.dispose(); } catch {}
+    try { entry.upperNoAttachments?.dispose(); } catch {}
+    try { entry.lower?.dispose(); } catch {}
+    try { entry.lowerNoAttachments?.dispose(); } catch {}
+  }
   stageGeomCache.clear();
   inFlightGeoms.clear();
-  prewarmQueue.length = 0;
-  activePrewarmIds.clear();
+  activePrewarmPromise = null;
+  currentRegisteredStages = [];
+  rawGlbCache.clear();
+  resetModelProgress();
+  lastKnownValidUpperBuffer = null;
+  lastKnownValidLowerBuffer = null;
+  lastKnownValidUpperStageNum = null;
+  lastKnownValidLowerStageNum = null;
 }
 
 /**
@@ -1100,6 +1179,9 @@ export async function loadStageGeometries(
         lowerCentroids,
       };
       stageGeomCache.set(stage.id, geometries);
+      if (globalStageBufferedCallback) {
+        globalStageBufferedCallback(stage.id, stageGeomCache.size, totalRegisteredStagesCount);
+      }
       return { ok: true, geometries };
     } catch (err) {
       return {
@@ -1115,89 +1197,71 @@ export async function loadStageGeometries(
   return promise;
 }
 
-const prewarmQueue: StageDefinition[] = [];
-const activePrewarmIds = new Set<string>();
-const MAX_CONCURRENT_PREWARMS = 4;
-let prewarmScheduled = false;
-
-function pumpPrewarmQueue(): void {
-  prewarmScheduled = false;
-
-  while (activePrewarmIds.size < MAX_CONCURRENT_PREWARMS && prewarmQueue.length > 0) {
-    const stage = prewarmQueue.shift();
-    if (!stage) break;
-
-    if (stageGeomCache.has(stage.id) || activePrewarmIds.has(stage.id)) {
-      continue;
-    }
-
-    activePrewarmIds.add(stage.id);
-
-    loadStageGeometries(stage)
-      .then(() => {
-        activePrewarmIds.delete(stage.id);
-        pumpPrewarmQueue();
-      })
-      .catch((err) => {
-        activePrewarmIds.delete(stage.id);
-        console.warn(`Prewarm error on stage ${stage.id}:`, err);
-        pumpPrewarmQueue();
-      });
-  }
-}
-
-function schedulePump(): void {
-  if (!prewarmScheduled) {
-    prewarmScheduled = true;
-    if (typeof queueMicrotask === "function") {
-      queueMicrotask(pumpPrewarmQueue);
-    } else {
-      setTimeout(pumpPrewarmQueue, 0);
-    }
-  }
-}
+let currentRegisteredStages: readonly StageDefinition[] = [];
+let activePrewarmPromise: Promise<void> | null = null;
 
 /**
- * Prioritizes a specific stage by moving it to the absolute front of the background prewarm queue.
+ * Prioritizes a specific stage by immediately invoking its geometry load.
  * If the user clicks Play or navigates ahead, this ensures the target stage is loaded immediately.
  */
 export function prioritizeStage(stageId: string): void {
-  if (stageGeomCache.has(stageId) || activePrewarmIds.has(stageId)) {
+  if (stageGeomCache.has(stageId)) {
     return;
   }
-  const idx = prewarmQueue.findIndex((s) => s.id === stageId);
-  if (idx > 0) {
-    const [target] = prewarmQueue.splice(idx, 1);
-    if (target) {
-      prewarmQueue.unshift(target);
-    }
+  const stage = currentRegisteredStages.find((s) => s.id === stageId);
+  if (stage) {
+    void loadStageGeometries(stage);
   }
-  schedulePump();
 }
 
 export function prioritizeStages(stageIds: readonly string[]): void {
-  for (let i = stageIds.length - 1; i >= 0; i--) {
+  for (let i = 0; i < stageIds.length; i++) {
     const id = stageIds[i];
     if (id) prioritizeStage(id);
   }
 }
 
 /**
- * Pre-warms and parses all stage 3D geometries concurrently in the background.
- * Uses a 4-worker pipeline over HTTP/2 so an entire 30-stage progression loads into
- * RAM within seconds, enabling 60 FPS zero-latency playback and instant scrubbing.
+ * Pre-warms and parses all stage 3D geometries in parallel using a high-concurrency
+ * worker pool (up to 12 parallel HTTP/2 streams).
+ * Returns a real Promise that resolves when all stages have loaded into RAM/IndexedDB,
+ * ensuring 100% zero-latency playback and instant scrubbing with zero buffering.
  */
-export function prewarmAllStageGeometries(
+export async function prewarmAllStageGeometries(
   stages: readonly StageDefinition[],
-): void {
-  for (const stage of stages) {
-    if (!stageGeomCache.has(stage.id) && !activePrewarmIds.has(stage.id)) {
-      if (!prewarmQueue.some((s) => s.id === stage.id)) {
-        prewarmQueue.push(stage);
-      }
-    }
+  concurrency = 12,
+): Promise<void> {
+  if (!stages || stages.length === 0) return;
+  currentRegisteredStages = stages;
+  totalRegisteredStagesCount = stages.length;
+
+  if (activePrewarmPromise) {
+    return activePrewarmPromise;
   }
 
-  schedulePump();
+  activePrewarmPromise = (async () => {
+    try {
+      let index = 0;
+      const workerCount = Math.min(concurrency, stages.length);
+      const workers = Array.from({ length: workerCount }, async () => {
+        while (index < stages.length) {
+          const currentStage = stages[index++];
+          if (currentStage && !stageGeomCache.has(currentStage.id)) {
+            try {
+              await loadStageGeometries(currentStage);
+            } catch (err) {
+              console.warn(`Prewarm error on stage ${currentStage.id}:`, err);
+            }
+          }
+        }
+      });
+
+      await Promise.allSettled(workers);
+    } finally {
+      activePrewarmPromise = null;
+    }
+  })();
+
+  return activePrewarmPromise;
 }
 

@@ -6,26 +6,34 @@ export default function TreatmentViewerClient() {
   const initialized = useRef(false);
 
   useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
-
     // 1. Ensure the treatment viewer stylesheet is loaded
     if (!document.querySelector('link[href*="treatment-main"]')) {
       const link = document.createElement("link");
       link.rel = "stylesheet";
-      link.href = "/assets/treatment-main-b1E6cUP0.css";
+      link.href = "/assets/treatment-main-39t-v6ti.css";
       document.head.appendChild(link);
     }
 
-    // 2. Dynamically load the bundled 3D viewer module
-    const script = document.createElement("script");
-    script.type = "module";
-    script.src = "/assets/treatment-main-3thOkQlX.js";
-    document.body.appendChild(script);
+    // 2. If the viewer bundle has already been loaded on this page, re-invoke init directly
+    if (typeof window !== "undefined" && (window as any).__initDentalTreatmentViewer) {
+      (window as any).__initDentalTreatmentViewer();
+    } else {
+      // Dynamically load the bundled 3D viewer module
+      const script = document.createElement("script");
+      script.type = "module";
+      script.src = "/assets/treatment-main-Q1ym5Kkt.js";
+      document.body.appendChild(script);
+    }
 
     return () => {
-      if (script.parentNode) {
-        script.parentNode.removeChild(script);
+      // Clean up previous 3D viewer instance and WebGL context on unmount
+      if (typeof window !== "undefined" && (window as any).__dentalTreatmentApp) {
+        try {
+          (window as any).__dentalTreatmentApp.dispose();
+        } catch (e) {
+          console.warn("Failed to dispose viewer on unmount:", e);
+        }
+        (window as any).__dentalTreatmentApp = null;
       }
     };
   }, []);

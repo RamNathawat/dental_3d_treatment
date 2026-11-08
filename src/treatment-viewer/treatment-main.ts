@@ -3,11 +3,20 @@
  * Loads dynamic cases from Supabase Cloud Storage when `?case=<token>` is present.
  */
 import "./treatment.css";
-import { createTreatmentApp } from "./treatment-app";
+import { createTreatmentApp, type TreatmentAppHandle } from "./treatment-app";
 import { normalizeManifestStages, type CaseManifest } from "./stage-manifest";
+import { purgeStaleIndexedDBCache } from "./model-loader";
 
-const root = document.querySelector<HTMLElement>("#app");
-if (root === null) throw new Error("The page has no #app mount point.");
+declare global {
+  interface Window {
+    __dentalTreatmentApp?: TreatmentAppHandle | null;
+    __initDentalTreatmentViewer?: () => Promise<void>;
+  }
+}
+
+function getRoot(): HTMLElement | null {
+  return document.querySelector<HTMLElement>("#app");
+}
 
 function showEmptyState(
   title: string,
@@ -15,6 +24,7 @@ function showEmptyState(
   buttonHref: string,
   buttonText: string,
 ) {
+  const root = getRoot();
   if (!root) return;
   root.innerHTML = `
     <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; width: 100vw; background: radial-gradient(circle at 50% 30%, #151821 0%, #0a0b0e 100%); color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center; padding: 24px; box-sizing: border-box;">
@@ -38,7 +48,20 @@ function showEmptyState(
   `;
 }
 
-async function init() {
+export async function initTreatmentViewer(): Promise<void> {
+  // Dispose any existing viewer instance before initializing a new one
+  if (typeof window !== "undefined" && window.__dentalTreatmentApp) {
+    try {
+      window.__dentalTreatmentApp.dispose();
+    } catch (e) {
+      console.warn("Disposal of previous viewer instance:", e);
+    }
+    window.__dentalTreatmentApp = null;
+  }
+
+  const root = getRoot();
+  if (root === null) return;
+
   const params = new URLSearchParams(window.location.search);
   const shareToken = params.get("case");
 
@@ -84,6 +107,39 @@ async function init() {
         }
 
         const baseStorage = `${supabaseUrl}/storage/v1/object/public/treatment-models/${caseId}`;
+        const versionTag = caseRecord.updated_at
+          ? new Date(caseRecord.updated_at).getTime()
+          : Date.now();
+
+        // Purge any stale IndexedDB and memory cache entries for this case that don't match versionTag
+        await purgeStaleIndexedDBCache(caseId, versionTag);
+
+        const appendVersion = (url: string | undefined, version: number | string): string | undefined => {
+          if (!url) return undefined;
+          try {
+            const parsed = new URL(url, window.location.href);
+            parsed.searchParams.set("v", String(version));
+            return parsed.toString();
+          } catch {
+            const clean = url.split("?")[0];
+            return `${clean}?v=${version}`;
+          }
+        };
+
+        // Live sync: if the user edits or re-enters models in another tab, auto-reload this view
+        if (typeof window !== "undefined" && !(window as any).__dentalViewerSyncListenerAttached) {
+          (window as any).__dentalViewerSyncListenerAttached = true;
+          window.addEventListener("storage", (e) => {
+            if (e.key === "dental_viewer_sync" && e.newValue) {
+              try {
+                const syncData = JSON.parse(e.newValue);
+                if (syncData.caseId === caseId) {
+                  window.location.reload();
+                }
+              } catch {}
+            }
+          });
+        }
 
         // Discover genuine uploaded model files for each arch to safely resolve unequal upper/lower stage counts
         let storageFiles: string[] | undefined = undefined;
@@ -119,27 +175,67 @@ async function init() {
               Array.isArray(storedManifest.treatmentStages) &&
               storedManifest.treatmentStages.length > 0
             ) {
-              // Sync single-arch designation from database caseRecord if present
-              const isDbUpperOnly = caseRecord.patient_name?.includes("[Upper]");
-              const isDbLowerOnly = caseRecord.patient_name?.includes("[Lower]");
+              // Check actual model assets present in the manifest
+              const manifestHasUpper = storedManifest.treatmentStages.some((st: any) => Boolean(st.upper));
+              const manifestHasLower = storedManifest.treatmentStages.some((st: any) => Boolean(st.lower));
 
-              if (isDbUpperOnly) {
+              if (manifestHasUpper && manifestHasLower) {
+                storedManifest.archType = "both";
+                storedManifest.hasUpper = true;
+                storedManifest.hasLower = true;
+                // Strip obsolete single-arch [Upper] or [Lower] suffix if both arches exist
+                if (storedManifest.patientName) {
+                  storedManifest.patientName = storedManifest.patientName
+                    .replace(/\s*\[(Upper|Lower|Dual)\]/i, "")
+                    .trim();
+                }
+              } else if (manifestHasUpper && !manifestHasLower) {
                 storedManifest.archType = "upper";
                 storedManifest.hasUpper = true;
                 storedManifest.hasLower = false;
-                if (!storedManifest.patientName?.includes("[Upper]")) {
-                  storedManifest.patientName = `${storedManifest.patientName || ""} [Upper]`.trim();
-                }
-              } else if (isDbLowerOnly) {
+              } else if (!manifestHasUpper && manifestHasLower) {
                 storedManifest.archType = "lower";
                 storedManifest.hasUpper = false;
                 storedManifest.hasLower = true;
-                if (!storedManifest.patientName?.includes("[Lower]")) {
-                  storedManifest.patientName = `${storedManifest.patientName || ""} [Lower]`.trim();
+              } else {
+                // If manifest stages do not specify, fallback to DB designation
+                const isDbUpperOnly = caseRecord.patient_name?.includes("[Upper]");
+                const isDbLowerOnly = caseRecord.patient_name?.includes("[Lower]");
+
+                if (isDbUpperOnly) {
+                  storedManifest.archType = "upper";
+                  storedManifest.hasUpper = true;
+                  storedManifest.hasLower = false;
+                  if (!storedManifest.patientName?.includes("[Upper]")) {
+                    storedManifest.patientName = `${storedManifest.patientName || ""} [Upper]`.trim();
+                  }
+                } else if (isDbLowerOnly) {
+                  storedManifest.archType = "lower";
+                  storedManifest.hasUpper = false;
+                  storedManifest.hasLower = true;
+                  if (!storedManifest.patientName?.includes("[Lower]")) {
+                    storedManifest.patientName = `${storedManifest.patientName || ""} [Lower]`.trim();
+                  }
                 }
               }
 
               normalizeManifestStages(storedManifest, storageFiles);
+
+              // Ensure every model URL has the case version tag to bypass stale browser & IndexedDB caches
+              for (const st of storedManifest.treatmentStages) {
+                if (st.upper?.url) {
+                  (st as any).upper = {
+                    ...st.upper,
+                    url: appendVersion(st.upper.url, versionTag)!,
+                  };
+                }
+                if (st.lower?.url) {
+                  (st as any).lower = {
+                    ...st.lower,
+                    url: appendVersion(st.lower.url, versionTag)!,
+                  };
+                }
+              }
 
               // Merge in database records if manifest is missing any recent fields
               if ((!storedManifest.ipr || storedManifest.ipr.length === 0) && Array.isArray(caseRecord.ipr) && caseRecord.ipr.length > 0) {
@@ -226,7 +322,27 @@ async function init() {
         };
 
         normalizeManifestStages(dynamicManifest, storageFiles);
-        createTreatmentApp(root!, { caseManifest: dynamicManifest });
+
+        // Ensure every model URL has the case version tag to bypass stale browser & IndexedDB caches
+        for (const st of dynamicManifest.treatmentStages) {
+          if (st.upper?.url) {
+            (st as any).upper = {
+              ...st.upper,
+              url: appendVersion(st.upper.url, versionTag)!,
+            };
+          }
+          if (st.lower?.url) {
+            (st as any).lower = {
+              ...st.lower,
+              url: appendVersion(st.lower.url, versionTag)!,
+            };
+          }
+        }
+
+        const app = createTreatmentApp(root!, { caseManifest: dynamicManifest });
+        if (typeof window !== "undefined") {
+          window.__dentalTreatmentApp = app;
+        }
         return;
       }
     }
@@ -238,13 +354,29 @@ async function init() {
     );
   } catch (err) {
     console.warn("Could not load dynamic case from cloud:", err);
-    showEmptyState(
-      "Error Loading Case",
-      "Could not retrieve this treatment case. Please check your connection or return to the dashboard.",
-      "/dashboard",
-      "Go to Dashboard",
-    );
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const isWebGLError = /webgl|context/i.test(errMsg);
+
+    if (isWebGLError) {
+      showEmptyState(
+        "WebGL Hardware Acceleration Needed",
+        "Your browser or graphics hardware temporarily suspended WebGL context. Please ensure hardware acceleration is enabled in your browser settings and click below to reload the viewer.",
+        window.location.href,
+        "Reload 3D Viewer",
+      );
+    } else {
+      showEmptyState(
+        "Error Loading Case",
+        "Could not retrieve this treatment case. Please check your connection or return to the dashboard.",
+        "/dashboard",
+        "Go to Dashboard",
+      );
+    }
   }
 }
 
-init();
+if (typeof window !== "undefined") {
+  window.__initDentalTreatmentViewer = initTreatmentViewer;
+}
+
+initTreatmentViewer();
