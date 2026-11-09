@@ -542,6 +542,7 @@ export function clearStlBufferCache(): void {
 }
 
 function calibrateGeometryColors(geom: BufferGeometry): void {
+  sanitizeColorAttribute(geom);
   if (!geom.getAttribute("normal")) {
     geom.computeVertexNormals();
   }
@@ -746,23 +747,45 @@ export interface ExtractedGlbGeometries {
 
 /**
  * Ensures any color attribute is converted to a clean standard Float32Array (normalized: false).
- * Prevents BufferGeometryUtils.mergeGeometries from throwing gpuType/normalized attribute mismatches.
+ * Safely unpacks InterleavedBufferAttributes (e.g. 4-byte aligned GLTF accessors) and normalized Uint8
+ * buffers using per-vertex coordinate getters, preventing byte-phase shifts and BufferGeometryUtils mismatches.
  */
 export function sanitizeColorAttribute(geom: BufferGeometry): void {
   const col = geom.getAttribute("color") as BufferAttribute | undefined;
   if (!col) return;
-  if (!(col.array instanceof Float32Array) || col.normalized || col.gpuType !== undefined) {
-    const count = col.count;
-    const itemSize = col.itemSize;
-    const f32 = new Float32Array(count * itemSize);
-    const src = col.array;
-    const isNorm = col.normalized;
-    for (let i = 0; i < src.length; i++) {
-      f32[i] = isNorm ? (src[i]! / 255) : src[i]!;
+
+  const isInterleaved = Boolean((col as any).isInterleavedBufferAttribute);
+  const isStandardFloat32 =
+    !isInterleaved &&
+    col.array instanceof Float32Array &&
+    !col.normalized &&
+    col.itemSize === 3 &&
+    (col as any).gpuType === undefined;
+
+  if (isStandardFloat32) return;
+
+  const count = col.count;
+  const f32 = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    let r = col.getX(i);
+    let g = col.getY(i);
+    let b = col.getZ(i);
+
+    // If values are in un-normalized integer range (> 1.0)
+    if (!col.normalized && (r > 1.0 || g > 1.0 || b > 1.0)) {
+      r /= 255;
+      g /= 255;
+      b /= 255;
     }
-    const cleanAttr = new BufferAttribute(f32, itemSize, false);
-    geom.setAttribute("color", cleanAttr);
+
+    const idx = i * 3;
+    f32[idx] = Math.max(0, Math.min(1, r));
+    f32[idx + 1] = Math.max(0, Math.min(1, g));
+    f32[idx + 2] = Math.max(0, Math.min(1, b));
   }
+
+  const cleanAttr = new BufferAttribute(f32, 3, false);
+  geom.setAttribute("color", cleanAttr);
 }
 
 function safeMergeGeometries(g1: BufferGeometry, g2: BufferGeometry): BufferGeometry {

@@ -27,7 +27,7 @@ export default function TreatmentViewerClient() {
       // Dynamically load the bundled 3D viewer module
       const script = document.createElement("script");
       script.type = "module";
-      script.src = "/assets/treatment-main-BOI58sFk.js";
+      script.src = "/assets/treatment-main-oKdBo_Jw.js";
       document.body.appendChild(script);
     }
 

@@ -6,6 +6,7 @@ import {
   prewarmAllStageGeometries,
   clearStageGeometryCache,
   isStageGeomCached,
+  sanitizeColorAttribute,
 } from "../src/treatment-viewer/model-loader";
 import { createTreatmentApp } from "../src/treatment-viewer/treatment-app";
 import { FakeViewport } from "./fake-viewport";
@@ -503,5 +504,57 @@ describe("Client Feedback Real-World Scenarios & Edge Cases", () => {
     // Verify uncompressed buffer is untouched
     const untouched = decompressIfGzipped(rawGlb);
     expect(untouched).toBe(rawGlb);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Feedback Issue 10: Mottled / static color texture on teeth and gum
+  // Prevents 1-byte phase shift when unpacking 4-byte aligned GLTF color attributes
+  // ──────────────────────────────────────────────────────────────────────────
+  it("Scenario 10: sanitizeColorAttribute unpacks interleaved/padded GLTF color buffers with zero phase-shift", () => {
+    const { BufferGeometry, Float32BufferAttribute, InterleavedBuffer, InterleavedBufferAttribute } = require("three");
+
+    // Simulate 4 vertices with distinct colors:
+    // Vertex 0: Gum pink (0.46, 0.085, 0.105)
+    // Vertex 1: Tooth ivory (0.82, 0.76, 0.68)
+    // Vertex 2: Gum pink (0.46, 0.085, 0.105)
+    // Vertex 3: Tooth ivory (0.82, 0.76, 0.68)
+    // In a 4-byte padded buffer (itemSize: 3, stride: 4): [R, G, B, 0]
+    const u8 = new Uint8Array([
+      Math.round(0.46 * 255), Math.round(0.085 * 255), Math.round(0.105 * 255), 0,
+      Math.round(0.82 * 255), Math.round(0.76 * 255),  Math.round(0.68 * 255),  0,
+      Math.round(0.46 * 255), Math.round(0.085 * 255), Math.round(0.105 * 255), 0,
+      Math.round(0.82 * 255), Math.round(0.76 * 255),  Math.round(0.68 * 255),  0,
+    ]);
+
+    const ib = new InterleavedBuffer(u8, 4);
+    const iba = new InterleavedBufferAttribute(ib, 3, 0, true);
+
+    const geom = new BufferGeometry();
+    geom.setAttribute("position", new Float32BufferAttribute(new Float32Array(12), 3));
+    geom.setAttribute("color", iba);
+
+    // Sanitize
+    sanitizeColorAttribute(geom);
+
+    const clean = geom.getAttribute("color");
+    expect(clean.count).toBe(4);
+    expect(clean.itemSize).toBe(3);
+    expect(clean.normalized).toBe(false);
+
+    // Vertex 0 should be Gum pink
+    expect(clean.getX(0)).toBeCloseTo(0.46, 1);
+    expect(clean.getY(0)).toBeCloseTo(0.085, 2);
+    expect(clean.getZ(0)).toBeCloseTo(0.105, 2);
+
+    // Vertex 1 should be Tooth ivory (NOT corrupted by zero-padding or phase-shift)
+    expect(clean.getX(1)).toBeCloseTo(0.82, 1);
+    expect(clean.getY(1)).toBeCloseTo(0.76, 1);
+    expect(clean.getZ(1)).toBeCloseTo(0.68, 1);
+
+    // Vertex 2 should be Gum pink
+    expect(clean.getX(2)).toBeCloseTo(0.46, 1);
+
+    // Vertex 3 should be Tooth ivory
+    expect(clean.getX(3)).toBeCloseTo(0.82, 1);
   });
 });

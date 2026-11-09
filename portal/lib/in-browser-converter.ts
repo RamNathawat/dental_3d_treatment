@@ -147,20 +147,24 @@ export function parseMeshBuffer(
 }
 
 /**
- * Quantizes a 32-bit Float32 color attribute into standard normalized 8-bit Uint8.
- * Reduces color buffer weight by 75% in exported GLB models without color fidelity loss.
+ * Quantizes a 32-bit Float32 color attribute into standard normalized 8-bit Uint8 (RGBA).
+ * Using itemSize 4 aligns with WebGL / GLTF 4-byte boundaries, eliminating interleaved stride padding.
+ * Reduces color buffer weight by ~66% in exported GLB models without color fidelity loss.
  */
 export function quantizeColorAttribute(geom: THREE.BufferGeometry): void {
   const colorAttr = geom.getAttribute("color");
   if (!colorAttr) return;
-  if (colorAttr.array instanceof Uint8Array) return;
   const count = colorAttr.count;
-  const arr = colorAttr.array as Float32Array;
-  const u8 = new Uint8Array(count * 3);
-  for (let i = 0; i < count * 3; i++) {
-    u8[i] = Math.round(Math.max(0, Math.min(1, arr[i] || 0)) * 255);
+  if (colorAttr.array instanceof Uint8Array && colorAttr.itemSize === 4) return;
+  const u8 = new Uint8Array(count * 4);
+  for (let i = 0; i < count; i++) {
+    const idx = i * 4;
+    u8[idx] = Math.round(Math.max(0, Math.min(1, colorAttr.getX(i))) * 255);
+    u8[idx + 1] = Math.round(Math.max(0, Math.min(1, colorAttr.getY(i))) * 255);
+    u8[idx + 2] = Math.round(Math.max(0, Math.min(1, colorAttr.getZ(i))) * 255);
+    u8[idx + 3] = colorAttr.itemSize >= 4 ? Math.round(Math.max(0, Math.min(1, colorAttr.getW(i))) * 255) : 255;
   }
-  geom.setAttribute("color", new THREE.BufferAttribute(u8, 3, true));
+  geom.setAttribute("color", new THREE.BufferAttribute(u8, 4, true));
 }
 
 export function capPlanarOpenings(
@@ -1409,13 +1413,14 @@ export async function processDentalZipInBrowser(
           // ClinCheck / 3Shape vascular coral-rose gingiva (#CC5C6A in linear: 0.46, 0.085, 0.105)
           const count = geom.attributes.position ? geom.attributes.position.count : 0;
           if (count > 0) {
-            const colors = new Uint8Array(count * 3);
+            const colors = new Uint8Array(count * 4);
             for (let i = 0; i < count; i++) {
-              colors[i * 3] = Math.round(0.46 * 255);
-              colors[i * 3 + 1] = Math.round(0.085 * 255);
-              colors[i * 3 + 2] = Math.round(0.105 * 255);
+              colors[i * 4] = Math.round(0.46 * 255);
+              colors[i * 4 + 1] = Math.round(0.085 * 255);
+              colors[i * 4 + 2] = Math.round(0.105 * 255);
+              colors[i * 4 + 3] = 255;
             }
-            geom.setAttribute("color", new THREE.BufferAttribute(colors, 3, true));
+            geom.setAttribute("color", new THREE.BufferAttribute(colors, 4, true));
             gumGeom = geom;
             jawGeoms.push(geom);
           }
@@ -1427,13 +1432,14 @@ export async function processDentalZipInBrowser(
           // Warm natural ivory / beige enamel (#E8DEC8 in linear: 0.82, 0.76, 0.68)
           const count = geom.attributes.position ? geom.attributes.position.count : 0;
           if (count > 0) {
-            const colors = new Uint8Array(count * 3);
+            const colors = new Uint8Array(count * 4);
             for (let i = 0; i < count; i++) {
-              colors[i * 3] = Math.round(0.82 * 255);
-              colors[i * 3 + 1] = Math.round(0.76 * 255);
-              colors[i * 3 + 2] = Math.round(0.68 * 255);
+              colors[i * 4] = Math.round(0.82 * 255);
+              colors[i * 4 + 1] = Math.round(0.76 * 255);
+              colors[i * 4 + 2] = Math.round(0.68 * 255);
+              colors[i * 4 + 3] = 255;
             }
-            geom.setAttribute("color", new THREE.BufferAttribute(colors, 3, true));
+            geom.setAttribute("color", new THREE.BufferAttribute(colors, 4, true));
             toothGeoms.push(geom);
             jawGeoms.push(geom);
           }
@@ -1458,13 +1464,14 @@ export async function processDentalZipInBrowser(
             // Orthodontic composite resin: vibrant clinical contrast burnt orange
             const count = geom.attributes.position ? geom.attributes.position.count : 0;
             if (count > 0) {
-              const colors = new Uint8Array(count * 3);
+              const colors = new Uint8Array(count * 4);
               for (let i = 0; i < count; i++) {
-                colors[i * 3] = Math.round(0.88 * 255);
-                colors[i * 3 + 1] = Math.round(0.30 * 255);
-                colors[i * 3 + 2] = Math.round(0.04 * 255);
+                colors[i * 4] = Math.round(0.88 * 255);
+                colors[i * 4 + 1] = Math.round(0.30 * 255);
+                colors[i * 4 + 2] = Math.round(0.04 * 255);
+                colors[i * 4 + 3] = 255;
               }
-              geom.setAttribute("color", new THREE.BufferAttribute(colors, 3, true));
+              geom.setAttribute("color", new THREE.BufferAttribute(colors, 4, true));
               attGeoms.push(geom);
             }
           }
