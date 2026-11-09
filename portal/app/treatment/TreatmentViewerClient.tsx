@@ -6,11 +6,17 @@ export default function TreatmentViewerClient() {
   const initialized = useRef(false);
 
   useEffect(() => {
-    // 1. Ensure the treatment viewer stylesheet is loaded
-    if (!document.querySelector('link[href*="treatment-main"]')) {
+    // 1. Ensure the latest treatment viewer stylesheet is loaded
+    const expectedCss = "/assets/treatment-main-0-u0pM1h.css";
+    const existingLink = document.querySelector('link[href*="treatment-main"]');
+    if (existingLink) {
+      if (existingLink.getAttribute("href") !== expectedCss) {
+        existingLink.setAttribute("href", expectedCss);
+      }
+    } else {
       const link = document.createElement("link");
       link.rel = "stylesheet";
-      link.href = "/assets/treatment-main-39t-v6ti.css";
+      link.href = expectedCss;
       document.head.appendChild(link);
     }
 
@@ -21,7 +27,7 @@ export default function TreatmentViewerClient() {
       // Dynamically load the bundled 3D viewer module
       const script = document.createElement("script");
       script.type = "module";
-      script.src = "/assets/treatment-main-Q1ym5Kkt.js";
+      script.src = "/assets/treatment-main-BOI58sFk.js";
       document.body.appendChild(script);
     }
 

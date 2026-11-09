@@ -1121,7 +1121,9 @@ body {
   position: absolute;
   bottom: 1.5rem;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  visibility: visible;
   display: flex;
   align-items: center;
   gap: 1.25rem;
@@ -1134,6 +1136,173 @@ body {
   box-shadow: var(--tv-shadow-lg);
   z-index: 20;
   max-width: calc(100% - 2rem);
+  transition: transform 0.30s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.24s ease, visibility 0.30s ease;
+  will-change: transform, opacity;
+}
+
+/* ── Dock Minimise Button (on the left of Before / After in dock tools) ───── */
+
+.tv-dock-minimize-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 32px !important;
+  min-width: 32px !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  padding: 0 !important;
+  border-radius: var(--tv-radius-pill) !important;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
+}
+
+.tv-app--dark .tv-dock-minimize-btn {
+  background: rgba(19, 26, 38, 0.85);
+  border: 1px solid rgba(51, 65, 85, 0.7);
+  color: #94a3b8;
+}
+
+.tv-app--dark .tv-dock-minimize-btn:hover {
+  color: #ffd166;
+  background: rgba(30, 41, 59, 0.95);
+  border-color: rgba(224, 180, 87, 0.6);
+  box-shadow: 0 0 12px rgba(224, 180, 87, 0.25);
+}
+
+.tv-app--dark .tv-dock-minimize-btn:active {
+  transform: translateY(1px) scale(0.95);
+}
+
+.tv-app:not(.tv-app--dark) .tv-dock-minimize-btn {
+  background: #ffffff;
+  border: 1px solid rgba(206, 198, 182, 0.8);
+  color: #555d6b;
+  box-shadow: 0 1px 3px rgba(45, 38, 28, 0.06);
+}
+
+.tv-app:not(.tv-app--dark) .tv-dock-minimize-btn:hover {
+  color: #9c7726;
+  border-color: #c49a45;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(196, 154, 69, 0.22);
+}
+
+.tv-app:not(.tv-app--dark) .tv-dock-minimize-btn:active {
+  transform: translateY(1px) scale(0.95);
+}
+
+.tv-dock-minimize-icon {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  flex-shrink: 0;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tv-dock-minimize-btn:hover .tv-dock-minimize-icon {
+  transform: translateY(1px);
+}
+
+/* ── Hidden Bottom Dock State (Smooth Slide-Down & Fade) ─────────────────── */
+
+.tv-bottom-dock--hidden,
+.tv-bottom-dock[hidden] {
+  display: flex !important;
+  transform: translateX(-50%) translateY(calc(100% + 2.5rem)) !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  transition: transform 0.30s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.24s ease, visibility 0.30s ease;
+}
+
+/* ── Expand Controls Floating Pill ──────────────────────────────────────── */
+
+.tv-dock-expand-pill {
+  position: absolute;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  visibility: visible;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.45rem 1.15rem;
+  height: 38px;
+  border-radius: var(--tv-radius-pill);
+  cursor: pointer;
+  z-index: 50;
+  user-select: none;
+  touch-action: manipulation;
+  white-space: nowrap;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease, visibility 0.28s ease, background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  will-change: transform, opacity;
+}
+
+.tv-dock-expand-pill--hidden,
+.tv-dock-expand-pill[hidden] {
+  display: inline-flex !important;
+  transform: translateX(-50%) translateY(calc(100% + 2.5rem)) !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease, visibility 0.28s ease;
+}
+
+.tv-app--dark .tv-dock-expand-pill {
+  background: rgba(19, 26, 38, 0.94);
+  border: 1.5px solid rgba(224, 180, 87, 0.5);
+  color: #ffd166;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 14px rgba(224, 180, 87, 0.2);
+}
+
+.tv-app--dark .tv-dock-expand-pill:hover {
+  background: rgba(26, 36, 52, 0.98);
+  border-color: #ffd166;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7), 0 0 18px rgba(224, 180, 87, 0.35);
+  transform: translateX(-50%) translateY(-2px);
+}
+
+.tv-app--dark .tv-dock-expand-pill:hover .tv-dock-expand-icon {
+  transform: translateY(-1px);
+}
+
+.tv-app:not(.tv-app--dark) .tv-dock-expand-pill {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1.5px solid rgba(196, 154, 69, 0.6);
+  color: #9c7726;
+  box-shadow: 0 8px 24px rgba(45, 38, 28, 0.14), 0 0 10px rgba(196, 154, 69, 0.15);
+}
+
+.tv-app:not(.tv-app--dark) .tv-dock-expand-pill:hover {
+  background: #ffffff;
+  border-color: #c49a45;
+  box-shadow: 0 10px 28px rgba(45, 38, 28, 0.2);
+  transform: translateX(-50%) translateY(-2px);
+}
+
+.tv-app:not(.tv-app--dark) .tv-dock-expand-pill:hover .tv-dock-expand-icon {
+  transform: translateY(-1px);
+}
+
+.tv-dock-expand-icon {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  flex-shrink: 0;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* Before / After Pill */
@@ -2256,11 +2425,42 @@ body {
     padding: 0.45rem 0.65rem 0.50rem;
     width: min(440px, calc(100% - 0.8rem));
     left: 50%;
-    transform: translateX(-50%);
+    transform: translateX(-50%) translateY(0);
     bottom: max(0.55rem, env(safe-area-inset-bottom, 0.55rem));
     border-radius: 18px;
     backdrop-filter: blur(24px) saturate(180%);
     -webkit-backdrop-filter: blur(24px) saturate(180%);
+    transition: transform 0.30s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.24s ease, visibility 0.30s ease;
+  }
+
+  .tv-bottom-dock--hidden,
+  .tv-bottom-dock[hidden] {
+    display: grid !important;
+    transform: translateX(-50%) translateY(calc(100% + 2.5rem)) !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+  }
+
+  .tv-dock-minimize-btn {
+    width: 30px !important;
+    min-width: 30px !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    padding: 0 !important;
+    border-radius: var(--tv-radius-pill) !important;
+  }
+
+  .tv-dock-minimize-icon {
+    width: 13px !important;
+    height: 13px !important;
+  }
+
+  .tv-dock-expand-pill {
+    bottom: max(0.55rem, env(safe-area-inset-bottom, 0.55rem)) !important;
+    height: 34px !important;
+    padding: 0.35rem 0.95rem !important;
+    font-size: 0.74rem !important;
   }
 
   /* Light Mode Mobile Bottom Dock */
@@ -3597,6 +3797,75 @@ body {
     z-index: 85 !important;
   }
 }
+
+/* ── Mobile Landscape Orientation Optimization ──────────────────────────── */
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .tv-bottom-dock:not(.tv-bottom-dock--hidden) {
+    padding: 0.25rem 0.55rem 0.35rem !important;
+    gap: 0.20rem 0.45rem !important;
+    bottom: max(0.35rem, env(safe-area-inset-bottom, 0.35rem)) !important;
+    width: min(520px, calc(100% - 1.2rem)) !important;
+  }
+  .tv-bottom-dock:not(.tv-bottom-dock--hidden) .tv-dock-tools {
+    gap: 0.2rem !important;
+    padding-bottom: 0.15rem !important;
+  }
+  .tv-bottom-dock:not(.tv-bottom-dock--hidden) .tv-ba-btn,
+  .tv-bottom-dock:not(.tv-bottom-dock--hidden) .tv-dock-tool-btn {
+    padding: 0.2rem 0.45rem !important;
+    font-size: 0.63rem !important;
+    min-height: 24px !important;
+  }
+  .tv-bottom-dock .tv-dock-minimize-btn {
+    width: 26px !important;
+    min-width: 26px !important;
+    height: 24px !important;
+    min-height: 24px !important;
+    padding: 0 !important;
+  }
+  .tv-bottom-dock .tv-dock-minimize-icon {
+    width: 12px !important;
+    height: 12px !important;
+  }
+  .tv-bottom-dock:not(.tv-bottom-dock--hidden) .tv-btn--play-circle {
+    width: 2.15rem !important;
+    height: 2.15rem !important;
+    font-size: 0.90rem !important;
+  }
+  .tv-bottom-dock:not(.tv-bottom-dock--hidden) .tv-btn--speed {
+    height: 1.90rem !important;
+    min-width: 2.25rem !important;
+    font-size: 0.65rem !important;
+  }
+  .tv-bottom-dock:not(.tv-bottom-dock--hidden) .tv-stepper-btn {
+    width: 1.65rem !important;
+    height: 1.65rem !important;
+    min-width: 1.65rem !important;
+    font-size: 0.85rem !important;
+  }
+  .tv-bottom-dock:not(.tv-bottom-dock--hidden) .tv-stage-label {
+    font-size: 0.68rem !important;
+    padding: 0.15rem 0.45rem !important;
+  }
+  .tv-camera-dock {
+    top: 2.8rem !important;
+    gap: 0.15rem !important;
+    padding: 0.2rem !important;
+  }
+  .tv-cam-btn {
+    height: 1.55rem !important;
+    min-width: 2.4rem !important;
+    font-size: 0.60rem !important;
+  }
+  .tv-dock-expand-pill {
+    bottom: max(0.40rem, env(safe-area-inset-bottom, 0.40rem)) !important;
+    height: 32px !important;
+    padding: 0.30rem 0.85rem !important;
+    font-size: 0.70rem !important;
+  }
+}
+
 
 
 

@@ -31,12 +31,24 @@ export function getCaseTrayInfo(
   item: TrayBreakdownCase,
   cachedCounts?: { upper: number; lower: number; total: number; isUnequal: boolean }
 ): CaseTrayInfo {
-  const isUpperOnly = item.patient_name.includes("[Upper]");
-  const isLowerOnly = item.patient_name.includes("[Lower]");
   const stages = item.total_stages || 1;
 
+  const rawUpper =
+    item.upper_stages ??
+    item.doctor_notes?.aligner_counts?.upper ??
+    cachedCounts?.upper;
+  const rawLower =
+    item.lower_stages ??
+    item.doctor_notes?.aligner_counts?.lower ??
+    cachedCounts?.lower;
+
+  const hasBoth = rawUpper != null && rawUpper > 0 && rawLower != null && rawLower > 0;
+
+  const isUpperOnly = !hasBoth && item.patient_name.includes("[Upper]");
+  const isLowerOnly = !hasBoth && item.patient_name.includes("[Lower]");
+
   if (isUpperOnly) {
-    const upper = item.upper_stages || stages;
+    const upper = rawUpper || stages;
     return {
       upper,
       lower: 0,
@@ -52,7 +64,7 @@ export function getCaseTrayInfo(
   }
 
   if (isLowerOnly) {
-    const lower = item.lower_stages || stages;
+    const lower = rawLower || stages;
     return {
       upper: 0,
       lower,
@@ -68,16 +80,8 @@ export function getCaseTrayInfo(
   }
 
   // Dual-arch case: inspect columns, doctor_notes, and cached manifest
-  const upper =
-    item.upper_stages ??
-    item.doctor_notes?.aligner_counts?.upper ??
-    cachedCounts?.upper ??
-    stages;
-  const lower =
-    item.lower_stages ??
-    item.doctor_notes?.aligner_counts?.lower ??
-    cachedCounts?.lower ??
-    stages;
+  const upper = rawUpper ?? stages;
+  const lower = rawLower ?? stages;
 
   const isUnequal = upper > 0 && lower > 0 && upper !== lower;
   const total = upper + lower;

@@ -16,6 +16,7 @@ export interface ArchAsset {
   readonly filename: string;
   readonly url?: string;
   readonly file?: File | Blob;
+  readonly buffer?: ArrayBuffer;
   readonly sizeBytes?: number;
 }
 
@@ -683,6 +684,12 @@ export function normalizeManifestStages(
 
   const isExplicitLowerOnly = Boolean(manifest.patientName?.includes("[Lower]")) && !hasUpperInStages;
   const isExplicitUpperOnly = Boolean(manifest.patientName?.includes("[Upper]")) && !hasLowerInStages;
+
+  if (hasUpperInStages && hasLowerInStages) {
+    if (manifest.patientName) {
+      (manifest as any).patientName = manifest.patientName.replace(/\s*\[(Upper|Lower|Dual)\]/i, "").trim();
+    }
+  }
 
   const allowUpperRestore = !isExplicitLowerOnly;
   const allowLowerRestore = !isExplicitUpperOnly;

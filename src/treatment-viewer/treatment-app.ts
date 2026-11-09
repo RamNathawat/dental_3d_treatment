@@ -149,6 +149,9 @@ export interface TreatmentAppHandle {
   readonly cyclePlaybackSpeed: () => number;
   readonly setPlaybackSpeed: (speed: number) => void;
   readonly getPlaybackSpeed: () => number;
+  readonly toggleDockMinimized: () => void;
+  readonly setDockMinimized: (minimized: boolean) => void;
+  readonly isDockMinimized: () => boolean;
   readonly getState: () => Readonly<AppState>;
 }
 
@@ -661,7 +664,95 @@ export function createTreatmentApp(
   iprBtn.title = "Toggle planned Interproximal Reduction (IPR) values and contact callouts";
   iprBtn.setAttribute("aria-pressed", "false");
 
+  // ── Minimise / Expand Play Control Bar ────────────────────────────────────
+  let isDockMinimized = false;
+
+  // 1. Minimise button placed directly on the LEFT of Before / After toggle in dock tools
+  const minimizeBtn = document.createElement("button");
+  minimizeBtn.type = "button";
+  minimizeBtn.className = "tv-ba-btn tv-dock-tool-btn tv-dock-minimize-btn";
+  minimizeBtn.title = "Minimise playback controls (M)";
+  minimizeBtn.setAttribute("aria-label", "Minimise playback controls");
+
+  const minSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  minSvg.setAttribute("class", "tv-dock-minimize-icon");
+  minSvg.setAttribute("viewBox", "0 0 24 24");
+  minSvg.setAttribute("width", "13");
+  minSvg.setAttribute("height", "13");
+  minSvg.setAttribute("fill", "none");
+  minSvg.setAttribute("stroke", "currentColor");
+  minSvg.setAttribute("stroke-width", "2.5");
+  minSvg.setAttribute("stroke-linecap", "round");
+  minSvg.setAttribute("stroke-linejoin", "round");
+
+  const minPolyline = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+  minPolyline.setAttribute("points", "6 9 12 15 18 9"); // Down chevron
+  minSvg.appendChild(minPolyline);
+
+  minimizeBtn.append(minSvg);
+
+  // 2. Expand floating pill button (shown when dock is minimized)
+  const expandPillEl = document.createElement("button");
+  expandPillEl.type = "button";
+  expandPillEl.className = "tv-dock-expand-pill";
+  expandPillEl.title = "Expand playback controls (M)";
+  expandPillEl.setAttribute("aria-label", "Expand playback controls");
+  expandPillEl.hidden = true;
+
+  const expandSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  expandSvg.setAttribute("class", "tv-dock-expand-icon");
+  expandSvg.setAttribute("viewBox", "0 0 24 24");
+  expandSvg.setAttribute("width", "14");
+  expandSvg.setAttribute("height", "14");
+  expandSvg.setAttribute("fill", "none");
+  expandSvg.setAttribute("stroke", "currentColor");
+  expandSvg.setAttribute("stroke-width", "2.5");
+  expandSvg.setAttribute("stroke-linecap", "round");
+  expandSvg.setAttribute("stroke-linejoin", "round");
+
+  const expandPolyline = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+  expandPolyline.setAttribute("points", "18 15 12 9 6 15"); // Up chevron
+  expandSvg.appendChild(expandPolyline);
+
+  const expandLabel = span("tv-dock-expand-label", "Controls · Stage 1 of 1");
+  expandPillEl.append(expandSvg, expandLabel);
+
+  function updateExpandPillLabel(): void {
+    const count = state.manifest.treatmentStages.length || 1;
+    const targetIdx = pendingStageIndex ?? state.currentIndex;
+    const current = state.manifest.treatmentStages[targetIdx];
+    const actualNumber = current?.stageNumber ?? targetIdx + 1;
+    expandLabel.textContent = `Controls · Stage ${actualNumber} of ${count}`;
+  }
+
+  function setDockMinimized(minimized: boolean): void {
+    isDockMinimized = minimized;
+    bottomDockEl.classList.toggle("tv-bottom-dock--hidden", isDockMinimized);
+    bottomDockEl.hidden = isDockMinimized;
+    expandPillEl.hidden = !isDockMinimized;
+    if (isDockMinimized) {
+      updateExpandPillLabel();
+    }
+  }
+
+  function toggleDockMinimized(): void {
+    setDockMinimized(!isDockMinimized);
+  }
+
+  minimizeBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setDockMinimized(true);
+  });
+
+  expandPillEl.addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setDockMinimized(false);
+  });
+
   const dockToolsEl = div("tv-dock-tools", [
+    minimizeBtn,
     beforeAfterPillEl,
     contactsBtn,
     overlayBtn,
@@ -951,6 +1042,7 @@ export function createTreatmentApp(
     notesDrawerEl,
     cameraDockEl,
     bottomDockEl,
+    expandPillEl,
     loadingEl,
     hudEl,
     ambiguityBannerEl,
@@ -1047,6 +1139,9 @@ export function createTreatmentApp(
     } else if (e.key === " " || e.key === "Spacebar") {
       e.preventDefault();
       togglePlay();
+    } else if (e.key === "m" || e.key === "M") {
+      e.preventDefault();
+      toggleDockMinimized();
     }
   };
   window.addEventListener("keydown", onKeyDown);
@@ -2815,6 +2910,10 @@ export function createTreatmentApp(
       stageLabel.textContent = `Stage — / ${count}`;
     }
 
+    if (isDockMinimized) {
+      updateExpandPillLabel();
+    }
+
     sliderEl.value = String(targetIdx + 1);
     sliderEl.disabled = Boolean(state.activeTemplateStage);
 
@@ -3177,6 +3276,9 @@ export function createTreatmentApp(
     cyclePlaybackSpeed,
     setPlaybackSpeed,
     getPlaybackSpeed,
+    toggleDockMinimized,
+    setDockMinimized,
+    isDockMinimized: () => isDockMinimized,
     getState: () => ({ ...state }),
   };
 }

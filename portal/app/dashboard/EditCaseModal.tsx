@@ -385,7 +385,8 @@ export default function EditCaseModal({
       );
 
       if (result.ok && result.caseId) {
-        const archType = result.archType || (willHaveUpper && willHaveLower ? "both" : willHaveUpper ? "upper" : "lower");
+        const willBeBoth = Boolean((result.hasUpper && result.hasLower) || (willHaveUpper && willHaveLower));
+        const archType = willBeBoth ? "both" : (result.archType || (willHaveUpper ? "upper" : "lower"));
         const cleanName = patientName.replace(/\s*\[(Upper|Lower|Dual)\]/i, "").trim();
         const dbName =
           archType === "upper"
@@ -393,6 +394,13 @@ export default function EditCaseModal({
             : archType === "lower"
             ? `${cleanName} [Lower]`
             : cleanName;
+
+        const resolvedUpperStages =
+          result.upperStages ??
+          (willHaveUpper ? (caseItem.upper_stages ?? caseItem.total_stages) : null);
+        const resolvedLowerStages =
+          result.lowerStages ??
+          (willHaveLower ? (caseItem.lower_stages ?? (result.totalStages ? 1 : null)) : null);
 
         const updatedCase: DentalCase = {
           ...caseItem,
@@ -403,15 +411,15 @@ export default function EditCaseModal({
           patient_age: resolvedAge,
           patient_sex: resolvedSex,
           total_stages: result.totalStages || caseItem.total_stages || 1,
-          upper_stages: result.upperStages ?? caseItem.upper_stages ?? null,
-          lower_stages: result.lowerStages ?? caseItem.lower_stages ?? null,
+          upper_stages: resolvedUpperStages,
+          lower_stages: resolvedLowerStages,
           doctor_notes: {
             ...(caseItem.doctor_notes || {}),
             aligner_counts: {
-              upper: result.upperStages ?? caseItem.upper_stages,
-              lower: result.lowerStages ?? caseItem.lower_stages,
-              total: result.totalAligners,
-              is_unequal: result.isUnequal,
+              upper: resolvedUpperStages ?? undefined,
+              lower: resolvedLowerStages ?? undefined,
+              total: result.totalAligners || ((resolvedUpperStages || 0) + (resolvedLowerStages || 0)),
+              is_unequal: result.isUnequal ?? (Boolean(resolvedUpperStages && resolvedLowerStages && resolvedUpperStages !== resolvedLowerStages)),
             },
           },
           updated_at: new Date().toISOString(),

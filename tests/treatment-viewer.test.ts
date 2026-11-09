@@ -1194,5 +1194,75 @@ describe("Treatment Viewer Application", () => {
 
       app.dispose();
     });
+
+    it("toggles play control bar minimise and expand states seamlessly", () => {
+      const app = createTreatmentApp(root, {
+        createViewport: () => fakeViewport,
+        autoLoad: false,
+      });
+
+      const bottomDock = root.querySelector<HTMLDivElement>(".tv-bottom-dock");
+      const dockTools = root.querySelector<HTMLDivElement>(".tv-dock-tools");
+      const minimizeBtn = root.querySelector<HTMLButtonElement>(".tv-dock-minimize-btn");
+      const beforeAfterPill = root.querySelector<HTMLDivElement>(".tv-ba-pill");
+      const expandPill = root.querySelector<HTMLButtonElement>(".tv-dock-expand-pill");
+
+      expect(bottomDock).not.toBeNull();
+      expect(dockTools).not.toBeNull();
+      expect(minimizeBtn).not.toBeNull();
+      expect(beforeAfterPill).not.toBeNull();
+      expect(expandPill).not.toBeNull();
+
+      // Verify minimizeBtn is placed on the LEFT of the Before/After toggle pill
+      expect(dockTools?.firstElementChild).toBe(minimizeBtn);
+      expect(minimizeBtn?.nextElementSibling).toBe(beforeAfterPill);
+
+      // Verify minimizeBtn contains ONLY the arrow icon and no text
+      expect(minimizeBtn?.querySelector(".tv-dock-minimize-icon")).not.toBeNull();
+      expect(minimizeBtn?.textContent?.trim()).toBe("");
+
+      // Initially expanded
+      expect(app.isDockMinimized()).toBe(false);
+      expect(bottomDock?.classList.contains("tv-bottom-dock--hidden")).toBe(false);
+      expect(bottomDock?.hidden).toBe(false);
+      expect(expandPill?.hidden).toBe(true);
+
+      // Click minimizeBtn to minimise
+      minimizeBtn?.click();
+      expect(app.isDockMinimized()).toBe(true);
+      expect(bottomDock?.classList.contains("tv-bottom-dock--hidden")).toBe(true);
+      expect(bottomDock?.hidden).toBe(true);
+      expect(expandPill?.hidden).toBe(false);
+      expect(expandPill?.textContent).toContain("Controls · Stage");
+
+      // Click expandPill to expand back
+      expandPill?.click();
+      expect(app.isDockMinimized()).toBe(false);
+      expect(bottomDock?.classList.contains("tv-bottom-dock--hidden")).toBe(false);
+      expect(bottomDock?.hidden).toBe(false);
+      expect(expandPill?.hidden).toBe(true);
+
+      // Test programmatic API
+      app.setDockMinimized(true);
+      expect(app.isDockMinimized()).toBe(true);
+      expect(bottomDock?.hidden).toBe(true);
+      expect(expandPill?.hidden).toBe(false);
+
+      app.toggleDockMinimized();
+      expect(app.isDockMinimized()).toBe(false);
+      expect(bottomDock?.hidden).toBe(false);
+      expect(expandPill?.hidden).toBe(true);
+
+      // Test 'm' key shortcut
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "m" }));
+      expect(app.isDockMinimized()).toBe(true);
+      expect(bottomDock?.hidden).toBe(true);
+
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "M" }));
+      expect(app.isDockMinimized()).toBe(false);
+      expect(bottomDock?.hidden).toBe(false);
+
+      app.dispose();
+    });
   });
 });

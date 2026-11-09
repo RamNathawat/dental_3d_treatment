@@ -14,10 +14,33 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { BufferAttribute, type BufferGeometry, type Mesh } from "three";
 import { get as idbGet, set as idbSet, keys as idbKeys, delMany as idbDelMany, createStore } from "idb-keyval";
+import * as fflate from "fflate";
 import { computeAnatomicalColors } from "../viewer/three-viewport";
 import { capPlanarOpenings } from "../viewer/cap-planar";
 import { computeToothCentroids } from "./tooth-data";
 import type { ArchAsset, StageDefinition } from "./stage-manifest";
+
+/**
+ * Transparently decompresses Gzipped buffers (magic bytes 0x1F, 0x8B).
+ * If the buffer is uncompressed (raw GLB or STL), it is returned untouched.
+ */
+export function decompressIfGzipped(buf: ArrayBuffer): ArrayBuffer {
+  if (buf && buf.byteLength >= 2) {
+    const u8 = new Uint8Array(buf);
+    if (u8[0] === 0x1f && u8[1] === 0x8b) {
+      try {
+        const decomp = fflate.gunzipSync(u8);
+        return decomp.buffer.slice(
+          decomp.byteOffset,
+          decomp.byteOffset + decomp.byteLength,
+        ) as ArrayBuffer;
+      } catch (err) {
+        console.warn("Gzip decompression error, using raw buffer:", err);
+      }
+    }
+  }
+  return buf;
+}
 
 const isTestEnv =
   (typeof process !== "undefined" &&
@@ -261,11 +284,11 @@ export async function loadStageModels(
         if (typeof upper === "object" && "url" in upper && upper.url) {
           rawGlbCache.set(upper.url, lastKnownValidUpperBuffer);
         }
-      } else if (lowerResult && lowerResult.ok) {
+      } else {
         const fallback = await probePreviousArchBuffer(upper, signal);
         if (fallback) {
           console.info(
-            `Upper jaw model not found for this stage (upper arch reached final stage at ${fallback.stageNum}). Holding upper arch at stage ${fallback.stageNum}.`,
+            `Upper jaw model not found for this stage (holding upper arch at stage ${fallback.stageNum}).`,
           );
           finalUpperBuffer = fallback.buffer;
           lastKnownValidUpperBuffer = fallback.buffer;
@@ -273,11 +296,11 @@ export async function loadStageModels(
           if (typeof upper === "object" && "url" in upper && upper.url) {
             rawGlbCache.set(upper.url, fallback.buffer);
           }
+        } else if (lowerResult && lowerResult.ok) {
+          // Dual-arch case where only lower is available at this stage
         } else {
           return { ok: false, reason: `Upper jaw: ${upperResult.reason}` };
         }
-      } else {
-        return { ok: false, reason: `Upper jaw: ${upperResult.reason}` };
       }
     }
 
@@ -290,11 +313,11 @@ export async function loadStageModels(
         if (typeof lower === "object" && "url" in lower && lower.url) {
           rawGlbCache.set(lower.url, lastKnownValidLowerBuffer);
         }
-      } else if (upperResult && upperResult.ok) {
+      } else {
         const fallback = await probePreviousArchBuffer(lower, signal);
         if (fallback) {
           console.info(
-            `Lower jaw model not found for this stage (lower arch reached final stage at ${fallback.stageNum}). Holding lower arch at stage ${fallback.stageNum}.`,
+            `Lower jaw model not found for this stage (holding lower arch at stage ${fallback.stageNum}).`,
           );
           finalLowerBuffer = fallback.buffer;
           lastKnownValidLowerBuffer = fallback.buffer;
@@ -302,11 +325,11 @@ export async function loadStageModels(
           if (typeof lower === "object" && "url" in lower && lower.url) {
             rawGlbCache.set(lower.url, fallback.buffer);
           }
+        } else if (upperResult && upperResult.ok) {
+          // Dual-arch case where only upper is available at this stage
         } else {
           return { ok: false, reason: `Lower jaw: ${lowerResult.reason}` };
         }
-      } else {
-        return { ok: false, reason: `Lower jaw: ${lowerResult.reason}` };
       }
     }
 
@@ -377,11 +400,11 @@ async function resolveStlBuffer(
     return { ok: false, reason: "Load cancelled" };
   }
 
-  // 1. In-memory File or Blob
+  // 1. In-memory File, Blob, or ArrayBuffer
   if (source instanceof Blob) {
     try {
       const buffer = await source.arrayBuffer();
-      return { ok: true, buffer };
+      return { ok: true, buffer: decompressIfGzipped(buffer) };
     } catch (err) {
       return {
         ok: false,
@@ -390,8 +413,25 @@ async function resolveStlBuffer(
     }
   }
 
+  if (source instanceof ArrayBuffer) {
+    return { ok: true, buffer: decompressIfGzipped(source) };
+  }
+
+  if (source instanceof Uint8Array) {
+    const raw = source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength) as ArrayBuffer;
+    return { ok: true, buffer: decompressIfGzipped(raw) };
+  }
+
   // 2. ArchAsset object
   if (typeof source === "object" && source !== null && "filename" in source) {
+    if ((source as any).buffer) {
+      const raw = (source as any).buffer;
+      if (raw instanceof ArrayBuffer) return { ok: true, buffer: decompressIfGzipped(raw) };
+      if (raw instanceof Uint8Array) {
+        const b = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
+        return { ok: true, buffer: decompressIfGzipped(b) };
+      }
+    }
     if (source.file) {
       return resolveStlBuffer(source.file, archLabel, signal);
     }
@@ -415,11 +455,27 @@ async function resolveStlBuffer(
   };
 }
 
-/** Check if array buffer is GLB format by magic number ('glTF' = 0x46546c67) */
+/** Check if array buffer is GLB format by magic number ('glTF' = 0x46546c67), supporting gzipped GLBs */
 export function isGlb(buf: ArrayBuffer): boolean {
   if (buf.byteLength < 4) return false;
   const view = new DataView(buf);
-  return view.getUint32(0, true) === 0x46546c67;
+  if (view.getUint32(0, true) === 0x46546c67) return true;
+  // If gzipped, check if uncompressed content starts with 'glTF'
+  if (buf.byteLength >= 2) {
+    const u8 = new Uint8Array(buf);
+    if (u8[0] === 0x1f && u8[1] === 0x8b) {
+      try {
+        const decomp = fflate.gunzipSync(u8);
+        if (decomp.byteLength >= 4) {
+          const dv = new DataView(decomp.buffer, decomp.byteOffset, decomp.byteLength);
+          return dv.getUint32(0, true) === 0x46546c67;
+        }
+      } catch {
+        return false;
+      }
+    }
+  }
+  return false;
 }
 
 /** Converts a binary GLB buffer into a standard binary STL ArrayBuffer. */
@@ -688,6 +744,27 @@ export interface ExtractedGlbGeometries {
   readonly hasAttachments: boolean;
 }
 
+/**
+ * Ensures any color attribute is converted to a clean standard Float32Array (normalized: false).
+ * Prevents BufferGeometryUtils.mergeGeometries from throwing gpuType/normalized attribute mismatches.
+ */
+export function sanitizeColorAttribute(geom: BufferGeometry): void {
+  const col = geom.getAttribute("color") as BufferAttribute | undefined;
+  if (!col) return;
+  if (!(col.array instanceof Float32Array) || col.normalized || col.gpuType !== undefined) {
+    const count = col.count;
+    const itemSize = col.itemSize;
+    const f32 = new Float32Array(count * itemSize);
+    const src = col.array;
+    const isNorm = col.normalized;
+    for (let i = 0; i < src.length; i++) {
+      f32[i] = isNorm ? (src[i]! / 255) : src[i]!;
+    }
+    const cleanAttr = new BufferAttribute(f32, itemSize, false);
+    geom.setAttribute("color", cleanAttr);
+  }
+}
+
 function safeMergeGeometries(g1: BufferGeometry, g2: BufferGeometry): BufferGeometry {
   const c1 = g1.clone();
   const c2 = g2.clone();
@@ -703,6 +780,28 @@ function safeMergeGeometries(g1: BufferGeometry, g2: BufferGeometry): BufferGeom
 
   if (!b1.getAttribute("normal")) b1.computeVertexNormals();
   if (!b2.getAttribute("normal")) b2.computeVertexNormals();
+
+  sanitizeColorAttribute(b1);
+  sanitizeColorAttribute(b2);
+
+  // If one geometry has color and the other does not, harmonize with warm ivory
+  const col1 = b1.getAttribute("color");
+  const col2 = b2.getAttribute("color");
+  if (col1 && !col2) {
+    const count = b2.getAttribute("position")?.count || 0;
+    const f32 = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      f32[i * 3] = 0.82; f32[i * 3 + 1] = 0.76; f32[i * 3 + 2] = 0.68;
+    }
+    b2.setAttribute("color", new BufferAttribute(f32, 3, false));
+  } else if (!col1 && col2) {
+    const count = b1.getAttribute("position")?.count || 0;
+    const f32 = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      f32[i * 3] = 0.82; f32[i * 3 + 1] = 0.76; f32[i * 3 + 2] = 0.68;
+    }
+    b1.setAttribute("color", new BufferAttribute(f32, 3, false));
+  }
 
   for (const name of Object.keys(b1.attributes)) {
     if (name !== "position" && name !== "normal" && name !== "color") {
@@ -724,8 +823,9 @@ function safeMergeGeometries(g1: BufferGeometry, g2: BufferGeometry): BufferGeom
 export async function extractGeometriesFromGlb(
   glbBuffer: ArrayBuffer,
 ): Promise<ExtractedGlbGeometries | null> {
+  const decompressedGlb = decompressIfGzipped(glbBuffer);
   const gltfLoader = new GLTFLoader();
-  const gltf = await gltfLoader.parseAsync(glbBuffer, "");
+  const gltf = await gltfLoader.parseAsync(decompressedGlb, "");
   const baseGeoms: BufferGeometry[] = [];
   const attGeoms: BufferGeometry[] = [];
 
@@ -735,6 +835,7 @@ export async function extractGeometriesFromGlb(
       const m = child as Mesh;
       const g = m.geometry.clone();
       g.applyMatrix4(m.matrixWorld);
+      sanitizeColorAttribute(g);
       const name = (child.name || "").toLowerCase();
       if (name.includes("attachment")) {
         attGeoms.push(g);
@@ -745,6 +846,9 @@ export async function extractGeometriesFromGlb(
   });
 
   if (baseGeoms.length === 0 && attGeoms.length === 0) return null;
+
+  baseGeoms.forEach(sanitizeColorAttribute);
+  attGeoms.forEach(sanitizeColorAttribute);
 
   if (attGeoms.length > 0) {
     const baseGeom =
@@ -844,12 +948,13 @@ async function fetchStl(
       try {
         const idbCached = await idbGet<ArrayBuffer>(url, modelStore);
         if (idbCached && idbCached.byteLength > 0) {
-          bufferCache.set(url, idbCached);
-          if (isGlb(idbCached)) {
-            rawGlbCache.set(url, idbCached);
+          const decompressed = decompressIfGzipped(idbCached);
+          bufferCache.set(url, decompressed);
+          if (isGlb(decompressed)) {
+            rawGlbCache.set(url, decompressed);
           }
           reportDownloadProgress(url, idbCached.byteLength, idbCached.byteLength, true);
-          return { ok: true, buffer: idbCached };
+          return { ok: true, buffer: decompressed };
         }
       } catch {
         // Fall through to network fetch if IndexedDB read fails
@@ -902,19 +1007,33 @@ async function fetchStl(
         reportDownloadProgress(url, buffer.byteLength, total || buffer.byteLength, true);
       }
 
-      if (isGlb(buffer)) {
-        rawGlbCache.set(url, buffer);
-      }
-      bufferCache.set(url, buffer);
-
-      // Save to IndexedDB persistently for subsequent instant loads
+      // Save raw compressed buffer in IndexedDB to save client disk storage
       if (modelStore) {
-        idbSet(url, buffer, modelStore).catch((e) => {
-          console.warn("Could not cache model in IndexedDB:", e);
+        idbSet(url, buffer, modelStore).catch(async (e) => {
+          const isQuota = e && (e.name === "QuotaExceededError" || (e as any).code === 22);
+          if (isQuota) {
+            // Browser IndexedDB storage quota reached (common in Incognito mode or low disk space).
+            // Evict oldest keys to free quota without disrupting the viewer
+            try {
+              const keys = await idbKeys<string>(modelStore);
+              if (keys.length > 10) {
+                await idbDelMany(keys.slice(0, 10), modelStore);
+              }
+            } catch {
+              // Silently ignore eviction errors
+            }
+          }
         });
       }
 
-      return { ok: true, buffer };
+      const decompressed = decompressIfGzipped(buffer);
+
+      if (isGlb(decompressed)) {
+        rawGlbCache.set(url, decompressed);
+      }
+      bufferCache.set(url, decompressed);
+
+      return { ok: true, buffer: decompressed };
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") throw error;
       return {
