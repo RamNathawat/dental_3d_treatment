@@ -192,12 +192,21 @@ export async function initTreatmentViewer(): Promise<void> {
             : {};
 
         // Milestone 3: Access Control & Expiration Validation
+        let localCache: any = null;
+        if (typeof window !== "undefined" && caseId) {
+          try {
+            const raw = localStorage.getItem(`dental_link_access_${caseId}`);
+            if (raw) localCache = JSON.parse(raw);
+          } catch {}
+        }
+
         const isRevoked = Boolean(
           caseRecord.is_revoked === true ||
             caseRecord.is_revoked === "true" ||
             caseRecord.status === "revoked" ||
             notesObj?.link_access?.is_revoked === true ||
-            notesObj?.link_access?.is_revoked === "true"
+            notesObj?.link_access?.is_revoked === "true" ||
+            localCache?.isRevoked === true
         );
         if (isRevoked) {
           showSecurityGateState({
@@ -212,6 +221,7 @@ export async function initTreatmentViewer(): Promise<void> {
         const expiresAtStr =
           caseRecord.expires_at ??
           notesObj?.link_access?.expires_at ??
+          localCache?.expiresAt ??
           null;
         if (expiresAtStr) {
           const expiresAtTime = new Date(expiresAtStr).getTime();

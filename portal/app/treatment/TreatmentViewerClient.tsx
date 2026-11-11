@@ -83,13 +83,22 @@ export default function TreatmentViewerClient() {
                 ? caseRecord.doctor_notes
                 : {};
 
+            let localCache: any = null;
+            if (typeof window !== "undefined" && caseRecord.id) {
+              try {
+                const raw = localStorage.getItem(`dental_link_access_${caseRecord.id}`);
+                if (raw) localCache = JSON.parse(raw);
+              } catch {}
+            }
+
             // 1. Check Revocation status
             const isRevoked = Boolean(
               caseRecord.is_revoked === true ||
                 caseRecord.is_revoked === "true" ||
                 caseRecord.status === "revoked" ||
                 notesObj?.link_access?.is_revoked === true ||
-                notesObj?.link_access?.is_revoked === "true",
+                notesObj?.link_access?.is_revoked === "true" ||
+                localCache?.isRevoked === true,
             );
 
             if (isRevoked) {
@@ -107,6 +116,7 @@ export default function TreatmentViewerClient() {
             const expiresAtStr =
               caseRecord.expires_at ??
               notesObj?.link_access?.expires_at ??
+              localCache?.expiresAt ??
               null;
 
             if (expiresAtStr) {
@@ -160,7 +170,7 @@ export default function TreatmentViewerClient() {
       } else {
         const script = document.createElement("script");
         script.type = "module";
-        script.src = `/assets/treatment-main-CQsum08h.js?t=${Date.now()}`;
+        script.src = `/assets/treatment-main-DV822zV-.js?t=${Date.now()}`;
         document.body.appendChild(script);
       }
     }
