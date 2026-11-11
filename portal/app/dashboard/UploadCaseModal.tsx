@@ -411,6 +411,8 @@ export default function UploadCaseModal({
         total_stages: result.totalStages || Math.max(upperMeta?.totalStages || 1, lowerMeta?.totalStages || 1),
         upper_stages: result.upperStages ?? (archType === "lower" ? 0 : upperMeta?.totalStages || null),
         lower_stages: result.lowerStages ?? (archType === "upper" ? 0 : lowerMeta?.totalStages || null),
+        expires_at: null,
+        is_revoked: false,
         doctor_notes: {
           aligner_counts: {
             upper: result.upperStages,

@@ -48,6 +48,84 @@ function showEmptyState(
   `;
 }
 
+function showSecurityGateState(opts: {
+  type: "revoked" | "expired";
+  patientName: string;
+  clinicName?: string | null;
+  clinicEmail?: string | null;
+  expiredDate?: Date | null;
+}) {
+  const root = getRoot();
+  if (!root) return;
+
+  const isRevoked = opts.type === "revoked";
+  const title = isRevoked ? "Link Access Revoked" : "Treatment Link Expired";
+  const iconSvg = isRevoked
+    ? `<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#f43f5e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        <line x1="12" y1="15" x2="12" y2="17"/>
+      </svg>`
+    : `<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <polyline points="12 6 12 12 16 14"/>
+      </svg>`;
+
+  const badgeBg = isRevoked ? "rgba(244, 63, 94, 0.12)" : "rgba(245, 158, 11, 0.12)";
+  const badgeBorder = isRevoked ? "rgba(244, 63, 94, 0.3)" : "rgba(245, 158, 11, 0.3)";
+  const badgeShadow = isRevoked ? "rgba(244, 63, 94, 0.2)" : "rgba(245, 158, 11, 0.2)";
+
+  const dateFormatted = opts.expiredDate
+    ? opts.expiredDate.toLocaleDateString(undefined, {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : "its scheduled duration";
+
+  const message = isRevoked
+    ? "Access to this 3D treatment progression plan has been revoked by the clinic or doctor. For security and data privacy, this link is no longer accessible."
+    : `This shared treatment plan link expired on ${dateFormatted}. Treatment progression links are time-limited for patient privacy.`;
+
+  const clinicName = opts.clinicName ? opts.clinicName : "your clinic or treating doctor";
+  const contactEmail = opts.clinicEmail ? opts.clinicEmail.trim() : null;
+
+  root.innerHTML = `
+    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; width: 100vw; background: radial-gradient(circle at 50% 28%, #161b26 0%, #090c13 100%); color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center; padding: 24px; box-sizing: border-box;">
+      <div style="width: 72px; height: 72px; border-radius: 20px; background: ${badgeBg}; border: 1px solid ${badgeBorder}; display: flex; align-items: center; justify-content: center; margin-bottom: 24px; box-shadow: 0 0 35px ${badgeShadow};">
+        ${iconSvg}
+      </div>
+      <h1 style="font-size: 24px; font-weight: 700; margin: 0 0 12px 0; color: #ffffff; letter-spacing: -0.02em;">${title}</h1>
+      <p style="font-size: 14px; line-height: 1.6; color: #94a3b8; max-width: 480px; margin: 0 0 28px 0;">${message}</p>
+      
+      <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px; padding: 18px 24px; max-width: 420px; width: 100%; margin-bottom: 24px; box-sizing: border-box;">
+        <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; color: #64748b; margin-bottom: 6px;">Next Step</div>
+        <div style="font-size: 14px; color: #e2e8f0; font-weight: 500; margin-bottom: ${contactEmail ? "14px" : "0"};">
+          Please contact <strong style="color: #ffd166;">${clinicName}</strong> to request an updated or extended link.
+        </div>
+        ${
+          contactEmail
+            ? `<a href="mailto:${contactEmail}?subject=${encodeURIComponent(
+                `[3D Treatment Plan] Request New Link - ${opts.patientName}`,
+              )}&body=${encodeURIComponent(
+                `Hello,\n\nThe 3D progression link for ${opts.patientName} has expired or is inactive. Could you please generate and send a new link?\n\nThank you!`,
+              )}" style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: #38bdf8; text-decoration: none; font-weight: 500; background: rgba(56, 189, 248, 0.1); padding: 8px 16px; border-radius: 8px; border: 1px solid rgba(56, 189, 248, 0.25);">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+                Email Clinic: ${contactEmail}
+              </a>`
+            : ""
+        }
+      </div>
+
+      <a href="/dashboard" style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 10px; background: rgba(255, 255, 255, 0.08); color: #cbd5e1; text-decoration: none; font-size: 13px; font-weight: 500; border: 1px solid rgba(255, 255, 255, 0.12); transition: all 0.15s ease;">
+        Clinic Dashboard Login
+      </a>
+    </div>
+  `;
+}
+
 export async function initTreatmentViewer(): Promise<void> {
   // Dispose any existing viewer instance before initializing a new one
   if (typeof window !== "undefined" && window.__dentalTreatmentApp) {
@@ -81,9 +159,12 @@ export async function initTreatmentViewer(): Promise<void> {
     const res = await fetch(
       `${supabaseUrl}/rest/v1/cases?share_token=eq.${encodeURIComponent(shareToken)}&select=*`,
       {
+        cache: "no-store",
         headers: {
           apikey: supabaseKey,
           Authorization: `Bearer ${supabaseKey}`,
+          "Cache-Control": "no-cache",
+          Pragma: "no-cache",
         },
       },
     );
@@ -95,6 +176,56 @@ export async function initTreatmentViewer(): Promise<void> {
         const totalStages = caseRecord.total_stages || 0;
         const patientName = caseRecord.patient_name || "Patient";
         const caseId = caseRecord.id;
+
+        // Parse doctor_notes if string or object
+        const notesObj =
+          typeof caseRecord.doctor_notes === "string"
+            ? (() => {
+                try {
+                  return JSON.parse(caseRecord.doctor_notes);
+                } catch {
+                  return {};
+                }
+              })()
+            : caseRecord.doctor_notes && typeof caseRecord.doctor_notes === "object"
+            ? caseRecord.doctor_notes
+            : {};
+
+        // Milestone 3: Access Control & Expiration Validation
+        const isRevoked = Boolean(
+          caseRecord.is_revoked === true ||
+            caseRecord.is_revoked === "true" ||
+            caseRecord.status === "revoked" ||
+            notesObj?.link_access?.is_revoked === true ||
+            notesObj?.link_access?.is_revoked === "true"
+        );
+        if (isRevoked) {
+          showSecurityGateState({
+            type: "revoked",
+            patientName,
+            clinicName: caseRecord.clinic_name,
+            clinicEmail: caseRecord.clinic_email,
+          });
+          return;
+        }
+
+        const expiresAtStr =
+          caseRecord.expires_at ??
+          notesObj?.link_access?.expires_at ??
+          null;
+        if (expiresAtStr) {
+          const expiresAtTime = new Date(expiresAtStr).getTime();
+          if (!isNaN(expiresAtTime) && expiresAtTime < Date.now()) {
+            showSecurityGateState({
+              type: "expired",
+              patientName,
+              clinicName: caseRecord.clinic_name,
+              clinicEmail: caseRecord.clinic_email,
+              expiredDate: new Date(expiresAtStr),
+            });
+            return;
+          }
+        }
 
         if (totalStages === 0) {
           showEmptyState(

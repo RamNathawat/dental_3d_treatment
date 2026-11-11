@@ -35,7 +35,8 @@ import EditNotesModal from "./EditNotesModal";
 import ShareModal from "./ShareModal";
 import EditCaseModal from "./EditCaseModal";
 import { getCaseTrayInfo } from "@/lib/case-tray-info";
-export { getCaseTrayInfo };
+import { getCaseLinkAccess } from "@/lib/link-access";
+export { getCaseTrayInfo, getCaseLinkAccess };
 
 interface DashboardClientProps {
   email: string;
@@ -62,6 +63,11 @@ export default function DashboardClient({
   const [archCountsMap, setArchCountsMap] = useState<
     Record<string, { upper: number; lower: number; total: number; isUnequal: boolean }>
   >({});
+  const [isMounted, setIsMounted] = useState<boolean>(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   const router = useRouter();
   const supabase = createClient();
@@ -246,6 +252,18 @@ export default function DashboardClient({
     setCases((prev) =>
       prev.map((c) => (c.id === updatedCase.id ? updatedCase : c))
     );
+    setSelectedShareCase((prev) =>
+      prev && prev.id === updatedCase.id ? updatedCase : prev,
+    );
+    setSelectedEditCase((prev) =>
+      prev && prev.id === updatedCase.id ? updatedCase : prev,
+    );
+    setSelectedNotesCase((prev) =>
+      prev && prev.id === updatedCase.id ? updatedCase : prev,
+    );
+    setSelectedIprCase((prev) =>
+      prev && prev.id === updatedCase.id ? updatedCase : prev,
+    );
   }
 
   function handleEmailUpdated(caseId: string, email: string) {
@@ -264,6 +282,7 @@ export default function DashboardClient({
       Boolean(c.patient_sex && c.patient_sex.toLowerCase().includes(q)) ||
       Boolean(c.patient_age && String(c.patient_age).includes(q));
     if (activeFilter === "all") return matchesSearch;
+    if (activeFilter === "ready") return matchesSearch && (c.status === "ready" || c.status === "revoked");
     return matchesSearch && c.status === activeFilter;
   });
 
@@ -467,7 +486,7 @@ export default function DashboardClient({
                     : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
                 }`}
               >
-                Ready ({cases.filter((c) => c.status === "ready").length})
+                Ready ({cases.filter((c) => c.status === "ready" || c.status === "revoked").length})
               </button>
             </div>
           </div>
@@ -516,6 +535,7 @@ export default function DashboardClient({
                 const maxWeeks = Math.round((stages * 14) / 7);
 
                 const trayInfo = getCaseTrayInfo(item, archCountsMap[item.id]);
+                const linkAccess = getCaseLinkAccess(item, { readLocalCache: isMounted });
                 const displayName = item.patient_name.replace(/\s*\[(Upper|Lower|Dual)\]/i, "").trim();
 
                 return (
@@ -565,7 +585,7 @@ export default function DashboardClient({
                                   <span className="text-slate-300 dark:text-slate-700">•</span>
                                 </>
                               )}
-                              <span>Created {dateStr}</span>
+                              <span suppressHydrationWarning>Created {dateStr}</span>
                             </div>
                           </div>
                         </div>
@@ -594,6 +614,17 @@ export default function DashboardClient({
                             />
                             {trayInfo.archBadgeText}
                           </span>
+                          {/* Milestone 3: Live Link Status & Expiry Badge */}
+                          <button
+                            type="button"
+                            suppressHydrationWarning
+                            onClick={() => setSelectedShareCase(item)}
+                            title={`Link Access: ${linkAccess.relativeTimeText}. Click to configure expiry or revoke access.`}
+                            className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1.5 border transition-all hover:scale-105 active:scale-95 ${linkAccess.badgeColorClass}`}
+                          >
+                            <span suppressHydrationWarning className={`w-1.5 h-1.5 rounded-full ${linkAccess.badgeDotClass}`} />
+                            <span suppressHydrationWarning>{linkAccess.badgeLabel}</span>
+                          </button>
                           <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200/70 dark:border-emerald-800/50 inline-flex items-center gap-1.5">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                             Ready
@@ -775,6 +806,7 @@ export default function DashboardClient({
           doctorName={email !== "Doctor" ? email.split("@")[0] : undefined}
           allCases={cases}
           onEmailUpdated={handleEmailUpdated}
+          onCaseUpdated={handleCaseUpdated}
           onToast={showToast}
         />
       )}

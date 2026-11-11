@@ -18,8 +18,10 @@ export interface DentalCase {
   total_stages: number;
   upper_stages?: number | null;
   lower_stages?: number | null;
+  expires_at?: string | null;
+  is_revoked?: boolean | null;
   share_token: string;
-  status: "ready" | "processing" | "archived";
+  status: "ready" | "processing" | "archived" | "revoked";
   created_at: string;
   updated_at: string;
 }
