@@ -41,6 +41,7 @@ import EditCaseModal from "./EditCaseModal";
 import PracticeProfileModal from "./PracticeProfileModal";
 import DoctorsView from "./DoctorsView";
 import ClinicsView from "./ClinicsView";
+import SettingsView from "./SettingsView";
 import { PracticeProfile, DoctorRecord, ClinicRecord } from "@/lib/practice-types";
 import {
   fetchPracticeProfile,
@@ -77,7 +78,7 @@ export default function DashboardClient({
     Record<string, { upper: number; lower: number; total: number; isUnequal: boolean }>
   >({});
   const [isMounted, setIsMounted] = useState<boolean>(false);
-  const [currentTab, setCurrentTab] = useState<"cases" | "doctors" | "clinics">("cases");
+  const [currentTab, setCurrentTab] = useState<"cases" | "doctors" | "clinics" | "settings">("cases");
   const [practiceProfile, setPracticeProfile] = useState<PracticeProfile | null>(null);
   const [doctors, setDoctors] = useState<DoctorRecord[]>([]);
   const [clinics, setClinics] = useState<ClinicRecord[]>([]);
@@ -373,10 +374,7 @@ export default function DashboardClient({
           <div className="w-full">
             {practiceProfile?.logoUrl ? (
               <div
-                onClick={() => {
-                  setIsOnboarding(false);
-                  setIsProfileModalOpen(true);
-                }}
+                onClick={() => setCurrentTab("settings")}
                 title="Practice & Brand Settings"
                 className="w-full flex items-center justify-start cursor-pointer group"
               >
@@ -478,17 +476,17 @@ export default function DashboardClient({
         {/* Sidebar Footer: Doctor Profile, Brand Settings & Sign Out */}
         <div className="pt-4 border-t border-slate-100 dark:border-slate-800/80 space-y-2">
           <button
-            onClick={() => {
-              setIsOnboarding(false);
-              setIsProfileModalOpen(true);
-            }}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
+            onClick={() => setCurrentTab("settings")}
+            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+              currentTab === "settings"
+                ? "bg-slate-100 dark:bg-slate-800/80 text-slate-900 dark:text-white shadow-2xs"
+                : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/40 hover:text-slate-900 dark:hover:text-slate-200"
+            }`}
           >
-            <div className="flex items-center gap-2">
-              <Settings className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
-              <span>Practice & Brand Settings</span>
+            <div className="flex items-center gap-2.5">
+              <Settings className={`w-4 h-4 ${currentTab === "settings" ? "text-slate-900 dark:text-[#ffd166]" : "text-slate-400"}`} />
+              <span>Settings</span>
             </div>
-            <span className="text-[10px] text-amber-600 dark:text-[#ffd166] font-semibold">Edit</span>
           </button>
 
           <div className="flex items-center justify-between pt-1">
@@ -549,12 +547,13 @@ export default function DashboardClient({
 
             <div className="flex items-center gap-1.5">
               <button
-                onClick={() => {
-                  setIsOnboarding(false);
-                  setIsProfileModalOpen(true);
-                }}
-                title="Practice Settings"
-                className="w-8 h-8 rounded-lg flex items-center justify-center border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-[#131A26] text-slate-600 dark:text-slate-300"
+                onClick={() => setCurrentTab("settings")}
+                title="Settings"
+                className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-colors cursor-pointer ${
+                  currentTab === "settings"
+                    ? "border-amber-500 bg-amber-500/10 text-amber-500 dark:text-[#ffd166]"
+                    : "border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-[#131A26] text-slate-600 dark:text-slate-300"
+                }`}
               >
                 <Settings className="w-3.5 h-3.5" />
               </button>
@@ -620,7 +619,18 @@ export default function DashboardClient({
 
         {/* Content Container */}
         <div className="p-4 sm:p-6 lg:p-8 max-w-6xl w-full mx-auto space-y-7">
-          {currentTab === "doctors" ? (
+          {currentTab === "settings" ? (
+            <SettingsView
+              userId={userId}
+              initialProfile={practiceProfile}
+              userEmail={email}
+              onProfileSaved={(prof) => {
+                setPracticeProfile(prof);
+                showToast("Settings saved successfully");
+              }}
+              onToast={showToast}
+            />
+          ) : currentTab === "doctors" ? (
             <DoctorsView
               doctors={doctors}
               onDoctorsUpdated={setDoctors}

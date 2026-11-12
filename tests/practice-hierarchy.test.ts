@@ -136,4 +136,30 @@ describe("Milestone 3 - Phase 2: Practice Hierarchy Storage", () => {
     expect(retrieved[0]?.name).toBe("Dr. Ananya Roy");
     expect(retrieved[0]?.specialization).toBe("Orthodontist / MDS");
   });
+
+  it("updates practice profile with new branding and organization type", async () => {
+    const { savePracticeProfile } = await import("../portal/lib/practice-storage");
+
+    const updated = await savePracticeProfile(testUserId, {
+      firmType: "clinic",
+      firmName: "Sleek Smile Aligners",
+      brandName: "Sleek Smile",
+      logoUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      email: "contact@sleeksmile.com",
+      phone: "+91 99999 88888",
+      address: "MG Road, Bangalore",
+      website: "https://sleeksmile.com",
+    });
+
+    expect(updated.firmType).toBe("clinic");
+    expect(updated.firmName).toBe("Sleek Smile Aligners");
+    expect(updated.brandName).toBe("Sleek Smile");
+    expect(updated.logoUrl).toContain("data:image/png;base64");
+    expect(updated.website).toBe("https://sleeksmile.com");
+
+    const cached = getLocalPracticeProfile(testUserId);
+    expect(cached?.firmType).toBe("clinic");
+    expect(cached?.brandName).toBe("Sleek Smile");
+    expect(cached?.website).toBe("https://sleeksmile.com");
+  });
 });
