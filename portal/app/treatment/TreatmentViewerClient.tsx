@@ -170,7 +170,7 @@ export default function TreatmentViewerClient() {
       } else {
         const script = document.createElement("script");
         script.type = "module";
-        script.src = `/assets/treatment-main-D6duOs0o.js?t=${Date.now()}`;
+        script.src = `/assets/treatment-main-CxDVqBOL.js?t=${Date.now()}`;
         document.body.appendChild(script);
       }
     }
@@ -221,18 +221,22 @@ export default function TreatmentViewerClient() {
         <div className="max-w-md w-full flex flex-col items-center text-center animate-fadeIn">
           {/* Neutral Status Icon Badge */}
           <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center mb-6 border shadow-2xl transition-transform bg-amber-500/10 border-amber-500/30 text-amber-400 shadow-amber-500/20">
-            <Clock className="w-8 h-8 sm:w-10 sm:h-10" />
+            {isRevoked ? (
+              <AlertCircle className="w-8 h-8 sm:w-10 sm:h-10" />
+            ) : (
+              <Clock className="w-8 h-8 sm:w-10 sm:h-10" />
+            )}
           </div>
 
           {/* Heading */}
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white mb-3">
-            {isRevoked ? "Link No Longer Active" : "Treatment Link Expired"}
+            {isRevoked ? "Link Not Available" : "Treatment Link Expired"}
           </h1>
 
           {/* Explanation */}
           <p className="text-sm text-slate-400 leading-relaxed mb-6 max-w-sm">
             {isRevoked
-              ? "This 3D treatment preview is no longer available or the preview session has concluded. For patient privacy and data security, this link is no longer accessible."
+              ? "This link is currently not available. If you need access to your 3D treatment preview, please reach out to your dental clinic or care team."
               : `This shared treatment plan link expired on ${
                   gateState.expiredDateFormatted || "its scheduled date"
                 }. Treatment progression links are time-limited for patient privacy.`}
@@ -246,16 +250,16 @@ export default function TreatmentViewerClient() {
             <p className="text-sm text-slate-200 font-medium">
               Please contact{" "}
               <strong className="text-[#ffd166]">{clinicDisplayName}</strong> to
-              request an updated or extended link.
+              request an updated link.
             </p>
 
             {gateState.clinicEmail && (
               <div className="pt-1">
                 <a
                   href={`mailto:${gateState.clinicEmail}?subject=${encodeURIComponent(
-                    `[3D Treatment Plan] Request New Link - ${gateState.patientName}`,
+                    `[3D Treatment Plan] Request Link - ${gateState.patientName}`,
                   )}&body=${encodeURIComponent(
-                    `Hello,\n\nThe 3D progression link for ${gateState.patientName} is no longer active. Could you please generate and send a new link?\n\nThank you!`,
+                    `Hello,\n\nThe 3D progression link for ${gateState.patientName} is not available. Could you please provide an updated link?\n\nThank you!`,
                   )}`}
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/30 transition-colors shadow-2xs"
                 >

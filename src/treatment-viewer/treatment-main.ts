@@ -59,10 +59,11 @@ function showSecurityGateState(opts: {
   if (!root) return;
 
   const isRevoked = opts.type === "revoked";
-  const title = isRevoked ? "Link No Longer Active" : "Treatment Link Expired";
+  const title = isRevoked ? "Link Not Available" : "Treatment Link Expired";
   const iconSvg = `<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="10"/>
-        <polyline points="12 6 12 12 16 14"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <line x1="12" y1="16" x2="12.01" y2="16"/>
       </svg>`;
 
   const badgeBg = "rgba(245, 158, 11, 0.12)";
@@ -80,7 +81,7 @@ function showSecurityGateState(opts: {
     : "its scheduled duration";
 
   const message = isRevoked
-    ? "This 3D treatment preview is no longer available or the preview session has concluded. For patient privacy and data security, this link is no longer accessible."
+    ? "This link is currently not available. If you need access to your 3D treatment preview, please reach out to your dental clinic or care team."
     : `This shared treatment plan link expired on ${dateFormatted}. Treatment progression links are time-limited for patient privacy.`;
 
   const clinicName = opts.clinicName ? opts.clinicName : "your dental clinic or care team";
@@ -97,14 +98,14 @@ function showSecurityGateState(opts: {
       <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px; padding: 18px 24px; max-width: 420px; width: 100%; margin-bottom: 24px; box-sizing: border-box;">
         <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; color: #64748b; margin-bottom: 6px;">Next Step</div>
         <div style="font-size: 14px; color: #e2e8f0; font-weight: 500; margin-bottom: ${contactEmail ? "14px" : "0"};">
-          Please contact <strong style="color: #ffd166;">${clinicName}</strong> to request an updated or extended link.
+          Please contact <strong style="color: #ffd166;">${clinicName}</strong> to request an updated link.
         </div>
         ${
           contactEmail
             ? `<a href="mailto:${contactEmail}?subject=${encodeURIComponent(
-                `[3D Treatment Plan] Request New Link - ${opts.patientName}`,
+                `[3D Treatment Plan] Request Link - ${opts.patientName}`,
               )}&body=${encodeURIComponent(
-                `Hello,\n\nThe 3D progression link for ${opts.patientName} is no longer active. Could you please generate and send a new link?\n\nThank you!`,
+                `Hello,\n\nThe 3D progression link for ${opts.patientName} is not available. Could you please provide an updated link?\n\nThank you!`,
               )}" style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: #38bdf8; text-decoration: none; font-weight: 500; background: rgba(56, 189, 248, 0.1); padding: 8px 16px; border-radius: 8px; border: 1px solid rgba(56, 189, 248, 0.25);">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
                 Email Clinic: ${contactEmail}
