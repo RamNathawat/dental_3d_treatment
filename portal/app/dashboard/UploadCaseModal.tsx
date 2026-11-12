@@ -22,9 +22,10 @@ import {
   Sparkles,
   Phone,
   MapPin,
+  GraduationCap,
 } from "lucide-react";
 import { DoctorRecord, ClinicRecord } from "@/lib/practice-types";
-import { saveClinic } from "@/lib/practice-storage";
+import { saveClinic, saveDoctor } from "@/lib/practice-storage";
 import {
   getSavedClinicEmails,
   saveClinicEmail,
@@ -65,6 +66,7 @@ interface UploadCaseModalProps {
   isSoloDoctor?: boolean;
   defaultDoctorName?: string;
   onClinicCreated?: (newClinic: ClinicRecord) => void;
+  onDoctorCreated?: (newDoctor: DoctorRecord) => void;
 }
 
 export default function UploadCaseModal({
@@ -79,6 +81,7 @@ export default function UploadCaseModal({
   isSoloDoctor = false,
   defaultDoctorName = "",
   onClinicCreated,
+  onDoctorCreated,
 }: UploadCaseModalProps) {
   const [isRefinement, setIsRefinement] = useState(false);
   const [patientName, setPatientName] = useState("");
@@ -95,12 +98,31 @@ export default function UploadCaseModal({
   const [newClinicPhone, setNewClinicPhone] = useState("");
   const [newClinicAddress, setNewClinicAddress] = useState("");
   const [showNewClinicDetails, setShowNewClinicDetails] = useState(false);
+  const [newDoctorSpecialization, setNewDoctorSpecialization] = useState("");
+  const [newDoctorPhone, setNewDoctorPhone] = useState("");
+  const [newDoctorEmail, setNewDoctorEmail] = useState("");
+  const [showNewDoctorDetails, setShowNewDoctorDetails] = useState(false);
 
   const trimmedClinicName = clinicName.trim();
   const matchedExistingClinic = clinics.find(
     (c) => c.name.toLowerCase() === trimmedClinicName.toLowerCase()
   );
   const isNewClinic = Boolean(trimmedClinicName && !matchedExistingClinic);
+
+  const trimmedDoctorName = doctorName.trim();
+  const cleanDoctorName = trimmedDoctorName.replace(/^dr\.?\s+/i, "").toLowerCase();
+  const matchedExistingDoctor = doctors.find((d) => {
+    const existingClean = d.name.replace(/^dr\.?\s+/i, "").toLowerCase();
+    return (
+      d.name.toLowerCase() === trimmedDoctorName.toLowerCase() ||
+      existingClean === cleanDoctorName
+    );
+  });
+  const isNewDoctor = Boolean(
+    trimmedDoctorName &&
+    !matchedExistingDoctor &&
+    !(isSoloDoctor && defaultDoctorName && trimmedDoctorName.toLowerCase() === defaultDoctorName.toLowerCase())
+  );
 
   useEffect(() => {
     if (isSoloDoctor && defaultDoctorName && !doctorName) {
@@ -458,6 +480,26 @@ export default function UploadCaseModal({
           })
           .catch((err) => {
             console.warn("Could not auto-save new clinic:", err);
+          });
+      }
+
+      // Auto-provision new doctor to directory if it doesn't exist
+      if (isNewDoctor && trimmedDoctorName) {
+        const autoDoctorId = `DOC-${String(doctors.length + 1).padStart(2, "0")}`;
+        void saveDoctor(userId, {
+          name: trimmedDoctorName,
+          doctorId: autoDoctorId,
+          specialization: newDoctorSpecialization.trim() || undefined,
+          phone: newDoctorPhone.trim() || undefined,
+          email: newDoctorEmail.trim() || undefined,
+        })
+          .then((createdDoctor) => {
+            if (onDoctorCreated) {
+              onDoctorCreated(createdDoctor);
+            }
+          })
+          .catch((err) => {
+            console.warn("Could not auto-save new doctor:", err);
           });
       }
       const archType = result.archType || (upperFile && lowerFile ? "both" : upperFile ? "upper" : "lower");
@@ -904,6 +946,74 @@ export default function UploadCaseModal({
                         value={newClinicAddress}
                         onChange={(e) => setNewClinicAddress(e.target.value)}
                         placeholder="e.g. 124 MG Road, Bangalore"
+                        className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* New Doctor Auto-Save Card (Idea 4 Hybrid) */}
+            {isNewDoctor && (
+              <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-xs transition-all animate-fadeIn">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 text-amber-900 dark:text-[#ffd166] font-medium text-xs">
+                    <Sparkles className="w-4 h-4 text-amber-500 dark:text-[#ffd166] flex-shrink-0" />
+                    <span>
+                      New doctor <strong>&quot;{trimmedDoctorName}&quot;</strong> will be automatically saved to your directory
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewDoctorDetails(!showNewDoctorDetails)}
+                    className="text-xs font-semibold text-amber-700 dark:text-[#ffd166] hover:underline cursor-pointer flex items-center gap-1 flex-shrink-0"
+                  >
+                    <span>{showNewDoctorDetails ? "Hide extra details" : "+ Add specialization & contact (optional)"}</span>
+                  </button>
+                </div>
+
+                {showNewDoctorDetails && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mt-2.5 pt-2.5 border-t border-amber-500/20 animate-fadeIn">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
+                        <GraduationCap className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
+                        <span>Specialization (Optional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        disabled={isProcessing}
+                        value={newDoctorSpecialization}
+                        onChange={(e) => setNewDoctorSpecialization(e.target.value)}
+                        placeholder="e.g. Orthodontist / MDS"
+                        className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
+                        <Phone className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
+                        <span>Doctor Phone (Optional)</span>
+                      </label>
+                      <input
+                        type="tel"
+                        disabled={isProcessing}
+                        value={newDoctorPhone}
+                        onChange={(e) => setNewDoctorPhone(e.target.value)}
+                        placeholder="e.g. +91 98765 43210"
+                        className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
+                        <Mail className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
+                        <span>Doctor Email (Optional)</span>
+                      </label>
+                      <input
+                        type="email"
+                        disabled={isProcessing}
+                        value={newDoctorEmail}
+                        onChange={(e) => setNewDoctorEmail(e.target.value)}
+                        placeholder="e.g. doctor@clinic.com"
                         className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                       />
                     </div>

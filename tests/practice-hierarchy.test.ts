@@ -8,6 +8,7 @@ import {
   getLocalClinics,
   saveLocalClinics,
   saveClinic,
+  saveDoctor,
 } from "../portal/lib/practice-storage";
 import type { PracticeProfile, DoctorRecord, ClinicRecord } from "../portal/lib/practice-types";
 
@@ -112,5 +113,27 @@ describe("Milestone 3 - Phase 2: Practice Hierarchy Storage", () => {
     expect(retrieved.length).toBe(1);
     expect(retrieved[0]?.name).toBe("Sunrise Orthodontic Studio");
     expect(retrieved[0]?.clinicId).toBe("CLN-02");
+  });
+
+  it("auto-provisions and persists a new doctor with optional specialization and contact", async () => {
+    const created = await saveDoctor(testUserId, {
+      name: "Dr. Ananya Roy",
+      doctorId: "DOC-02",
+      specialization: "Orthodontist / MDS",
+      phone: "+91 91234 56789",
+      email: "ananya.roy@ortho.com",
+    });
+
+    expect(created.id).toBeDefined();
+    expect(created.name).toBe("Dr. Ananya Roy");
+    expect(created.doctorId).toBe("DOC-02");
+    expect(created.specialization).toBe("Orthodontist / MDS");
+    expect(created.phone).toBe("+91 91234 56789");
+    expect(created.email).toBe("ananya.roy@ortho.com");
+
+    const retrieved = getLocalDoctors(testUserId);
+    expect(retrieved.length).toBe(1);
+    expect(retrieved[0]?.name).toBe("Dr. Ananya Roy");
+    expect(retrieved[0]?.specialization).toBe("Orthodontist / MDS");
   });
 });

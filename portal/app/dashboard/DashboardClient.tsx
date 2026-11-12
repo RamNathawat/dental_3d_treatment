@@ -1051,6 +1051,16 @@ export default function DashboardClient({
           });
           showToast(`Clinic "${newClinic.name}" saved to directory`);
         }}
+        onDoctorCreated={(newDoctor) => {
+          setDoctors((prev) => {
+            if (prev.some((d) => d.id === newDoctor.id || d.name.toLowerCase() === newDoctor.name.toLowerCase())) {
+              return prev;
+            }
+            return [...prev, newDoctor];
+          });
+          const doctorDisplay = newDoctor.name.startsWith("Dr.") ? newDoctor.name : `Dr. ${newDoctor.name}`;
+          showToast(`${doctorDisplay} saved to directory`);
+        }}
         onOpenAddDoctor={() => {
           setIsUploadOpen(false);
           setCurrentTab("doctors");
