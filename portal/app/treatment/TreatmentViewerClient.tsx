@@ -170,7 +170,7 @@ export default function TreatmentViewerClient() {
       } else {
         const script = document.createElement("script");
         script.type = "module";
-        script.src = `/assets/treatment-main-oEEvPQdv.js?t=${Date.now()}`;
+        script.src = `/assets/treatment-main-D6duOs0o.js?t=${Date.now()}`;
         document.body.appendChild(script);
       }
     }
@@ -211,7 +211,7 @@ export default function TreatmentViewerClient() {
   if (gateState) {
     const isRevoked = gateState.type === "revoked";
     const clinicDisplayName =
-      gateState.clinicName || "your clinic or treating doctor";
+      gateState.clinicName || "your dental clinic or care team";
 
     return (
       <div className="fixed inset-0 w-screen h-screen z-50 flex items-center justify-center p-6 bg-[#090c13] text-slate-100 font-sans select-none overflow-y-auto">
@@ -219,37 +219,27 @@ export default function TreatmentViewerClient() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_28%,#161b26_0%,#090c13_100%)] -z-10" />
 
         <div className="max-w-md w-full flex flex-col items-center text-center animate-fadeIn">
-          {/* Security Icon Badge */}
-          <div
-            className={`w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center mb-6 border shadow-2xl transition-transform ${
-              isRevoked
-                ? "bg-rose-500/10 border-rose-500/30 text-rose-500 shadow-rose-500/20"
-                : "bg-amber-500/10 border-amber-500/30 text-amber-400 shadow-amber-500/20"
-            }`}
-          >
-            {isRevoked ? (
-              <Lock className="w-8 h-8 sm:w-10 sm:h-10" />
-            ) : (
-              <Clock className="w-8 h-8 sm:w-10 sm:h-10" />
-            )}
+          {/* Neutral Status Icon Badge */}
+          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center mb-6 border shadow-2xl transition-transform bg-amber-500/10 border-amber-500/30 text-amber-400 shadow-amber-500/20">
+            <Clock className="w-8 h-8 sm:w-10 sm:h-10" />
           </div>
 
           {/* Heading */}
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white mb-3">
-            {isRevoked ? "Link Access Revoked" : "Treatment Link Expired"}
+            {isRevoked ? "Link No Longer Active" : "Treatment Link Expired"}
           </h1>
 
           {/* Explanation */}
           <p className="text-sm text-slate-400 leading-relaxed mb-6 max-w-sm">
             {isRevoked
-              ? "Access to this 3D treatment progression plan has been revoked by the clinic or doctor. For security and patient privacy, this link is no longer accessible."
+              ? "This 3D treatment preview is no longer available or the preview session has concluded. For patient privacy and data security, this link is no longer accessible."
               : `This shared treatment plan link expired on ${
                   gateState.expiredDateFormatted || "its scheduled date"
                 }. Treatment progression links are time-limited for patient privacy.`}
           </p>
 
           {/* Next Step Guidance Card */}
-          <div className="w-full p-5 rounded-2xl bg-white/[0.04] border border-white/[0.08] backdrop-blur-md mb-6 space-y-3">
+          <div className="w-full p-5 rounded-2xl bg-white/[0.04] border border-white/[0.08] backdrop-blur-md space-y-3">
             <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500">
               Next Step
             </span>
@@ -265,7 +255,7 @@ export default function TreatmentViewerClient() {
                   href={`mailto:${gateState.clinicEmail}?subject=${encodeURIComponent(
                     `[3D Treatment Plan] Request New Link - ${gateState.patientName}`,
                   )}&body=${encodeURIComponent(
-                    `Hello,\n\nThe 3D progression link for ${gateState.patientName} is inactive or has expired. Could you please generate and send a new link?\n\nThank you!`,
+                    `Hello,\n\nThe 3D progression link for ${gateState.patientName} is no longer active. Could you please generate and send a new link?\n\nThank you!`,
                   )}`}
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/30 transition-colors shadow-2xs"
                 >
@@ -275,14 +265,6 @@ export default function TreatmentViewerClient() {
               </div>
             )}
           </div>
-
-          {/* Clinic Dashboard Return Link */}
-          <a
-            href="/dashboard"
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-medium text-slate-300 hover:text-white bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.1] transition-all"
-          >
-            <span>Clinic Dashboard Login</span>
-          </a>
         </div>
       </div>
     );

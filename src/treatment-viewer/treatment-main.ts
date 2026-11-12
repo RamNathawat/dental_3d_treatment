@@ -59,21 +59,15 @@ function showSecurityGateState(opts: {
   if (!root) return;
 
   const isRevoked = opts.type === "revoked";
-  const title = isRevoked ? "Link Access Revoked" : "Treatment Link Expired";
-  const iconSvg = isRevoked
-    ? `<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#f43f5e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
-        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-        <line x1="12" y1="15" x2="12" y2="17"/>
-      </svg>`
-    : `<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  const title = isRevoked ? "Link No Longer Active" : "Treatment Link Expired";
+  const iconSvg = `<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="10"/>
         <polyline points="12 6 12 12 16 14"/>
       </svg>`;
 
-  const badgeBg = isRevoked ? "rgba(244, 63, 94, 0.12)" : "rgba(245, 158, 11, 0.12)";
-  const badgeBorder = isRevoked ? "rgba(244, 63, 94, 0.3)" : "rgba(245, 158, 11, 0.3)";
-  const badgeShadow = isRevoked ? "rgba(244, 63, 94, 0.2)" : "rgba(245, 158, 11, 0.2)";
+  const badgeBg = "rgba(245, 158, 11, 0.12)";
+  const badgeBorder = "rgba(245, 158, 11, 0.3)";
+  const badgeShadow = "rgba(245, 158, 11, 0.2)";
 
   const dateFormatted = opts.expiredDate
     ? opts.expiredDate.toLocaleDateString(undefined, {
@@ -86,10 +80,10 @@ function showSecurityGateState(opts: {
     : "its scheduled duration";
 
   const message = isRevoked
-    ? "Access to this 3D treatment progression plan has been revoked by the clinic or doctor. For security and data privacy, this link is no longer accessible."
+    ? "This 3D treatment preview is no longer available or the preview session has concluded. For patient privacy and data security, this link is no longer accessible."
     : `This shared treatment plan link expired on ${dateFormatted}. Treatment progression links are time-limited for patient privacy.`;
 
-  const clinicName = opts.clinicName ? opts.clinicName : "your clinic or treating doctor";
+  const clinicName = opts.clinicName ? opts.clinicName : "your dental clinic or care team";
   const contactEmail = opts.clinicEmail ? opts.clinicEmail.trim() : null;
 
   root.innerHTML = `
@@ -110,7 +104,7 @@ function showSecurityGateState(opts: {
             ? `<a href="mailto:${contactEmail}?subject=${encodeURIComponent(
                 `[3D Treatment Plan] Request New Link - ${opts.patientName}`,
               )}&body=${encodeURIComponent(
-                `Hello,\n\nThe 3D progression link for ${opts.patientName} has expired or is inactive. Could you please generate and send a new link?\n\nThank you!`,
+                `Hello,\n\nThe 3D progression link for ${opts.patientName} is no longer active. Could you please generate and send a new link?\n\nThank you!`,
               )}" style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: #38bdf8; text-decoration: none; font-weight: 500; background: rgba(56, 189, 248, 0.1); padding: 8px 16px; border-radius: 8px; border: 1px solid rgba(56, 189, 248, 0.25);">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
                 Email Clinic: ${contactEmail}
@@ -118,10 +112,6 @@ function showSecurityGateState(opts: {
             : ""
         }
       </div>
-
-      <a href="/dashboard" style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 10px; background: rgba(255, 255, 255, 0.08); color: #cbd5e1; text-decoration: none; font-size: 13px; font-weight: 500; border: 1px solid rgba(255, 255, 255, 0.12); transition: all 0.15s ease;">
-        Clinic Dashboard Login
-      </a>
     </div>
   `;
 }
