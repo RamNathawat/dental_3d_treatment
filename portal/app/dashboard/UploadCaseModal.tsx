@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   UploadCloud,
   CheckCircle2,
@@ -18,7 +18,10 @@ import {
   Calendar,
   User,
   Mail,
+  Stethoscope,
+  Sparkles,
 } from "lucide-react";
+import { DoctorRecord, ClinicRecord } from "@/lib/practice-types";
 import {
   getSavedClinicEmails,
   saveClinicEmail,
@@ -52,6 +55,12 @@ interface UploadCaseModalProps {
   onClose: () => void;
   userId: string;
   onCaseCreated: (newCase: DentalCase) => void;
+  doctors?: DoctorRecord[];
+  clinics?: ClinicRecord[];
+  onOpenAddDoctor?: () => void;
+  onOpenAddClinic?: () => void;
+  isSoloDoctor?: boolean;
+  defaultDoctorName?: string;
 }
 
 export default function UploadCaseModal({
@@ -59,14 +68,31 @@ export default function UploadCaseModal({
   onClose,
   userId,
   onCaseCreated,
+  doctors = [],
+  clinics = [],
+  onOpenAddDoctor,
+  onOpenAddClinic,
+  isSoloDoctor = false,
+  defaultDoctorName = "",
 }: UploadCaseModalProps) {
+  const [isRefinement, setIsRefinement] = useState(false);
   const [patientName, setPatientName] = useState("");
   const [patientId, setPatientId] = useState("");
   const [patientAge, setPatientAge] = useState("");
   const [patientSex, setPatientSex] = useState("");
   const [clinicName, setClinicName] = useState("");
+  const [doctorName, setDoctorName] = useState(() => (isSoloDoctor && defaultDoctorName ? defaultDoctorName : ""));
   const [clinicEmail, setClinicEmail] = useState("");
   const [savedEmails, setSavedEmails] = useState<string[]>([]);
+  const [isCustomDoctor, setIsCustomDoctor] = useState(false);
+  const [isCustomClinic, setIsCustomClinic] = useState(false);
+  const [isEditingSoloDoctor, setIsEditingSoloDoctor] = useState(false);
+
+  useEffect(() => {
+    if (isSoloDoctor && defaultDoctorName && !doctorName) {
+      setDoctorName(defaultDoctorName);
+    }
+  }, [isSoloDoctor, defaultDoctorName]);
 
   // Load remembered clinic emails for 1-click autocomplete
   useState(() => {
@@ -77,10 +103,20 @@ export default function UploadCaseModal({
 
   function handleClinicNameChange(name: string) {
     setClinicName(name);
-    if (!clinicEmail.trim()) {
+    // Auto-match email from clinics directory or saved emails
+    const matchedClinic = clinics.find(
+      (c) => c.name.toLowerCase() === name.toLowerCase()
+    );
+    if (matchedClinic?.email) {
+      setClinicEmail(matchedClinic.email);
+    } else if (!clinicEmail.trim()) {
       const match = getSavedEmailForClinic(name);
       if (match) setClinicEmail(match);
     }
+  }
+
+  function handleDoctorNameChange(name: string) {
+    setDoctorName(name);
   }
   const [upperFile, setUpperFile] = useState<File | null>(null);
   const [lowerFile, setLowerFile] = useState<File | null>(null);
@@ -405,6 +441,8 @@ export default function UploadCaseModal({
         patient_name: dbName,
         clinic_name: clinicName.trim() || null,
         clinic_email: resolvedClinicEmail || null,
+        doctor_name: doctorName.trim() || null,
+        is_refinement: isRefinement,
         patient_id: result.patientId || resolvedPatientId,
         patient_age: resolvedAge ?? null,
         patient_sex: resolvedSex ?? null,
@@ -420,6 +458,8 @@ export default function UploadCaseModal({
             total: result.totalAligners,
             is_unequal: result.isUnequal,
           },
+          is_refinement: isRefinement,
+          assigned_doctor: doctorName.trim() || undefined,
         },
         share_token: result.shareToken || "",
         status: "ready",
@@ -461,7 +501,7 @@ export default function UploadCaseModal({
       }}
     >
       <div
-        className="w-full max-w-xl bg-white dark:bg-[#131A26] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh] transition-colors"
+        className="w-full max-w-2xl bg-white dark:bg-[#131A26] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh] transition-colors"
         onClick={(e) => e.stopPropagation()}
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
@@ -496,14 +536,387 @@ export default function UploadCaseModal({
 
         {/* Content */}
         <div className="p-6 space-y-4 overflow-y-auto flex-1">
+          {/* ─── Step 1: Patient, Clinic & Doctor Identification (TOP) ─── */}
+          <div className="space-y-3.5">
+            {/* Patient Name & Patient ID */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
+                    <span>Patient / Case Name</span>
+                    <span className="text-rose-500 font-bold">*</span>
+                  </label>
+                  {patientName.trim() ? (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                      ✓ Ready
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-rose-500 font-medium">Required</span>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  disabled={isProcessing}
+                  value={patientName}
+                  onChange={(e) => setPatientName(e.target.value)}
+                  placeholder="e.g. Niya"
+                  required
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all disabled:bg-slate-50 dark:disabled:bg-slate-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5 flex items-center gap-1.5">
+                  <Hash className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
+                  <span>Patient ID</span>
+                  <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500">(Optional)</span>
+                </label>
+                <input
+                  type="text"
+                  disabled={isProcessing}
+                  value={patientId}
+                  onChange={(e) => setPatientId(e.target.value)}
+                  placeholder="e.g. PT-1049 (auto if blank)"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all disabled:bg-slate-50 dark:disabled:bg-slate-900 font-mono"
+                />
+              </div>
+            </div>
+
+            {/* Practice Hierarchy: Clinic & Doctor Dropdowns */}
+            {isSoloDoctor ? (
+              <div className="space-y-2.5 min-w-0">
+                {/* Treating Doctor Auto-Badge for Solo Doctor */}
+                <div className="flex items-center justify-between text-xs px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-[#0D121D] border border-slate-200 dark:border-slate-800">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-6 h-6 rounded-lg bg-amber-500/10 text-amber-600 dark:text-[#ffd166] flex items-center justify-center flex-shrink-0">
+                      <Stethoscope className="w-3.5 h-3.5" />
+                    </div>
+                    <span className="text-slate-500 dark:text-slate-400 flex-shrink-0">Treating Doctor:</span>
+                    {!isEditingSoloDoctor ? (
+                      <span className="font-semibold text-slate-800 dark:text-slate-200 truncate">
+                        {doctorName.startsWith("Dr.") ? doctorName : `Dr. ${doctorName || "Self"}`}
+                      </span>
+                    ) : (
+                      <input
+                        type="text"
+                        value={doctorName}
+                        onChange={(e) => setDoctorName(e.target.value)}
+                        placeholder="e.g. Dr. Your Name"
+                        className="px-2 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#131A26] text-xs text-slate-800 dark:text-slate-100"
+                      />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="text-[10px] text-amber-600 dark:text-[#ffd166] font-medium px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20">
+                      Solo Practitioner
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingSoloDoctor(!isEditingSoloDoctor)}
+                      className="text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 underline cursor-pointer"
+                    >
+                      {isEditingSoloDoctor ? "Done" : "Edit"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Clinic Select (Full width) */}
+                <div className="space-y-1.5 min-w-0">
+                  <div className="flex items-center justify-between gap-1 min-w-0">
+                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 truncate">
+                      <Building2 className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166] flex-shrink-0" />
+                      <span className="truncate">Clinic / Practice Branch</span>
+                      <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500">(Optional)</span>
+                    </label>
+                    {onOpenAddClinic && (
+                      <button
+                        type="button"
+                        onClick={onOpenAddClinic}
+                        className="text-[10px] font-semibold text-amber-600 dark:text-[#ffd166] hover:underline inline-flex items-center gap-0.5 flex-shrink-0"
+                      >
+                        <Plus className="w-2.5 h-2.5" />
+                        <span>New Clinic</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {!isCustomClinic && clinics.length > 0 ? (
+                    <div className="relative min-w-0">
+                      <select
+                        disabled={isProcessing}
+                        value={clinicName}
+                        onChange={(e) => {
+                          if (e.target.value === "__custom__") {
+                            setIsCustomClinic(true);
+                            setClinicName("");
+                          } else {
+                            handleClinicNameChange(e.target.value);
+                          }
+                        }}
+                        className="w-full min-w-0 max-w-full truncate px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all cursor-pointer"
+                      >
+                        <option value="">Select Clinic Branch (Optional)...</option>
+                        {clinics.map((c) => (
+                          <option key={c.id} value={c.name}>
+                            {c.name} {c.clinicId ? `(${c.clinicId})` : ""}
+                          </option>
+                        ))}
+                        <option value="__custom__">+ Enter Other / New Clinic Name...</option>
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <input
+                        type="text"
+                        disabled={isProcessing}
+                        value={clinicName}
+                        onChange={(e) => handleClinicNameChange(e.target.value)}
+                        placeholder="e.g. My Clinic / Consulting Branch (Optional)"
+                        className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                      />
+                      {clinics.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setIsCustomClinic(false)}
+                          className="px-2 py-2 text-[10px] font-medium text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 whitespace-nowrap rounded-lg bg-slate-100 dark:bg-slate-800 flex-shrink-0"
+                        >
+                          List
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0">
+                {/* Clinic Select */}
+                <div className="space-y-1.5 min-w-0">
+                  <div className="flex items-center justify-between gap-1 min-w-0">
+                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 truncate">
+                      <Building2 className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166] flex-shrink-0" />
+                      <span className="truncate">Clinic / Practice</span>
+                    </label>
+                    {onOpenAddClinic && (
+                      <button
+                        type="button"
+                        onClick={onOpenAddClinic}
+                        className="text-[10px] font-semibold text-amber-600 dark:text-[#ffd166] hover:underline inline-flex items-center gap-0.5 flex-shrink-0"
+                      >
+                        <Plus className="w-2.5 h-2.5" />
+                        <span>New</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {!isCustomClinic && clinics.length > 0 ? (
+                    <div className="relative min-w-0">
+                      <select
+                        disabled={isProcessing}
+                        value={clinicName}
+                        onChange={(e) => {
+                          if (e.target.value === "__custom__") {
+                            setIsCustomClinic(true);
+                            setClinicName("");
+                          } else {
+                            handleClinicNameChange(e.target.value);
+                          }
+                        }}
+                        className="w-full min-w-0 max-w-full truncate px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all cursor-pointer"
+                      >
+                        <option value="">Select Clinic Branch...</option>
+                        {clinics.map((c) => (
+                          <option key={c.id} value={c.name}>
+                            {c.name} {c.clinicId ? `(${c.clinicId})` : ""}
+                          </option>
+                        ))}
+                        <option value="__custom__">+ Enter Other / New Clinic Name...</option>
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <input
+                        type="text"
+                        disabled={isProcessing}
+                        value={clinicName}
+                        onChange={(e) => handleClinicNameChange(e.target.value)}
+                        placeholder="e.g. Smile Dental Clinic"
+                        className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                      />
+                      {clinics.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setIsCustomClinic(false)}
+                          className="px-2 py-2 text-[10px] font-medium text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 whitespace-nowrap rounded-lg bg-slate-100 dark:bg-slate-800 flex-shrink-0"
+                        >
+                          List
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Doctor Select */}
+                <div className="space-y-1.5 min-w-0">
+                  <div className="flex items-center justify-between gap-1 min-w-0">
+                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 truncate">
+                      <Stethoscope className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166] flex-shrink-0" />
+                      <span className="truncate">Treating Doctor</span>
+                    </label>
+                    {onOpenAddDoctor && (
+                      <button
+                        type="button"
+                        onClick={onOpenAddDoctor}
+                        className="text-[10px] font-semibold text-amber-600 dark:text-[#ffd166] hover:underline inline-flex items-center gap-0.5 flex-shrink-0"
+                      >
+                        <Plus className="w-2.5 h-2.5" />
+                        <span>New</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {!isCustomDoctor && doctors.length > 0 ? (
+                    <div className="relative min-w-0">
+                      <select
+                        disabled={isProcessing}
+                        value={doctorName}
+                        onChange={(e) => {
+                          if (e.target.value === "__custom__") {
+                            setIsCustomDoctor(true);
+                            setDoctorName("");
+                          } else {
+                            handleDoctorNameChange(e.target.value);
+                          }
+                        }}
+                        className="w-full min-w-0 max-w-full truncate px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all cursor-pointer"
+                      >
+                        <option value="">Select Doctor...</option>
+                        {doctors.map((d) => (
+                          <option key={d.id} value={d.name}>
+                            {d.name.startsWith("Dr.") ? d.name : `Dr. ${d.name}`} {d.specialization ? `(${d.specialization})` : ""}
+                          </option>
+                        ))}
+                        <option value="__custom__">+ Enter Other Doctor Name...</option>
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <input
+                        type="text"
+                        disabled={isProcessing}
+                        value={doctorName}
+                        onChange={(e) => handleDoctorNameChange(e.target.value)}
+                        placeholder="e.g. Dr. Rajesh Kumar"
+                        className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                      />
+                      {doctors.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setIsCustomDoctor(false)}
+                          className="px-2 py-2 text-[10px] font-medium text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 whitespace-nowrap rounded-lg bg-slate-100 dark:bg-slate-800 flex-shrink-0"
+                        >
+                          List
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Clinic Email */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                  <Mail className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
+                  <span>Clinic Mailbox Email</span>
+                  <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500">(Auto-filled for 1-click sharing)</span>
+                </label>
+              </div>
+              <input
+                type="email"
+                list="saved-clinic-emails-upload"
+                disabled={isProcessing}
+                value={clinicEmail}
+                onChange={(e) => setClinicEmail(e.target.value)}
+                placeholder="e.g. clinic@smiledental.com"
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 focus:outline-none"
+              />
+              <datalist id="saved-clinic-emails-upload">
+                {savedEmails.map((em) => (
+                  <option key={em} value={em} />
+                ))}
+              </datalist>
+            </div>
+
+            {/* Age & Sex */}
+            <div className="grid grid-cols-2 gap-3 pt-0.5">
+              <div className="relative">
+                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Patient Age
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="120"
+                  disabled={isProcessing}
+                  value={patientAge}
+                  onChange={(e) => setPatientAge(e.target.value)}
+                  placeholder="e.g. 24"
+                  className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Patient Sex
+                </label>
+                <select
+                  disabled={isProcessing}
+                  value={patientSex}
+                  onChange={(e) => setPatientSex(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs"
+                >
+                  <option value="">Not Specified</option>
+                  <option value="Female">Female</option>
+                  <option value="Male">Male</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* ─── Step 2: 3D CAD Model ZIP Uploads ─── */}
           {!isProcessing ? (
-            <>
-              {/* Tip Banner */}
-              <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-                <span>Upload dental model archives:</span>
-                <span className="text-[10px] text-amber-600 dark:text-[#ffd166] font-medium">
-                  Tip: select or drag both Upper &amp; Lower ZIPs simultaneously
-                </span>
+            <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800/80">
+              {/* Header with Title & Non-Obnoxious Refinement Checkbox */}
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div>
+                  <span className="font-semibold text-xs text-slate-800 dark:text-slate-200">
+                    Upload dental model archives:
+                  </span>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+                    Drag Upper &amp; Lower ZIPs simultaneously or select individually.
+                  </p>
+                </div>
+
+                {/* Compact, clean Refinement toggle placed near upload */}
+                <label className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium cursor-pointer transition-all select-none border ${
+                  isRefinement
+                    ? "bg-amber-500/15 border-amber-500/40 text-amber-800 dark:text-[#ffd166]"
+                    : "bg-slate-100 dark:bg-[#1A2234] border-slate-200 dark:border-slate-700/80 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600"
+                }`}>
+                  <input
+                    type="checkbox"
+                    checked={isRefinement}
+                    onChange={(e) => setIsRefinement(e.target.checked)}
+                    disabled={isProcessing}
+                    className="w-3.5 h-3.5 rounded text-amber-500 focus:ring-amber-500 dark:bg-slate-900 border-slate-300 dark:border-slate-700 cursor-pointer"
+                  />
+                  <span>Refinement Case</span>
+                  {isRefinement && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                  )}
+                </label>
               </div>
 
               {/* Separate Upper & Lower Dropzones */}
@@ -721,7 +1134,7 @@ export default function UploadCaseModal({
                   </span>
                 </div>
               )}
-            </>
+            </div>
           ) : (
             /* Progress State */
             <div className="py-6 px-4 text-center space-y-3 bg-slate-50 dark:bg-[#0D121D] rounded-xl border border-slate-200 dark:border-slate-800">
@@ -745,172 +1158,6 @@ export default function UploadCaseModal({
               </span>
             </div>
           )}
-
-          {/* Step 2: Patient & Clinic Identification */}
-          <div className="space-y-3">
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
-                  <span>Patient / Case Name</span>
-                  <span className="text-rose-500 font-bold">*</span>
-                </label>
-                {patientName.trim() ? (
-                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
-                    ✓ Name Specified
-                  </span>
-                ) : (
-                  <span className="text-[10px] text-rose-500 font-medium">
-                    Required (e.g. Niya)
-                  </span>
-                )}
-              </div>
-              <input
-                type="text"
-                disabled={isProcessing}
-                value={patientName}
-                onChange={(e) => setPatientName(e.target.value)}
-                placeholder="Enter patient or case name (e.g. Niya) *"
-                required
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:focus:ring-[#e0b457]/20 focus:border-slate-900 dark:focus:border-[#e0b457] transition-all disabled:bg-slate-50 dark:disabled:bg-slate-900"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5 flex items-center gap-1.5">
-                  <Hash className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
-                  <span>Patient ID</span>
-                  <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500">(Optional)</span>
-                </label>
-                <input
-                  type="text"
-                  disabled={isProcessing}
-                  value={patientId}
-                  onChange={(e) => setPatientId(e.target.value)}
-                  placeholder="e.g. PT-1049 (Auto-generated if blank)"
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:focus:ring-[#e0b457]/20 focus:border-slate-900 dark:focus:border-[#e0b457] transition-all disabled:bg-slate-50 dark:disabled:bg-slate-900"
-                />
-                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
-                  Auto-assigned if left blank (e.g. <span className="whitespace-nowrap font-mono font-medium text-slate-500 dark:text-slate-400">PT&#8209;4821</span>).
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5 flex items-center gap-1.5">
-                  <Building2 className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
-                  <span>Clinic / Practice Name</span>
-                  <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500">(Optional)</span>
-                </label>
-                <input
-                  type="text"
-                  disabled={isProcessing}
-                  value={clinicName}
-                  onChange={(e) => handleClinicNameChange(e.target.value)}
-                  placeholder="e.g. Smile Dental Clinic"
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:focus:ring-[#e0b457]/20 focus:border-slate-900 dark:focus:border-[#e0b457] transition-all disabled:bg-slate-50 dark:disabled:bg-slate-900"
-                />
-                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
-                  Associates the case with a clinic branch.
-                </p>
-              </div>
-            </div>
-
-            {/* Clinic Email Field with Autocomplete & Remembered Emails */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
-                  <Mail className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
-                  <span>Clinic Email</span>
-                  <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500">(Optional)</span>
-                </label>
-                {savedEmails.length > 0 && (
-                  <span className="text-[10px] text-slate-400 dark:text-slate-500">
-                    {savedEmails.length} remembered {savedEmails.length === 1 ? "email" : "emails"}
-                  </span>
-                )}
-              </div>
-              <div className="relative">
-                <input
-                  type="email"
-                  list="saved-clinic-emails-upload"
-                  disabled={isProcessing}
-                  value={clinicEmail}
-                  onChange={(e) => setClinicEmail(e.target.value)}
-                  placeholder="e.g. clinic@smiledental.com (auto-filled for 1-click mail button)"
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:focus:ring-[#e0b457]/20 focus:border-slate-900 dark:focus:border-[#e0b457] transition-all disabled:bg-slate-50 dark:disabled:bg-slate-900"
-                />
-                <datalist id="saved-clinic-emails-upload">
-                  {savedEmails.map((em) => (
-                    <option key={em} value={em} />
-                  ))}
-                </datalist>
-              </div>
-              {/* Quick-select chips if not typed */}
-              {savedEmails.length > 0 && !clinicEmail && (
-                <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
-                  <span className="text-[10px] text-slate-400 dark:text-slate-500">Recent:</span>
-                  {savedEmails.slice(0, 3).map((em) => (
-                    <button
-                      key={em}
-                      type="button"
-                      onClick={() => setClinicEmail(em)}
-                      className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-[#ffd166] hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-                    >
-                      {em}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
-                Allows clicking the &quot;Mail&quot; button on this case to immediately dispatch the 3D viewer link to the clinic without re-typing.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5 flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
-                  <span>Age</span>
-                  <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500">(Years, Optional)</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    min="1"
-                    max="120"
-                    disabled={isProcessing}
-                    value={patientAge}
-                    onChange={(e) => setPatientAge(e.target.value)}
-                    placeholder="e.g. 24"
-                    className="w-full px-3.5 py-2 pr-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:focus:ring-[#e0b457]/20 focus:border-slate-900 dark:focus:border-[#e0b457] transition-all disabled:bg-slate-50 dark:disabled:bg-slate-900"
-                  />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400 font-medium pointer-events-none">
-                    yrs
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5 flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
-                  <span>Sex</span>
-                  <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500">(Optional)</span>
-                </label>
-                <select
-                  disabled={isProcessing}
-                  value={patientSex}
-                  onChange={(e) => setPatientSex(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-900/10 dark:focus:ring-[#e0b457]/20 focus:border-slate-900 dark:focus:border-[#e0b457] transition-all disabled:bg-slate-50 dark:disabled:bg-slate-900 cursor-pointer"
-                >
-                  <option value="">Not Specified</option>
-                  <option value="Female">Female</option>
-                  <option value="Male">Male</option>
-                  <option value="Other">Other</option>
-                </select>
-              </div>
-            </div>
-          </div>
 
           {/* Optional Step 3: Interproximal Reduction (IPR) Plan */}
           <div className="border border-slate-200/80 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50/50 dark:bg-[#0D121D]">

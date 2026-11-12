@@ -1078,6 +1078,22 @@ export function createTreatmentApp(
                 ),
               ]
             : []),
+          ...(state.manifest.isRefinement
+            ? [
+                span(
+                  "tv-header__patient-demo tv-header__refinement-pill",
+                  "✦ Refinement",
+                ),
+              ]
+            : []),
+          ...(state.manifest.clinicName
+            ? [
+                span(
+                  "tv-header__patient-demo",
+                  state.manifest.clinicName,
+                ),
+              ]
+            : []),
         ]),
       ]),
       div("tv-header__actions", [

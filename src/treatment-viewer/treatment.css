@@ -3533,6 +3533,20 @@ body {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.tv-header__refinement-pill {
+  color: #d97706 !important;
+  background: rgba(245, 158, 11, 0.15) !important;
+  border: 1px solid rgba(245, 158, 11, 0.3) !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.02em;
+}
+
+.tv-app--dark .tv-header__refinement-pill {
+  color: #ffd166 !important;
+  background: rgba(224, 180, 87, 0.15) !important;
+  border: 1px solid rgba(224, 180, 87, 0.35) !important;
+}
+
 .tv-notes-date {
   font-size: 0.68rem;
   font-weight: 500;

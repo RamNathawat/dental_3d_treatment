@@ -399,6 +399,12 @@ export async function initTreatmentViewer(): Promise<void> {
               if (!storedManifest.clinicName && caseRecord.clinic_name) {
                 storedManifest.clinicName = caseRecord.clinic_name;
               }
+              if (!storedManifest.doctorName && (caseRecord.doctor_name || notesObj?.assigned_doctor)) {
+                (storedManifest as any).doctorName = caseRecord.doctor_name || notesObj?.assigned_doctor;
+              }
+              if (caseRecord.is_refinement || notesObj?.is_refinement) {
+                (storedManifest as any).isRefinement = true;
+              }
               if (storedManifest.patientAge == null && caseRecord.patient_age != null) {
                 storedManifest.patientAge = Number(caseRecord.patient_age);
               }
@@ -428,6 +434,8 @@ export async function initTreatmentViewer(): Promise<void> {
           patientAge: caseRecord.patient_age != null ? Number(caseRecord.patient_age) : undefined,
           patientSex: caseRecord.patient_sex || undefined,
           clinicName: caseRecord.clinic_name || undefined,
+          doctorName: caseRecord.doctor_name || notesObj?.assigned_doctor || undefined,
+          isRefinement: Boolean(caseRecord.is_refinement || notesObj?.is_refinement),
           archType: isUpperOnly ? "upper" : isLowerOnly ? "lower" : "both",
           hasUpper,
           hasLower,

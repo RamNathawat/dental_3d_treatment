@@ -27,6 +27,10 @@ import {
   Hash,
   Mail,
   Pencil,
+  Stethoscope,
+  Settings,
+  Sparkles,
+  Filter,
 } from "lucide-react";
 import { DentalCase } from "./page";
 import UploadCaseModal from "./UploadCaseModal";
@@ -34,6 +38,15 @@ import EditIprModal from "./EditIprModal";
 import EditNotesModal from "./EditNotesModal";
 import ShareModal from "./ShareModal";
 import EditCaseModal from "./EditCaseModal";
+import PracticeProfileModal from "./PracticeProfileModal";
+import DoctorsView from "./DoctorsView";
+import ClinicsView from "./ClinicsView";
+import { PracticeProfile, DoctorRecord, ClinicRecord } from "@/lib/practice-types";
+import {
+  fetchPracticeProfile,
+  fetchDoctors,
+  fetchClinics,
+} from "@/lib/practice-storage";
 import { getCaseTrayInfo } from "@/lib/case-tray-info";
 import { getCaseLinkAccess } from "@/lib/link-access";
 export { getCaseTrayInfo, getCaseLinkAccess };
@@ -64,10 +77,46 @@ export default function DashboardClient({
     Record<string, { upper: number; lower: number; total: number; isUnequal: boolean }>
   >({});
   const [isMounted, setIsMounted] = useState<boolean>(false);
+  const [currentTab, setCurrentTab] = useState<"cases" | "doctors" | "clinics">("cases");
+  const [practiceProfile, setPracticeProfile] = useState<PracticeProfile | null>(null);
+  const [doctors, setDoctors] = useState<DoctorRecord[]>([]);
+  const [clinics, setClinics] = useState<ClinicRecord[]>([]);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isOnboarding, setIsOnboarding] = useState(false);
+  const [selectedClinicFilter, setSelectedClinicFilter] = useState<string>("all");
+  const [selectedDoctorFilter, setSelectedDoctorFilter] = useState<string>("all");
+
+  const isSoloDoctor = practiceProfile?.firmType === "solo";
+  const defaultDoctorName =
+    practiceProfile?.firmName || (email ? email.split("@")[0] : "");
+
+  useEffect(() => {
+    if (isSoloDoctor && currentTab === "doctors") {
+      setCurrentTab("cases");
+    }
+  }, [isSoloDoctor, currentTab]);
 
   useEffect(() => {
     setIsMounted(true);
-  }, []);
+    if (!userId) return;
+
+    const isDismissed =
+      typeof window !== "undefined" &&
+      localStorage.getItem(`dental_onboarding_dismissed_${userId}`) === "true";
+
+    fetchPracticeProfile(userId, email).then((prof) => {
+      setPracticeProfile(prof);
+      if (!prof && !isDismissed) {
+        setIsOnboarding(true);
+        setIsProfileModalOpen(true);
+      }
+    });
+
+    fetchDoctors(userId).then(setDoctors);
+
+    const existingClinicNames = cases.map((c) => c.clinic_name || "").filter(Boolean);
+    fetchClinics(userId, existingClinicNames).then(setClinics);
+  }, [userId, email]);
 
   const router = useRouter();
   const supabase = createClient();
@@ -274,16 +323,32 @@ export default function DashboardClient({
 
   const filteredCases = cases.filter((c) => {
     const q = searchQuery.toLowerCase().trim();
+    const docName = (c.doctor_name || c.doctor_notes?.assigned_doctor || "").toLowerCase();
     const matchesSearch =
       !q ||
       c.patient_name.toLowerCase().includes(q) ||
       Boolean(c.patient_id && c.patient_id.toLowerCase().includes(q)) ||
       Boolean(c.clinic_name && c.clinic_name.toLowerCase().includes(q)) ||
+      Boolean(docName && docName.includes(q)) ||
       Boolean(c.patient_sex && c.patient_sex.toLowerCase().includes(q)) ||
       Boolean(c.patient_age && String(c.patient_age).includes(q));
-    if (activeFilter === "all") return matchesSearch;
-    if (activeFilter === "ready") return matchesSearch && (c.status === "ready" || c.status === "revoked");
-    return matchesSearch && c.status === activeFilter;
+
+    const matchesStatus =
+      activeFilter === "all"
+        ? true
+        : activeFilter === "ready"
+        ? c.status === "ready" || c.status === "revoked"
+        : c.status === activeFilter;
+
+    const matchesClinic =
+      selectedClinicFilter === "all" ||
+      (c.clinic_name && c.clinic_name.toLowerCase() === selectedClinicFilter.toLowerCase());
+
+    const matchesDoctor =
+      selectedDoctorFilter === "all" ||
+      docName.includes(selectedDoctorFilter.toLowerCase());
+
+    return matchesSearch && matchesStatus && matchesClinic && matchesDoctor;
   });
 
   const doctorInitial = email ? email[0].toUpperCase() : "D";
@@ -306,18 +371,32 @@ export default function DashboardClient({
         <div className="space-y-6">
           {/* Brand */}
           <div className="flex items-center gap-3 px-1 py-1">
-            <div className="w-10 h-10 rounded-xl bg-slate-900 dark:bg-gradient-to-br dark:from-[#e0b457] dark:to-[#c49a45] text-white dark:text-slate-950 flex items-center justify-center font-bold text-xs tracking-wider shadow-sm transition-colors">
-              3D
-            </div>
-            <div>
+            {practiceProfile?.logoUrl ? (
+              <img
+                src={practiceProfile.logoUrl}
+                alt={practiceProfile.brandName || "Brand Logo"}
+                className="w-10 h-10 rounded-xl object-contain bg-white dark:bg-[#1A2234] border border-slate-200 dark:border-slate-800 p-1 shadow-sm"
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-xl bg-slate-900 dark:bg-gradient-to-br dark:from-[#e0b457] dark:to-[#c49a45] text-white dark:text-slate-950 flex items-center justify-center font-bold text-xs tracking-wider shadow-sm transition-colors">
+                3D
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
-                <h1 className="text-sm font-bold text-slate-900 dark:text-white tracking-tight">Orthodontic 3D</h1>
-                <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-[#ffd166] border border-slate-200 dark:border-[#e0b457]/30">
-                  Pro
+                <h1 className="text-sm font-bold text-slate-900 dark:text-white tracking-tight truncate">
+                  {practiceProfile?.brandName || "Orthodontic 3D"}
+                </h1>
+                <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-[#ffd166] border border-slate-200 dark:border-[#e0b457]/30 flex-shrink-0">
+                  {practiceProfile?.firmType === "lab" ? "Lab" : practiceProfile?.firmType === "clinic" ? "Clinic" : "Pro"}
                 </span>
               </div>
-              <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 tracking-wider uppercase">
-                Clinical Studio
+              <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 tracking-wider uppercase truncate">
+                {practiceProfile?.firmType === "lab"
+                  ? "Aligner Lab"
+                  : practiceProfile?.firmType === "clinic"
+                  ? "Dental Practice"
+                  : "Clinical Studio"}
               </p>
             </div>
           </div>
@@ -332,24 +411,79 @@ export default function DashboardClient({
           </button>
 
           {/* Navigation Links */}
-          <nav className="space-y-1.5">
-            <Link
-              href="/dashboard"
-              className="flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800/70 text-slate-900 dark:text-white transition-colors"
+          <nav className="space-y-1">
+            <button
+              onClick={() => setCurrentTab("cases")}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                currentTab === "cases"
+                  ? "bg-slate-100 dark:bg-slate-800/80 text-slate-900 dark:text-white shadow-2xs"
+                  : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/40 hover:text-slate-900 dark:hover:text-slate-200"
+              }`}
             >
-              <div className="flex items-center gap-3">
-                <Layers className="w-4 h-4 text-slate-800 dark:text-[#ffd166]" />
+              <div className="flex items-center gap-2.5">
+                <Layers className={`w-4 h-4 ${currentTab === "cases" ? "text-slate-900 dark:text-[#ffd166]" : "text-slate-400"}`} />
                 <span>Patient Cases</span>
               </div>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 shadow-2xs border border-slate-200/60 dark:border-slate-700/60">
                 {cases.length}
               </span>
-            </Link>
+            </button>
+
+            {/* Doctors Directory (hidden for Solo Doctors) */}
+            {!isSoloDoctor && (
+              <button
+                onClick={() => setCurrentTab("doctors")}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                  currentTab === "doctors"
+                    ? "bg-slate-100 dark:bg-slate-800/80 text-slate-900 dark:text-white shadow-2xs"
+                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/40 hover:text-slate-900 dark:hover:text-slate-200"
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Stethoscope className={`w-4 h-4 ${currentTab === "doctors" ? "text-slate-900 dark:text-[#ffd166]" : "text-slate-400"}`} />
+                  <span>Doctors Directory</span>
+                </div>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 shadow-2xs border border-slate-200/60 dark:border-slate-700/60">
+                  {doctors.length}
+                </span>
+              </button>
+            )}
+
+            <button
+              onClick={() => setCurrentTab("clinics")}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                currentTab === "clinics"
+                  ? "bg-slate-100 dark:bg-slate-800/80 text-slate-900 dark:text-white shadow-2xs"
+                  : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/40 hover:text-slate-900 dark:hover:text-slate-200"
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <Building2 className={`w-4 h-4 ${currentTab === "clinics" ? "text-slate-900 dark:text-[#ffd166]" : "text-slate-400"}`} />
+                <span>Clinics Directory</span>
+              </div>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 shadow-2xs border border-slate-200/60 dark:border-slate-700/60">
+                {clinics.length}
+              </span>
+            </button>
           </nav>
         </div>
 
-        {/* Sidebar Footer: Doctor Profile & Theme Switcher */}
-        <div className="pt-4 border-t border-slate-100 dark:border-slate-800/80">
+        {/* Sidebar Footer: Doctor Profile, Brand Settings & Sign Out */}
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-800/80 space-y-2">
+          <button
+            onClick={() => {
+              setIsOnboarding(false);
+              setIsProfileModalOpen(true);
+            }}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-2">
+              <Settings className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
+              <span>Practice & Brand Settings</span>
+            </div>
+            <span className="text-[10px] text-amber-600 dark:text-[#ffd166] font-semibold">Edit</span>
+          </button>
+
           <div className="flex items-center justify-between pt-1">
             <div className="flex items-center gap-2.5 min-w-0 pr-2">
               <div className="w-8 h-8 rounded-full bg-slate-900 dark:bg-slate-800 text-white dark:text-[#ffd166] font-bold flex items-center justify-center text-xs shadow-2xs flex-shrink-0 border border-transparent dark:border-[#e0b457]/30">
@@ -357,9 +491,11 @@ export default function DashboardClient({
               </div>
               <div className="min-w-0">
                 <p className="text-xs font-semibold text-slate-900 dark:text-white truncate">
-                  Dr. {email.split("@")[0]}
+                  {practiceProfile?.firmName || `Dr. ${email.split("@")[0]}`}
                 </p>
-                <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate">Clinical Practice</p>
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
+                  {practiceProfile?.brandName || "Clinical Practice"}
+                </p>
               </div>
             </div>
             <button
@@ -376,120 +512,239 @@ export default function DashboardClient({
       {/* ─── Main Content Area ────────────────────────────────────────── */}
       <main className="flex-1 lg:pl-64 flex flex-col min-h-screen">
         {/* Mobile Header */}
-        <header className="lg:hidden sticky top-0 z-20 bg-white/95 dark:bg-[#0D121D]/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 px-4 py-3 flex items-center justify-between transition-colors">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-slate-900 dark:bg-gradient-to-br dark:from-[#e0b457] dark:to-[#c49a45] text-white dark:text-slate-950 flex items-center justify-center font-bold text-xs tracking-wider">
-              3D
+        <header className="lg:hidden sticky top-0 z-20 bg-white/95 dark:bg-[#0D121D]/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 px-4 py-3 space-y-2.5 transition-colors">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              {practiceProfile?.logoUrl ? (
+                <img
+                  src={practiceProfile.logoUrl}
+                  alt={practiceProfile.brandName || "Brand Logo"}
+                  className="w-8 h-8 rounded-lg object-contain bg-white dark:bg-[#1A2234] border border-slate-200 dark:border-slate-800 p-0.5 shadow-sm"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-lg bg-slate-900 dark:bg-gradient-to-br dark:from-[#e0b457] dark:to-[#c49a45] text-white dark:text-slate-950 flex items-center justify-center font-bold text-xs tracking-wider">
+                  3D
+                </div>
+              )}
+              <div>
+                <h1 className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[150px]">
+                  {practiceProfile?.brandName || "Orthodontic Studio"}
+                </h1>
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
+                  {practiceProfile?.firmName || `Dr. ${email.split("@")[0]}`}
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xs font-bold text-slate-900 dark:text-white">Orthodontic Studio</h1>
-              <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">Dr. {email.split("@")[0]}</p>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => {
+                  setIsOnboarding(false);
+                  setIsProfileModalOpen(true);
+                }}
+                title="Practice Settings"
+                className="w-8 h-8 rounded-lg flex items-center justify-center border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-[#131A26] text-slate-600 dark:text-slate-300"
+              >
+                <Settings className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={toggleTheme}
+                title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                className="w-8 h-8 rounded-lg flex items-center justify-center border border-slate-200 dark:border-[#e0b457]/30 bg-slate-100 dark:bg-[#131A26] text-slate-600 dark:text-[#ffd166] transition-colors"
+              >
+                {isDark ? <Sun className="w-3.5 h-3.5 text-[#ffd166]" /> : <Moon className="w-3.5 h-3.5" />}
+              </button>
+              <button
+                onClick={() => setIsUploadOpen(true)}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white dark:text-slate-950 bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:to-[#c49a45] active:scale-95 transition-all shadow-sm"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>New</span>
+              </button>
+              <button
+                onClick={handleSignOut}
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* Mobile Tab Switcher */}
+          <div className={`grid ${isSoloDoctor ? "grid-cols-2" : "grid-cols-3"} gap-1 p-1 bg-slate-100 dark:bg-[#0B0F17] rounded-xl text-xs font-semibold`}>
             <button
-              onClick={toggleTheme}
-              title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
-              className="w-8 h-8 rounded-lg flex items-center justify-center border border-slate-200 dark:border-[#e0b457]/30 bg-slate-100 dark:bg-[#131A26] text-slate-600 dark:text-[#ffd166] transition-colors"
+              onClick={() => setCurrentTab("cases")}
+              className={`py-1.5 rounded-lg text-center transition-all ${
+                currentTab === "cases"
+                  ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white shadow-xs"
+                  : "text-slate-500 dark:text-slate-400"
+              }`}
             >
-              {isDark ? <Sun className="w-3.5 h-3.5 text-[#ffd166]" /> : <Moon className="w-3.5 h-3.5" />}
+              Cases ({cases.length})
             </button>
+            {!isSoloDoctor && (
+              <button
+                onClick={() => setCurrentTab("doctors")}
+                className={`py-1.5 rounded-lg text-center transition-all ${
+                  currentTab === "doctors"
+                    ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white shadow-xs"
+                    : "text-slate-500 dark:text-slate-400"
+                }`}
+              >
+                Doctors ({doctors.length})
+              </button>
+            )}
             <button
-              onClick={() => setIsUploadOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white dark:text-slate-950 bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:to-[#c49a45] active:scale-95 transition-all shadow-sm"
+              onClick={() => setCurrentTab("clinics")}
+              className={`py-1.5 rounded-lg text-center transition-all ${
+                currentTab === "clinics"
+                  ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white shadow-xs"
+                  : "text-slate-500 dark:text-slate-400"
+              }`}
             >
-              <Plus className="w-3.5 h-3.5" />
-              New Case
-            </button>
-            <button
-              onClick={handleSignOut}
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-            >
-              <LogOut className="w-4 h-4" />
+              Clinics ({clinics.length})
             </button>
           </div>
         </header>
 
         {/* Content Container */}
         <div className="p-4 sm:p-6 lg:p-8 max-w-6xl w-full mx-auto space-y-7">
-          {/* Page Top Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-                Treatment Cases
-              </h2>
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Interactive 3D orthodontic progression plans and patient consultation links.
-              </p>
-            </div>
+          {currentTab === "doctors" ? (
+            <DoctorsView
+              doctors={doctors}
+              onDoctorsUpdated={setDoctors}
+              cases={cases}
+              userId={userId}
+              onToast={showToast}
+            />
+          ) : currentTab === "clinics" ? (
+            <ClinicsView
+              clinics={clinics}
+              onClinicsUpdated={setClinics}
+              cases={cases}
+              userId={userId}
+              onToast={showToast}
+            />
+          ) : (
+            <>
+              {/* Page Top Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                    Treatment Cases
+                  </h2>
+                  <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
+                    Interactive 3D orthodontic progression plans and patient consultation links.
+                  </p>
+                </div>
 
-            <div className="flex items-center gap-2.5 self-start sm:self-auto">
-              {/* Site-Wide Dark/Light Theme Switcher */}
-              <button
-                onClick={toggleTheme}
-                title={isDark ? "Switch to Daytime Light Mode" : "Switch to Clinical Dark Mode"}
-                className="p-2.5 rounded-xl border transition-all flex items-center justify-center gap-2 bg-white dark:bg-[#131A26] border-slate-200 dark:border-[#e0b457]/30 text-slate-700 dark:text-[#ffd166] hover:bg-slate-50 dark:hover:bg-[#1A2234] dark:hover:border-[#e0b457]/60 shadow-xs active:scale-95 text-xs font-semibold"
-              >
-                {isDark ? (
-                  <>
-                    <Sun className="w-4 h-4 text-[#ffd166]" />
-                    <span className="hidden sm:inline">Light Mode</span>
-                  </>
-                ) : (
-                  <>
-                    <Moon className="w-4 h-4 text-slate-600" />
-                    <span className="hidden sm:inline">Dark Mode</span>
-                  </>
-                )}
-              </button>
+                <div className="flex items-center gap-2.5 self-start sm:self-auto">
+                  {/* Site-Wide Dark/Light Theme Switcher */}
+                  <button
+                    onClick={toggleTheme}
+                    title={isDark ? "Switch to Daytime Light Mode" : "Switch to Clinical Dark Mode"}
+                    className="p-2.5 rounded-xl border transition-all flex items-center justify-center gap-2 bg-white dark:bg-[#131A26] border-slate-200 dark:border-[#e0b457]/30 text-slate-700 dark:text-[#ffd166] hover:bg-slate-50 dark:hover:bg-[#1A2234] dark:hover:border-[#e0b457]/60 shadow-xs active:scale-95 text-xs font-semibold"
+                  >
+                    {isDark ? (
+                      <>
+                        <Sun className="w-4 h-4 text-[#ffd166]" />
+                        <span className="hidden sm:inline">Light Mode</span>
+                      </>
+                    ) : (
+                      <>
+                        <Moon className="w-4 h-4 text-slate-600" />
+                        <span className="hidden sm:inline">Dark Mode</span>
+                      </>
+                    )}
+                  </button>
 
-              <button
-                onClick={() => setIsUploadOpen(true)}
-                className="hidden lg:flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-xs tracking-wide text-white dark:text-slate-950 bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:via-[#f3c875] dark:to-[#c49a45] hover:bg-slate-800 dark:hover:brightness-105 active:scale-98 transition-all shadow-sm dark:shadow-[0_2px_12px_rgba(224,180,87,0.25)]"
-              >
-                <Plus className="w-4 h-4" />
-                Upload New Case
-              </button>
-            </div>
-          </div>
+                  <button
+                    onClick={() => setIsUploadOpen(true)}
+                    className="hidden lg:flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-xs tracking-wide text-white dark:text-slate-950 bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:via-[#f3c875] dark:to-[#c49a45] hover:bg-slate-800 dark:hover:brightness-105 active:scale-98 transition-all shadow-sm dark:shadow-[0_2px_12px_rgba(224,180,87,0.25)]"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Upload New Case
+                  </button>
+                </div>
+              </div>
 
-          {/* Search & Filter Toolbar */}
-          <div className="bg-white dark:bg-[#131A26] rounded-2xl p-2 sm:p-2.5 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 transition-colors">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by patient name, ID, or clinic..."
-                className="w-full pl-10 pr-4 py-2 rounded-xl text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 bg-transparent focus:outline-none focus:bg-slate-50 dark:focus:bg-[#1A2234] transition-all"
-              />
-            </div>
+              {/* Search & Filter Toolbar */}
+              <div className="bg-white dark:bg-[#131A26] rounded-2xl p-2 sm:p-2.5 border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col md:flex-row items-stretch md:items-center gap-2.5 transition-colors">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search by patient name, ID, clinic, or doctor..."
+                    className="w-full pl-10 pr-4 py-2 rounded-xl text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 bg-transparent focus:outline-none focus:bg-slate-50 dark:focus:bg-[#1A2234] transition-all"
+                  />
+                </div>
 
-            <div className="flex items-center gap-1 p-1 bg-slate-100/90 dark:bg-[#0B0F17] rounded-xl overflow-x-auto transition-colors">
-              <button
-                onClick={() => setActiveFilter("all")}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  activeFilter === "all"
-                    ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white shadow-xs"
-                    : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
-                }`}
-              >
-                All Cases ({cases.length})
-              </button>
-              <button
-                onClick={() => setActiveFilter("ready")}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  activeFilter === "ready"
-                    ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white shadow-xs"
-                    : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
-                }`}
-              >
-                Ready ({cases.filter((c) => c.status === "ready" || c.status === "revoked").length})
-              </button>
-            </div>
-          </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {/* Status Filters */}
+                  <div className="flex items-center gap-1 p-1 bg-slate-100/90 dark:bg-[#0B0F17] rounded-xl overflow-x-auto transition-colors">
+                    <button
+                      onClick={() => setActiveFilter("all")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        activeFilter === "all"
+                          ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white shadow-xs"
+                          : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+                      }`}
+                    >
+                      All ({cases.length})
+                    </button>
+                    <button
+                      onClick={() => setActiveFilter("ready")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        activeFilter === "ready"
+                          ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white shadow-xs"
+                          : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+                      }`}
+                    >
+                      Ready ({cases.filter((c) => c.status === "ready" || c.status === "revoked").length})
+                    </button>
+                  </div>
+
+                  {/* Clinic Filter Dropdown */}
+                  {clinics.length > 0 && (
+                    <div className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100/90 dark:bg-[#0B0F17] rounded-xl border border-slate-200/60 dark:border-slate-800 text-xs">
+                      <Building2 className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
+                      <select
+                        value={selectedClinicFilter}
+                        onChange={(e) => setSelectedClinicFilter(e.target.value)}
+                        className="bg-transparent font-semibold text-slate-700 dark:text-slate-200 border-none focus:outline-none cursor-pointer pr-1"
+                      >
+                        <option value="all">All Clinics</option>
+                        {clinics.map((c) => (
+                          <option key={c.id} value={c.name} className="dark:bg-[#131A26]">
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Doctor Filter Dropdown (hidden for Solo Doctors) */}
+                  {!isSoloDoctor && doctors.length > 0 && (
+                    <div className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100/90 dark:bg-[#0B0F17] rounded-xl border border-slate-200/60 dark:border-slate-800 text-xs">
+                      <Stethoscope className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
+                      <select
+                        value={selectedDoctorFilter}
+                        onChange={(e) => setSelectedDoctorFilter(e.target.value)}
+                        className="bg-transparent font-semibold text-slate-700 dark:text-slate-200 border-none focus:outline-none cursor-pointer pr-1"
+                      >
+                        <option value="all">All Doctors</option>
+                        {doctors.map((d) => (
+                          <option key={d.id} value={d.name} className="dark:bg-[#131A26]">
+                            Dr. {d.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              </div>
 
           {/* Case Records Grid */}
           {filteredCases.length === 0 ? (
@@ -562,6 +817,12 @@ export default function DashboardClient({
                                   <span>{item.patient_id}</span>
                                 </span>
                               )}
+                              {(item.is_refinement || item.doctor_notes?.is_refinement) && (
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-800 dark:text-[#ffd166] border border-amber-500/30 inline-flex items-center gap-1">
+                                  <Sparkles className="w-2.5 h-2.5" />
+                                  <span>Refinement</span>
+                                </span>
+                              )}
                               {(item.patient_sex || item.patient_age != null) && (
                                 <span className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-100/90 dark:bg-[#151D2A] text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700/60 inline-flex items-center gap-1">
                                   <span>
@@ -581,6 +842,15 @@ export default function DashboardClient({
                                   <span className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-300">
                                     <Building2 className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
                                     <span>{item.clinic_name}</span>
+                                  </span>
+                                  <span className="text-slate-300 dark:text-slate-700">•</span>
+                                </>
+                              )}
+                              {(item.doctor_name || item.doctor_notes?.assigned_doctor) && (
+                                <>
+                                  <span className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-300">
+                                    <Stethoscope className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
+                                    <span>Dr. {item.doctor_name || item.doctor_notes?.assigned_doctor}</span>
                                   </span>
                                   <span className="text-slate-300 dark:text-slate-700">•</span>
                                 </>
@@ -757,6 +1027,8 @@ export default function DashboardClient({
               })}
             </div>
           )}
+            </>
+          )}
         </div>
       </main>
 
@@ -766,6 +1038,45 @@ export default function DashboardClient({
         onClose={() => setIsUploadOpen(false)}
         userId={userId}
         onCaseCreated={handleCaseCreated}
+        doctors={doctors}
+        clinics={clinics}
+        isSoloDoctor={isSoloDoctor}
+        defaultDoctorName={defaultDoctorName}
+        onOpenAddDoctor={() => {
+          setIsUploadOpen(false);
+          setCurrentTab("doctors");
+        }}
+        onOpenAddClinic={() => {
+          setIsUploadOpen(false);
+          setCurrentTab("clinics");
+        }}
+      />
+
+      {/* ─── Practice Profile & Brand Setup Modal ───────────────────────── */}
+      <PracticeProfileModal
+        isOpen={isProfileModalOpen}
+        onClose={() => {
+          setIsProfileModalOpen(false);
+          setIsOnboarding(false);
+          if (typeof window !== "undefined") {
+            try {
+              localStorage.setItem(`dental_onboarding_dismissed_${userId}`, "true");
+            } catch {}
+          }
+        }}
+        userId={userId}
+        userEmail={email}
+        initialProfile={practiceProfile}
+        onProfileSaved={(prof) => {
+          setPracticeProfile(prof);
+          if (typeof window !== "undefined") {
+            try {
+              localStorage.removeItem(`dental_onboarding_dismissed_${userId}`);
+            } catch {}
+          }
+          showToast("Practice brand profile updated");
+        }}
+        isOnboarding={isOnboarding}
       />
 
       {/* ─── Edit IPR Modal ───────────────────────────────────────────── */}

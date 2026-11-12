@@ -100,6 +100,10 @@ export interface CaseManifest {
   readonly patientSex?: string;
   /** Clinic or dental practice name if assigned. */
   readonly clinicName?: string;
+  /** Treating doctor name if assigned. */
+  readonly doctorName?: string;
+  /** Whether this case represents a mid-course refinement / revision. */
+  readonly isRefinement?: boolean;
   /** Treatment arch type: "both" (default), "upper", or "lower". */
   readonly archType?: "both" | "upper" | "lower";
   /** Whether upper arch assets exist in this case. */
