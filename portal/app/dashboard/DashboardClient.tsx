@@ -369,30 +369,23 @@ export default function DashboardClient({
       {/* ─── Desktop Sidebar ──────────────────────────────────────────── */}
       <aside className="hidden lg:flex flex-col w-64 bg-white dark:bg-[#0D121D] border-r border-slate-200/90 dark:border-slate-800/90 p-5 fixed inset-y-0 left-0 z-30 justify-between transition-colors duration-200">
         <div className="space-y-6">
-          {/* Brand */}
-          <div className="px-1 py-1">
+          {/* Top Corner Brand Area */}
+          <div className="w-full">
             {practiceProfile?.logoUrl ? (
-              <div className="space-y-1.5">
-                {/* Full-width spacious brand logo container */}
-                <div className="h-14 flex items-center justify-start overflow-hidden">
-                  <img
-                    src={practiceProfile.logoUrl}
-                    alt={practiceProfile.brandName || "Brand Logo"}
-                    className="max-h-14 w-auto max-w-[216px] object-contain object-left drop-shadow-sm"
-                  />
-                </div>
-                {(practiceProfile.brandName || practiceProfile.firmName) && (
-                  <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 tracking-wider uppercase truncate">
-                    {practiceProfile.firmType === "lab"
-                      ? "Aligner Lab"
-                      : practiceProfile.firmType === "clinic"
-                      ? "Dental Practice"
-                      : "Clinical Studio"}
-                    {practiceProfile.brandName && practiceProfile.brandName !== practiceProfile.firmName
-                      ? ` • ${practiceProfile.brandName}`
-                      : ""}
-                  </p>
-                )}
+              <div
+                onClick={() => {
+                  setIsOnboarding(false);
+                  setIsProfileModalOpen(true);
+                }}
+                title="Practice & Brand Settings"
+                className="w-full flex items-center justify-start cursor-pointer group"
+              >
+                {/* Dynamically fits logos of ANY aspect ratio: wide banner, square, or tall */}
+                <img
+                  src={practiceProfile.logoUrl}
+                  alt={practiceProfile.brandName || "Brand Logo"}
+                  className="max-h-28 sm:max-h-32 w-auto max-w-full object-contain object-left group-hover:opacity-90 transition-opacity"
+                />
               </div>
             ) : (
               <div className="flex items-center gap-3">
