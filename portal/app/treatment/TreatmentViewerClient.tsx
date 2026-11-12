@@ -151,7 +151,7 @@ export default function TreatmentViewerClient() {
 
       // Access is valid — initialize 3D viewer
       // 1. Ensure stylesheet is loaded
-      const expectedCss = "/assets/treatment-main-0-u0pM1h.css";
+      const expectedCss = "/assets/treatment-main-Dqz2MdVi.css";
       const existingLink = document.querySelector('link[href*="treatment-main"]');
       if (existingLink) {
         if (existingLink.getAttribute("href") !== expectedCss) {
@@ -170,7 +170,7 @@ export default function TreatmentViewerClient() {
       } else {
         const script = document.createElement("script");
         script.type = "module";
-        script.src = `/assets/treatment-main-DV822zV-.js?t=${Date.now()}`;
+        script.src = `/assets/treatment-main-oEEvPQdv.js?t=${Date.now()}`;
         document.body.appendChild(script);
       }
     }
