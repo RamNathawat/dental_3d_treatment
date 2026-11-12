@@ -254,17 +254,20 @@ export default function PracticeProfileModal({
             </label>
 
             <div className="flex items-center gap-3">
-              {/* Logo Preview Box */}
-              <div className="w-16 h-16 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-[#131A26] flex items-center justify-center overflow-hidden flex-shrink-0 relative">
+              {/* Logo Preview Box: Wide landscape format to accommodate real-world brand banners */}
+              <div className="h-16 w-48 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-[#131A26] flex items-center justify-center overflow-hidden p-2 flex-shrink-0 relative">
                 {logoUrl && !logoPreviewError ? (
                   <img
                     src={logoUrl}
                     alt="Brand Logo"
                     onError={() => setLogoPreviewError(true)}
-                    className="w-full h-full object-contain p-1"
+                    className="max-h-full max-w-full object-contain"
                   />
                 ) : (
-                  <ImageIcon className="w-6 h-6 text-slate-400" />
+                  <div className="flex items-center gap-2 text-slate-400">
+                    <ImageIcon className="w-5 h-5" />
+                    <span className="text-[11px] font-medium">Logo Preview</span>
+                  </div>
                 )}
               </div>
 

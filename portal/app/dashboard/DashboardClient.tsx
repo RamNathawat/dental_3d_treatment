@@ -370,35 +370,49 @@ export default function DashboardClient({
       <aside className="hidden lg:flex flex-col w-64 bg-white dark:bg-[#0D121D] border-r border-slate-200/90 dark:border-slate-800/90 p-5 fixed inset-y-0 left-0 z-30 justify-between transition-colors duration-200">
         <div className="space-y-6">
           {/* Brand */}
-          <div className="flex items-center gap-3 px-1 py-1">
+          <div className="px-1 py-1">
             {practiceProfile?.logoUrl ? (
-              <img
-                src={practiceProfile.logoUrl}
-                alt={practiceProfile.brandName || "Brand Logo"}
-                className="w-10 h-10 rounded-xl object-contain bg-white dark:bg-[#1A2234] border border-slate-200 dark:border-slate-800 p-1 shadow-sm"
-              />
+              <div className="space-y-1.5">
+                {/* Full-width spacious brand logo container */}
+                <div className="h-14 flex items-center justify-start overflow-hidden">
+                  <img
+                    src={practiceProfile.logoUrl}
+                    alt={practiceProfile.brandName || "Brand Logo"}
+                    className="max-h-14 w-auto max-w-[216px] object-contain object-left drop-shadow-sm"
+                  />
+                </div>
+                {(practiceProfile.brandName || practiceProfile.firmName) && (
+                  <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 tracking-wider uppercase truncate">
+                    {practiceProfile.firmType === "lab"
+                      ? "Aligner Lab"
+                      : practiceProfile.firmType === "clinic"
+                      ? "Dental Practice"
+                      : "Clinical Studio"}
+                    {practiceProfile.brandName && practiceProfile.brandName !== practiceProfile.firmName
+                      ? ` • ${practiceProfile.brandName}`
+                      : ""}
+                  </p>
+                )}
+              </div>
             ) : (
-              <div className="w-10 h-10 rounded-xl bg-slate-900 dark:bg-gradient-to-br dark:from-[#e0b457] dark:to-[#c49a45] text-white dark:text-slate-950 flex items-center justify-center font-bold text-xs tracking-wider shadow-sm transition-colors">
-                3D
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-slate-900 dark:bg-gradient-to-br dark:from-[#e0b457] dark:to-[#c49a45] text-white dark:text-slate-950 flex items-center justify-center font-bold text-xs tracking-wider shadow-sm transition-colors flex-shrink-0">
+                  3D
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-sm font-bold text-slate-900 dark:text-white tracking-tight truncate">
+                    {practiceProfile?.brandName || "Orthodontic 3D"}
+                  </h1>
+                  <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 tracking-wider uppercase truncate">
+                    {practiceProfile?.firmType === "lab"
+                      ? "Aligner Lab"
+                      : practiceProfile?.firmType === "clinic"
+                      ? "Dental Practice"
+                      : "Clinical Studio"}
+                  </p>
+                </div>
               </div>
             )}
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <h1 className="text-sm font-bold text-slate-900 dark:text-white tracking-tight truncate">
-                  {practiceProfile?.brandName || "Orthodontic 3D"}
-                </h1>
-                <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-[#ffd166] border border-slate-200 dark:border-[#e0b457]/30 flex-shrink-0">
-                  {practiceProfile?.firmType === "lab" ? "Lab" : practiceProfile?.firmType === "clinic" ? "Clinic" : "Pro"}
-                </span>
-              </div>
-              <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 tracking-wider uppercase truncate">
-                {practiceProfile?.firmType === "lab"
-                  ? "Aligner Lab"
-                  : practiceProfile?.firmType === "clinic"
-                  ? "Dental Practice"
-                  : "Clinical Studio"}
-              </p>
-            </div>
           </div>
 
           {/* Primary Action Button */}
@@ -516,24 +530,28 @@ export default function DashboardClient({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               {practiceProfile?.logoUrl ? (
-                <img
-                  src={practiceProfile.logoUrl}
-                  alt={practiceProfile.brandName || "Brand Logo"}
-                  className="w-8 h-8 rounded-lg object-contain bg-white dark:bg-[#1A2234] border border-slate-200 dark:border-slate-800 p-0.5 shadow-sm"
-                />
+                <div className="h-8 flex items-center justify-start overflow-hidden">
+                  <img
+                    src={practiceProfile.logoUrl}
+                    alt={practiceProfile.brandName || "Brand Logo"}
+                    className="max-h-8 w-auto max-w-[160px] object-contain object-left"
+                  />
+                </div>
               ) : (
-                <div className="w-8 h-8 rounded-lg bg-slate-900 dark:bg-gradient-to-br dark:from-[#e0b457] dark:to-[#c49a45] text-white dark:text-slate-950 flex items-center justify-center font-bold text-xs tracking-wider">
-                  3D
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-slate-900 dark:bg-gradient-to-br dark:from-[#e0b457] dark:to-[#c49a45] text-white dark:text-slate-950 flex items-center justify-center font-bold text-xs tracking-wider">
+                    3D
+                  </div>
+                  <div>
+                    <h1 className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[150px]">
+                      {practiceProfile?.brandName || "Orthodontic Studio"}
+                    </h1>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
+                      {practiceProfile?.firmName || `Dr. ${email.split("@")[0]}`}
+                    </p>
+                  </div>
                 </div>
               )}
-              <div>
-                <h1 className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[150px]">
-                  {practiceProfile?.brandName || "Orthodontic Studio"}
-                </h1>
-                <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
-                  {practiceProfile?.firmName || `Dr. ${email.split("@")[0]}`}
-                </p>
-              </div>
             </div>
 
             <div className="flex items-center gap-1.5">
