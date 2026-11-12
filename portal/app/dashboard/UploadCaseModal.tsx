@@ -20,8 +20,11 @@ import {
   Mail,
   Stethoscope,
   Sparkles,
+  Phone,
+  MapPin,
 } from "lucide-react";
 import { DoctorRecord, ClinicRecord } from "@/lib/practice-types";
+import { saveClinic } from "@/lib/practice-storage";
 import {
   getSavedClinicEmails,
   saveClinicEmail,
@@ -61,6 +64,7 @@ interface UploadCaseModalProps {
   onOpenAddClinic?: () => void;
   isSoloDoctor?: boolean;
   defaultDoctorName?: string;
+  onClinicCreated?: (newClinic: ClinicRecord) => void;
 }
 
 export default function UploadCaseModal({
@@ -74,6 +78,7 @@ export default function UploadCaseModal({
   onOpenAddClinic,
   isSoloDoctor = false,
   defaultDoctorName = "",
+  onClinicCreated,
 }: UploadCaseModalProps) {
   const [isRefinement, setIsRefinement] = useState(false);
   const [patientName, setPatientName] = useState("");
@@ -87,6 +92,15 @@ export default function UploadCaseModal({
   const [isCustomDoctor, setIsCustomDoctor] = useState(false);
   const [isCustomClinic, setIsCustomClinic] = useState(false);
   const [isEditingSoloDoctor, setIsEditingSoloDoctor] = useState(false);
+  const [newClinicPhone, setNewClinicPhone] = useState("");
+  const [newClinicAddress, setNewClinicAddress] = useState("");
+  const [showNewClinicDetails, setShowNewClinicDetails] = useState(false);
+
+  const trimmedClinicName = clinicName.trim();
+  const matchedExistingClinic = clinics.find(
+    (c) => c.name.toLowerCase() === trimmedClinicName.toLowerCase()
+  );
+  const isNewClinic = Boolean(trimmedClinicName && !matchedExistingClinic);
 
   useEffect(() => {
     if (isSoloDoctor && defaultDoctorName && !doctorName) {
@@ -425,6 +439,26 @@ export default function UploadCaseModal({
     if (result.ok && result.caseId) {
       if (resolvedClinicEmail) {
         saveClinicEmail(resolvedClinicEmail, clinicName.trim() || undefined);
+      }
+
+      // Auto-provision new clinic to directory if it doesn't exist
+      if (trimmedClinicName && !matchedExistingClinic) {
+        const autoClinicId = `CLN-${String(clinics.length + 1).padStart(2, "0")}`;
+        void saveClinic(userId, {
+          name: trimmedClinicName,
+          clinicId: autoClinicId,
+          email: resolvedClinicEmail || undefined,
+          phone: newClinicPhone.trim() || undefined,
+          address: newClinicAddress.trim() || undefined,
+        })
+          .then((createdClinic) => {
+            if (onClinicCreated) {
+              onClinicCreated(createdClinic);
+            }
+          })
+          .catch((err) => {
+            console.warn("Could not auto-save new clinic:", err);
+          });
       }
       const archType = result.archType || (upperFile && lowerFile ? "both" : upperFile ? "upper" : "lower");
       const cleanName = patientName.replace(/\s*\[(Upper|Lower|Dual)\]/i, "").trim();
@@ -821,6 +855,60 @@ export default function UploadCaseModal({
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* New Clinic Auto-Save Card (Idea 4 Hybrid) */}
+            {isNewClinic && (
+              <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-xs transition-all animate-fadeIn">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 text-amber-900 dark:text-[#ffd166] font-medium text-xs">
+                    <Sparkles className="w-4 h-4 text-amber-500 dark:text-[#ffd166] flex-shrink-0" />
+                    <span>
+                      New clinic <strong>&quot;{trimmedClinicName}&quot;</strong> will be automatically saved to your directory
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewClinicDetails(!showNewClinicDetails)}
+                    className="text-xs font-semibold text-amber-700 dark:text-[#ffd166] hover:underline cursor-pointer flex items-center gap-1 flex-shrink-0"
+                  >
+                    <span>{showNewClinicDetails ? "Hide extra details" : "+ Add phone & address (optional)"}</span>
+                  </button>
+                </div>
+
+                {showNewClinicDetails && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-2.5 pt-2.5 border-t border-amber-500/20 animate-fadeIn">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
+                        <Phone className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
+                        <span>Clinic Phone (Optional)</span>
+                      </label>
+                      <input
+                        type="tel"
+                        disabled={isProcessing}
+                        value={newClinicPhone}
+                        onChange={(e) => setNewClinicPhone(e.target.value)}
+                        placeholder="e.g. +91 98765 43210"
+                        className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
+                        <MapPin className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
+                        <span>Address / City (Optional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        disabled={isProcessing}
+                        value={newClinicAddress}
+                        onChange={(e) => setNewClinicAddress(e.target.value)}
+                        placeholder="e.g. 124 MG Road, Bangalore"
+                        className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

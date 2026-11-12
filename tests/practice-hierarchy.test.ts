@@ -7,6 +7,7 @@ import {
   saveLocalDoctors,
   getLocalClinics,
   saveLocalClinics,
+  saveClinic,
 } from "../portal/lib/practice-storage";
 import type { PracticeProfile, DoctorRecord, ClinicRecord } from "../portal/lib/practice-types";
 
@@ -89,5 +90,27 @@ describe("Milestone 3 - Phase 2: Practice Hierarchy Storage", () => {
     expect(list.length).toBe(1);
     expect(list[0]?.name).toBe("Downtown Smile Clinic");
     expect(list[0]?.email).toBe("clinic@smiledental.com");
+  });
+
+  it("auto-provisions and persists a new clinic with optional phone and address", async () => {
+    const created = await saveClinic(testUserId, {
+      name: "Sunrise Orthodontic Studio",
+      clinicId: "CLN-02",
+      email: "contact@sunriseortho.com",
+      phone: "+91 98765 43210",
+      address: "124 Indiranagar, Bangalore",
+    });
+
+    expect(created.id).toBeDefined();
+    expect(created.name).toBe("Sunrise Orthodontic Studio");
+    expect(created.clinicId).toBe("CLN-02");
+    expect(created.email).toBe("contact@sunriseortho.com");
+    expect(created.phone).toBe("+91 98765 43210");
+    expect(created.address).toBe("124 Indiranagar, Bangalore");
+
+    const retrieved = getLocalClinics(testUserId);
+    expect(retrieved.length).toBe(1);
+    expect(retrieved[0]?.name).toBe("Sunrise Orthodontic Studio");
+    expect(retrieved[0]?.clinicId).toBe("CLN-02");
   });
 });

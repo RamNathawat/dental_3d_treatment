@@ -1042,6 +1042,15 @@ export default function DashboardClient({
         clinics={clinics}
         isSoloDoctor={isSoloDoctor}
         defaultDoctorName={defaultDoctorName}
+        onClinicCreated={(newClinic) => {
+          setClinics((prev) => {
+            if (prev.some((c) => c.id === newClinic.id || c.name.toLowerCase() === newClinic.name.toLowerCase())) {
+              return prev;
+            }
+            return [...prev, newClinic];
+          });
+          showToast(`Clinic "${newClinic.name}" saved to directory`);
+        }}
         onOpenAddDoctor={() => {
           setIsUploadOpen(false);
           setCurrentTab("doctors");
