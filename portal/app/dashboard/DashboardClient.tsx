@@ -629,6 +629,7 @@ export default function DashboardClient({
                 showToast("Settings saved successfully");
               }}
               onToast={showToast}
+              onSignOut={handleSignOut}
             />
           ) : currentTab === "doctors" ? (
             <DoctorsView
