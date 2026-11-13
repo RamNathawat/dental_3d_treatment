@@ -40,7 +40,7 @@ export default async function DashboardPage() {
   }
 
   // Strict multi-account isolation: query only cases belonging to this specific doctor
-  const { data: cases, error } = await supabase
+  const { data: rawCases, error } = await supabase
     .from("cases")
     .select("*")
     .eq("dentist_id", user.id)
@@ -50,11 +50,29 @@ export default async function DashboardPage() {
     console.error("Error fetching cases for dentist:", error);
   }
 
+  // Hydrate custom fields stored inside JSONB doctor_notes for databases without custom columns
+  const initialCases: DentalCase[] = ((rawCases as any[]) || []).map((c) => {
+    const notes =
+      c.doctor_notes && typeof c.doctor_notes === "object" ? c.doctor_notes : {};
+    return {
+      ...c,
+      doctor_name:
+        c.doctor_name || notes.assigned_doctor || notes.doctor_name || null,
+      clinic_name: c.clinic_name || notes.clinic_name || null,
+      clinic_email: c.clinic_email || notes.clinic_email || null,
+      patient_id: c.patient_id || notes.patient_id || null,
+      is_refinement:
+        c.is_refinement !== undefined && c.is_refinement !== null
+          ? c.is_refinement
+          : (notes.is_refinement ?? false),
+    };
+  });
+
   return (
     <DashboardClient
       email={user.email ?? "Doctor"}
       userId={user.id}
-      initialCases={(cases as DentalCase[]) || []}
+      initialCases={initialCases}
     />
   );
 }

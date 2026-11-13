@@ -20,9 +20,8 @@ import {
   LogOut,
   Copy,
   CheckCheck,
-  LayoutGrid,
-  SlidersHorizontal,
-  LayoutTemplate,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { PracticeProfile, FirmType } from "@/lib/practice-types";
 import { savePracticeProfile } from "@/lib/practice-storage";
@@ -34,8 +33,8 @@ interface SettingsViewProps {
   onProfileSaved: (profile: PracticeProfile) => void;
   onToast?: (msg: string) => void;
   onSignOut?: () => void;
-  dashboardLayout?: "streamlined" | "classic";
-  onLayoutChange?: (layout: "streamlined" | "classic") => void;
+  isDark?: boolean;
+  onToggleTheme?: () => void;
 }
 
 export default function SettingsView({
@@ -45,10 +44,9 @@ export default function SettingsView({
   onProfileSaved,
   onToast,
   onSignOut,
-  dashboardLayout = "streamlined",
-  onLayoutChange,
+  isDark = false,
+  onToggleTheme,
 }: SettingsViewProps) {
-  const [layoutMode, setLayoutMode] = useState<"streamlined" | "classic">(dashboardLayout);
   const [firmType, setFirmType] = useState<FirmType>(initialProfile?.firmType || "lab");
   const [firmName, setFirmName] = useState(initialProfile?.firmName || "");
   const [brandName, setBrandName] = useState(initialProfile?.brandName || "");
@@ -62,25 +60,6 @@ export default function SettingsView({
   const [copiedId, setCopiedId] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (dashboardLayout) {
-      setLayoutMode(dashboardLayout);
-    }
-  }, [dashboardLayout]);
-
-  function selectLayout(mode: "streamlined" | "classic") {
-    setLayoutMode(mode);
-    if (onLayoutChange) {
-      onLayoutChange(mode);
-    }
-    if (typeof window !== "undefined" && userId) {
-      localStorage.setItem(`dental_dashboard_layout_${userId}`, mode);
-    }
-    if (onToast) {
-      onToast(`Switched to ${mode === "streamlined" ? "Streamlined" : "Classic"} layout`);
-    }
-  }
 
   useEffect(() => {
     if (initialProfile) {
@@ -190,6 +169,107 @@ export default function SettingsView({
       </div>
 
       <form onSubmit={handleSave} className="space-y-6">
+        {/* ─── Section: Interface Appearance & Theme ──────────────────────── */}
+        <div className="bg-white dark:bg-[#0D121D] border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-2xs">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-500 dark:text-[#ffd166] flex items-center justify-center flex-shrink-0">
+                {isDark ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Interface Appearance
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Switch between Clinical Dark Mode and Daytime Light Mode.
+                </p>
+              </div>
+            </div>
+
+            {/* Quick Toggle Button */}
+            <button
+              type="button"
+              onClick={onToggleTheme}
+              className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-[#e0b457]/30 bg-slate-50 dark:bg-[#131A26] hover:bg-slate-100 dark:hover:bg-[#1A2234] text-xs font-semibold text-slate-700 dark:text-[#ffd166] inline-flex items-center gap-2 transition-all cursor-pointer shadow-2xs active:scale-95"
+            >
+              {isDark ? (
+                <>
+                  <Sun className="w-3.5 h-3.5 text-[#ffd166]" />
+                  <span>Switch to Light</span>
+                </>
+              ) : (
+                <>
+                  <Moon className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Switch to Dark</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Theme Selector Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            {/* Dark Mode Card */}
+            <button
+              type="button"
+              onClick={() => {
+                if (!isDark && onToggleTheme) onToggleTheme();
+              }}
+              className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-3 ${
+                isDark
+                  ? "bg-[#131A26] border-[#e0b457] ring-1 ring-[#e0b457]/40 shadow-sm"
+                  : "bg-slate-50 dark:bg-[#131A26] border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 opacity-75 hover:opacity-100"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-[#0A0E17] text-[#ffd166] flex items-center justify-center border border-slate-800">
+                    <Moon className="w-3.5 h-3.5" />
+                  </div>
+                  <span className="font-bold text-xs text-slate-900 dark:text-white">Clinical Dark Mode</span>
+                </div>
+                {isDark && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#ffd166] text-slate-950 inline-flex items-center gap-1">
+                    <Check className="w-3 h-3" /> Active
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                High-contrast dark clinical theme optimized for dental arches, 3D progression models, and low-glare operatory viewing.
+              </p>
+            </button>
+
+            {/* Light Mode Card */}
+            <button
+              type="button"
+              onClick={() => {
+                if (isDark && onToggleTheme) onToggleTheme();
+              }}
+              className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-3 ${
+                !isDark
+                  ? "bg-amber-50/40 border-amber-500 ring-1 ring-amber-500/30 shadow-sm"
+                  : "bg-[#0D121D] border-slate-800 hover:border-slate-700 opacity-75 hover:opacity-100"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center border border-amber-200">
+                    <Sun className="w-3.5 h-3.5" />
+                  </div>
+                  <span className="font-bold text-xs text-slate-900 dark:text-white">Daytime Light Mode</span>
+                </div>
+                {!isDark && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white inline-flex items-center gap-1">
+                    <Check className="w-3 h-3" /> Active
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                Crisp high-luminance theme tailored for well-lit office environments, consult rooms, and print-friendly export documentation.
+              </p>
+            </button>
+          </div>
+        </div>
+
         {/* ─── Section 1: Practice & Organization ──────────────────────── */}
         <div className="bg-white dark:bg-[#0D121D] border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 space-y-5 shadow-2xs">
           <div className="flex items-center gap-2.5">
@@ -285,93 +365,6 @@ export default function SettingsView({
             <p className="text-[11px] text-slate-400 dark:text-slate-500">
               Used as the legal or business entity title on export summaries and invoices.
             </p>
-          </div>
-        </div>
-
-        {/* ─── Section: Dashboard Layout & Display ────────────────────────── */}
-        <div className="bg-white dark:bg-[#0D121D] border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4 shadow-2xs">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-500 dark:text-[#ffd166] flex items-center justify-center flex-shrink-0">
-              <LayoutTemplate className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                Dashboard Layout & Case View
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Choose between the new streamlined clinical layout or the classic expanded card layout.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* Streamlined Mode Card */}
-            <button
-              type="button"
-              onClick={() => selectLayout("streamlined")}
-              className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-3 ${
-                layoutMode === "streamlined"
-                  ? "bg-amber-500/10 border-amber-500 text-slate-900 dark:text-white ring-1 ring-amber-500/30"
-                  : "bg-slate-50 dark:bg-[#131A26] border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700"
-              }`}
-            >
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <LayoutGrid className="w-5 h-5 text-amber-500 dark:text-[#ffd166]" />
-                    <span className="font-bold text-xs text-slate-900 dark:text-white">Streamlined Layout</span>
-                  </div>
-                  {layoutMode === "streamlined" ? (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-slate-950 inline-flex items-center gap-1">
-                      <Check className="w-3 h-3" /> Active
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-700 dark:text-[#ffd166]">
-                      Recommended
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                  Clean, high-efficiency cards with a smooth stage timeline, consolidated clinical stats strip, and rapid action bar. Eliminates clutter without losing any clinical information.
-                </p>
-              </div>
-              <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800/60 flex items-center gap-2 text-[10px] text-slate-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span>Optimized for desktop & mobile</span>
-              </div>
-            </button>
-
-            {/* Classic Mode Card */}
-            <button
-              type="button"
-              onClick={() => selectLayout("classic")}
-              className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-3 ${
-                layoutMode === "classic"
-                  ? "bg-amber-500/10 border-amber-500 text-slate-900 dark:text-white ring-1 ring-amber-500/30"
-                  : "bg-slate-50 dark:bg-[#131A26] border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700"
-              }`}
-            >
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <SlidersHorizontal className="w-5 h-5 text-slate-400 dark:text-slate-300" />
-                    <span className="font-bold text-xs text-slate-900 dark:text-white">Classic Layout</span>
-                  </div>
-                  {layoutMode === "classic" && (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-slate-950 inline-flex items-center gap-1">
-                      <Check className="w-3 h-3" /> Active
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                  Original detailed layout with 3D arch emblem, individual dashed stage segments, separated multi-pill duration boxes, and wide side-by-side action buttons.
-                </p>
-              </div>
-              <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800/60 flex items-center gap-2 text-[10px] text-slate-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
-                <span>Expanded original view</span>
-              </div>
-            </button>
           </div>
         </div>
 

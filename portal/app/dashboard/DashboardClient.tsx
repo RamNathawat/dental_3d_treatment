@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -19,8 +19,6 @@ import {
   ArrowUpRight,
   Clock,
   Copy,
-  Sun,
-  Moon,
   Scissors,
   FileText,
   Building2,
@@ -31,8 +29,6 @@ import {
   Settings,
   Sparkles,
   Filter,
-  LayoutGrid,
-  SlidersHorizontal,
 } from "lucide-react";
 import { DentalCase } from "./page";
 import UploadCaseModal from "./UploadCaseModal";
@@ -54,6 +50,7 @@ import {
 } from "@/lib/practice-storage";
 import { getCaseTrayInfo } from "@/lib/case-tray-info";
 import { getCaseLinkAccess } from "@/lib/link-access";
+import { mergeCasesWithLocalCache, saveCaseToLocalCache } from "@/lib/case-cache";
 export { getCaseTrayInfo, getCaseLinkAccess };
 
 interface DashboardClientProps {
@@ -69,7 +66,7 @@ export default function DashboardClient({
 }: DashboardClientProps) {
   const [cases, setCases] = useState<DentalCase[]>(initialCases);
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeFilter, setActiveFilter] = useState<"all" | "ready" | "processing">("all");
+  const [activeFilter, setActiveFilter] = useState<"all" | "active">("all");
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [selectedIprCase, setSelectedIprCase] = useState<DentalCase | null>(null);
@@ -90,23 +87,6 @@ export default function DashboardClient({
   const [isOnboarding, setIsOnboarding] = useState(false);
   const [selectedClinicFilter, setSelectedClinicFilter] = useState<string>("all");
   const [selectedDoctorFilter, setSelectedDoctorFilter] = useState<string>("all");
-  const [dashboardLayout, setDashboardLayout] = useState<"streamlined" | "classic">("streamlined");
-
-  useEffect(() => {
-    if (typeof window !== "undefined" && userId) {
-      const saved = localStorage.getItem(`dental_dashboard_layout_${userId}`);
-      if (saved === "classic" || saved === "streamlined") {
-        setDashboardLayout(saved as "streamlined" | "classic");
-      }
-    }
-  }, [userId]);
-
-  function handleLayoutChange(mode: "streamlined" | "classic") {
-    setDashboardLayout(mode);
-    if (typeof window !== "undefined" && userId) {
-      localStorage.setItem(`dental_dashboard_layout_${userId}`, mode);
-    }
-  }
 
   const isSoloDoctor = practiceProfile?.firmType === "solo";
   const defaultDoctorName =
@@ -122,6 +102,10 @@ export default function DashboardClient({
     setIsMounted(true);
     if (!userId) return;
 
+    // Merge server-provided cases with client local cache
+    const merged = mergeCasesWithLocalCache(userId, initialCases);
+    setCases(merged);
+
     const isDismissed =
       typeof window !== "undefined" &&
       localStorage.getItem(`dental_onboarding_dismissed_${userId}`) === "true";
@@ -136,9 +120,74 @@ export default function DashboardClient({
 
     fetchDoctors(userId).then(setDoctors);
 
-    const existingClinicNames = cases.map((c) => c.clinic_name || "").filter(Boolean);
+    const existingClinicNames = merged.map((c) => c.clinic_name || "").filter(Boolean);
     fetchClinics(userId, existingClinicNames).then(setClinics);
-  }, [userId, email]);
+  }, [userId, email, initialCases]);
+
+  // Self-healing: if any case is missing clinic_name or doctor_name, attempt recovery from manifest.json
+  const checkedManifestIds = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!userId || cases.length === 0) return;
+
+    const casesNeedingCheck = cases.filter(
+      (c) => (!c.clinic_name || !c.doctor_name) && !checkedManifestIds.current.has(c.id)
+    );
+    if (casesNeedingCheck.length === 0) return;
+
+    casesNeedingCheck.forEach((c) => checkedManifestIds.current.add(c.id));
+
+    let active = true;
+    (async () => {
+      let hasUpdates = false;
+      const updatedList = [...cases];
+
+      for (const c of casesNeedingCheck) {
+        try {
+          const res = await fetch(
+            `https://yrjulcwnabnhgtqebrtn.supabase.co/storage/v1/object/public/treatment-models/${c.id}/manifest.json?t=${Date.now()}`
+          );
+          if (!res.ok) continue;
+          const m = await res.json();
+          const doc = m.doctorName || m.doctorNotes?.assigned_doctor || m.doctorNotes?.doctor_name;
+          const clinic = m.clinicName || m.doctorNotes?.clinic_name;
+          const mail = m.clinicEmail || m.doctorNotes?.clinic_email;
+          const isRef = m.isRefinement ?? m.doctorNotes?.is_refinement;
+
+          if (doc || clinic || isRef !== undefined) {
+            const idx = updatedList.findIndex((item) => item.id === c.id);
+            if (idx !== -1) {
+              const patchedCase: DentalCase = {
+                ...updatedList[idx],
+                doctor_name: updatedList[idx].doctor_name || doc || null,
+                clinic_name: updatedList[idx].clinic_name || clinic || null,
+                clinic_email: updatedList[idx].clinic_email || mail || null,
+                is_refinement: updatedList[idx].is_refinement ?? isRef,
+                doctor_notes: {
+                  ...(updatedList[idx].doctor_notes || {}),
+                  ...(m.doctorNotes || {}),
+                  assigned_doctor: doc || updatedList[idx].doctor_notes?.assigned_doctor,
+                  clinic_name: clinic || updatedList[idx].doctor_notes?.clinic_name,
+                },
+              };
+              updatedList[idx] = patchedCase;
+              saveCaseToLocalCache(userId, patchedCase);
+              hasUpdates = true;
+            }
+          }
+        } catch {
+          // ignore network glitch
+        }
+      }
+
+      if (active && hasUpdates) {
+        setCases(updatedList);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [userId, cases]);
 
   const router = useRouter();
   const supabase = createClient();
@@ -315,11 +364,13 @@ export default function DashboardClient({
   }
 
   function handleCaseCreated(newCase: DentalCase) {
+    saveCaseToLocalCache(userId, newCase);
     setCases((prev) => [newCase, ...prev]);
     showToast(`Case "${newCase.patient_name}" created and synced to cloud`);
   }
 
   function handleCaseUpdated(updatedCase: DentalCase) {
+    saveCaseToLocalCache(userId, updatedCase);
     setCases((prev) =>
       prev.map((c) => (c.id === updatedCase.id ? updatedCase : c))
     );
@@ -358,9 +409,10 @@ export default function DashboardClient({
     const matchesStatus =
       activeFilter === "all"
         ? true
-        : activeFilter === "ready"
-        ? c.status === "ready" || c.status === "revoked"
-        : c.status === activeFilter;
+        : (() => {
+            const access = getCaseLinkAccess(c, { readLocalCache: isMounted });
+            return access.status === "active" || access.status === "expiring_soon";
+          })();
 
     const matchesClinic =
       selectedClinicFilter === "all" ||
@@ -372,6 +424,11 @@ export default function DashboardClient({
 
     return matchesSearch && matchesStatus && matchesClinic && matchesDoctor;
   });
+
+  const activeCasesCount = cases.filter((c) => {
+    const access = getCaseLinkAccess(c, { readLocalCache: isMounted });
+    return access.status === "active" || access.status === "expiring_soon";
+  }).length;
 
   const doctorInitial = email ? email[0].toUpperCase() : "D";
 
@@ -601,13 +658,6 @@ export default function DashboardClient({
                 <Settings className="w-3.5 h-3.5" />
               </button>
               <button
-                onClick={toggleTheme}
-                title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
-                className="w-8 h-8 rounded-lg flex items-center justify-center border border-slate-200 dark:border-[#e0b457]/30 bg-slate-100 dark:bg-[#131A26] text-slate-600 dark:text-[#ffd166] transition-colors"
-              >
-                {isDark ? <Sun className="w-3.5 h-3.5 text-[#ffd166]" /> : <Moon className="w-3.5 h-3.5" />}
-              </button>
-              <button
                 onClick={() => setIsUploadOpen(true)}
                 className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white dark:text-slate-950 bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:to-[#c49a45] active:scale-95 transition-all shadow-sm"
               >
@@ -673,8 +723,8 @@ export default function DashboardClient({
               }}
               onToast={showToast}
               onSignOut={handleSignOut}
-              dashboardLayout={dashboardLayout}
-              onLayoutChange={handleLayoutChange}
+              isDark={isDark}
+              onToggleTheme={toggleTheme}
             />
           ) : currentTab === "doctors" ? (
             <DoctorsView
@@ -705,56 +755,7 @@ export default function DashboardClient({
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2.5 flex-wrap self-start sm:self-auto">
-                  {/* Layout Switcher (Streamlined vs Classic) */}
-                  <div className="flex items-center p-1 rounded-xl bg-white dark:bg-[#131A26] border border-slate-200/90 dark:border-slate-800 text-xs font-semibold shadow-2xs">
-                    <button
-                      type="button"
-                      onClick={() => handleLayoutChange("streamlined")}
-                      title="Streamlined Layout: compact, clean & high efficiency"
-                      className={`px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                        dashboardLayout === "streamlined"
-                          ? "bg-slate-900 dark:bg-[#1E293B] text-white dark:text-[#ffd166] shadow-2xs"
-                          : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200"
-                      }`}
-                    >
-                      <LayoutGrid className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Streamlined</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleLayoutChange("classic")}
-                      title="Classic Layout: original expanded cards"
-                      className={`px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                        dashboardLayout === "classic"
-                          ? "bg-slate-900 dark:bg-[#1E293B] text-white dark:text-[#ffd166] shadow-2xs"
-                          : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200"
-                      }`}
-                    >
-                      <SlidersHorizontal className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Classic</span>
-                    </button>
-                  </div>
-
-                  {/* Site-Wide Dark/Light Theme Switcher */}
-                  <button
-                    onClick={toggleTheme}
-                    title={isDark ? "Switch to Daytime Light Mode" : "Switch to Clinical Dark Mode"}
-                    className="p-2.5 rounded-xl border transition-all flex items-center justify-center gap-2 bg-white dark:bg-[#131A26] border-slate-200 dark:border-[#e0b457]/30 text-slate-700 dark:text-[#ffd166] hover:bg-slate-50 dark:hover:bg-[#1A2234] dark:hover:border-[#e0b457]/60 shadow-xs active:scale-95 text-xs font-semibold"
-                  >
-                    {isDark ? (
-                      <>
-                        <Sun className="w-4 h-4 text-[#ffd166]" />
-                        <span className="hidden sm:inline">Light Mode</span>
-                      </>
-                    ) : (
-                      <>
-                        <Moon className="w-4 h-4 text-slate-600" />
-                        <span className="hidden sm:inline">Dark Mode</span>
-                      </>
-                    )}
-                  </button>
-
+                <div className="flex items-center gap-2.5 self-start sm:self-auto">
                   <button
                     onClick={() => setIsUploadOpen(true)}
                     className="hidden lg:flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-xs tracking-wide text-white dark:text-slate-950 bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:via-[#f3c875] dark:to-[#c49a45] hover:bg-slate-800 dark:hover:brightness-105 active:scale-98 transition-all shadow-sm dark:shadow-[0_2px_12px_rgba(224,180,87,0.25)]"
@@ -792,14 +793,15 @@ export default function DashboardClient({
                       All ({cases.length})
                     </button>
                     <button
-                      onClick={() => setActiveFilter("ready")}
+                      onClick={() => setActiveFilter("active")}
+                      title="Filter cases with active shared links"
                       className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                        activeFilter === "ready"
+                        activeFilter === "active"
                           ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white shadow-xs"
                           : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
                       }`}
                     >
-                      Ready ({cases.filter((c) => c.status === "ready" || c.status === "revoked").length})
+                      Active ({activeCasesCount})
                     </button>
                   </div>
 
@@ -852,11 +854,17 @@ export default function DashboardClient({
               </div>
               <div className="max-w-md mx-auto">
                 <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
-                  {searchQuery ? "No matching patient cases found" : "No treatment cases uploaded yet"}
+                  {searchQuery
+                    ? "No matching patient cases found"
+                    : activeFilter === "active"
+                    ? "No active shared links found"
+                    : "No treatment cases uploaded yet"}
                 </h3>
                 <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
                   {searchQuery
                     ? `No records match "${searchQuery}". Clear your search query to view all treatment files.`
+                    : activeFilter === "active"
+                    ? "Cases with shared links and active countdown timers will appear here."
                     : "Drop your Maestro 3D ZIP export archive to automatically generate a 60 FPS interactive 3D progression model."}
                 </p>
               </div>
@@ -872,7 +880,7 @@ export default function DashboardClient({
             </div>
           ) : (
             /* Rich Clinical Case Cards */
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {filteredCases.map((item) => {
                 const dateStr = new Date(item.created_at).toLocaleDateString("en-US", {
                   month: "short",
@@ -890,230 +898,10 @@ export default function DashboardClient({
                 const linkAccess = getCaseLinkAccess(item, { readLocalCache: isMounted });
                 const displayName = item.patient_name.replace(/\s*\[(Upper|Lower|Dual)\]/i, "").trim();
 
-                {/* ─── Streamlined UI Layout (Modern, Clean & Mobile Optimized) ─── */}
-                if (dashboardLayout === "streamlined") {
-                  return (
-                    <div
-                      key={item.id}
-                      className="bg-white dark:bg-[#131A26] rounded-2xl p-4 sm:p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs hover:shadow-md hover:border-slate-300 dark:hover:border-[#e0b457]/40 transition-all duration-200 flex flex-col justify-between gap-3.5 group relative h-fit self-start"
-                    >
-                      <div className="space-y-3">
-                        {/* Top Header: Patient Title & Clinical Badges */}
-                        <div className="flex items-start justify-between gap-2.5">
-                          <div className="min-w-0 space-y-1">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white truncate tracking-tight group-hover:text-slate-700 dark:group-hover:text-[#ffd166] transition-colors">
-                                {displayName}
-                              </h3>
-                              {item.patient_id && (
-                                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-100 dark:bg-[#1A2234] text-slate-700 dark:text-[#ffd166] border border-slate-200 dark:border-slate-700/80 inline-flex items-center gap-0.5">
-                                  <Hash className="w-2.5 h-2.5 text-slate-400 dark:text-[#ffd166]" />
-                                  <span>{item.patient_id}</span>
-                                </span>
-                              )}
-                              {(item.is_refinement || item.doctor_notes?.is_refinement) && (
-                                <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-800 dark:text-[#ffd166] border border-amber-500/30 inline-flex items-center gap-1">
-                                  <Sparkles className="w-2.5 h-2.5" />
-                                  <span>Refinement</span>
-                                </span>
-                              )}
-                              {(item.patient_sex || item.patient_age != null) && (
-                                <span className="px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-slate-100/90 dark:bg-[#151D2A] text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700/60 inline-flex items-center gap-1">
-                                  <span>
-                                    {[
-                                      item.patient_sex,
-                                      item.patient_age != null ? `${item.patient_age} yrs` : null,
-                                    ]
-                                      .filter(Boolean)
-                                      .join(" · ")}
-                                  </span>
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="flex items-center gap-2 flex-wrap text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                              {item.clinic_name && (
-                                <>
-                                  <span className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-300">
-                                    <Building2 className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
-                                    <span className="truncate max-w-[140px] sm:max-w-none">{item.clinic_name}</span>
-                                  </span>
-                                  <span className="text-slate-300 dark:text-slate-700">•</span>
-                                </>
-                              )}
-                              {(item.doctor_name || item.doctor_notes?.assigned_doctor) && (
-                                <>
-                                  <span className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-300">
-                                    <Stethoscope className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
-                                    <span className="truncate max-w-[140px] sm:max-w-none">
-                                      {(() => {
-                                        const docRaw = (item.doctor_name || item.doctor_notes?.assigned_doctor || "").trim();
-                                        return docRaw.toLowerCase().startsWith("dr.") ? docRaw : `Dr. ${docRaw}`;
-                                      })()}
-                                    </span>
-                                  </span>
-                                  <span className="text-slate-300 dark:text-slate-700">•</span>
-                                </>
-                              )}
-                              <span suppressHydrationWarning>Created {dateStr}</span>
-                            </div>
-                          </div>
-
-                          {/* Top-Right Badges & Actions */}
-                          <div className="flex items-center gap-1 flex-wrap justify-end flex-shrink-0">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1 border ${
-                                trayInfo.isSingle && trayInfo.archType === "upper"
-                                  ? "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-200/70 dark:border-sky-800/50"
-                                  : trayInfo.isSingle && trayInfo.archType === "lower"
-                                  ? "bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200/70 dark:border-purple-800/50"
-                                  : trayInfo.isUnequal
-                                  ? "bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-[#ffd166] border-amber-300 dark:border-amber-700/60 shadow-2xs"
-                                  : "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-[#ffd166] border-amber-200/70 dark:border-amber-800/50"
-                              }`}
-                            >
-                              <span
-                                className={`w-1.5 h-1.5 rounded-full ${
-                                  trayInfo.isSingle && trayInfo.archType === "upper"
-                                    ? "bg-sky-500"
-                                    : trayInfo.isSingle && trayInfo.archType === "lower"
-                                    ? "bg-purple-500"
-                                    : "bg-amber-500"
-                                }`}
-                              />
-                              {trayInfo.archBadgeText}
-                            </span>
-
-                            <button
-                              type="button"
-                              suppressHydrationWarning
-                              onClick={() => setSelectedShareCase(item)}
-                              title={`Link Access: ${linkAccess.relativeTimeText}`}
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1 border transition-all hover:scale-105 active:scale-95 ${linkAccess.badgeColorClass}`}
-                            >
-                              <span suppressHydrationWarning className={`w-1.5 h-1.5 rounded-full ${linkAccess.badgeDotClass}`} />
-                              <span suppressHydrationWarning>{linkAccess.badgeLabel}</span>
-                            </button>
-
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200/70 dark:border-emerald-800/50 inline-flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                              Ready
-                            </span>
-
-                            <button
-                              onClick={() => setSelectedEditCase(item)}
-                              title="Edit case details & re-enter 3D models"
-                              className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-amber-600 dark:hover:text-[#ffd166] hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors ml-0.5"
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteCase(item.id, item.patient_name)}
-                              title="Delete case"
-                              className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Continuous Streamlined Stage Progression Bar */}
-                        <div className="space-y-1.5 pt-0.5">
-                          <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                            <span>Stage 01 (Initial)</span>
-                            <span
-                              className={`text-center px-1 truncate max-w-[200px] sm:max-w-none ${
-                                trayInfo.isUnequal
-                                  ? "text-amber-700 dark:text-[#ffd166] font-semibold"
-                                  : "text-slate-400 dark:text-slate-500 font-normal"
-                              }`}
-                            >
-                              {trayInfo.stepperCenterText}
-                            </span>
-                            <span>{trayInfo.stepperFinalText}</span>
-                          </div>
-                          <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-[#0D121D] border border-slate-200/60 dark:border-slate-800 overflow-hidden">
-                            <div className="h-full w-full rounded-full bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:via-[#f3c875] dark:to-[#c49a45] dark:shadow-[0_0_8px_rgba(224,180,87,0.35)] transition-all" />
-                          </div>
-                        </div>
-
-                        {/* Consolidated Clinical Info Strip */}
-                        <div className="rounded-xl bg-slate-50 dark:bg-[#0E1420] border border-slate-200/70 dark:border-slate-800/80 px-3 py-2 text-xs flex items-center justify-between gap-2 flex-wrap text-slate-700 dark:text-slate-300 font-medium">
-                          <div className="inline-flex items-center gap-1.5 truncate">
-                            <Layers className="w-3.5 h-3.5 text-amber-600 dark:text-[#ffd166] flex-shrink-0" />
-                            <span className="font-semibold text-slate-900 dark:text-white truncate">{trayInfo.metadataBadgeText}</span>
-                          </div>
-                          <div className="hidden sm:inline text-slate-300 dark:text-slate-700">•</div>
-                          <div className="inline-flex items-center gap-1.5 flex-shrink-0">
-                            <Calendar className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166] flex-shrink-0" />
-                            <span>~{minMonths}–{maxMonths} Mo ({minWeeks}–{maxWeeks} wks)</span>
-                          </div>
-                          <div className="hidden sm:inline text-slate-300 dark:text-slate-700">•</div>
-                          <div className="inline-flex items-center gap-1.5 flex-shrink-0">
-                            <Clock className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166] flex-shrink-0" />
-                            <span>10–14 Days/Stage</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Streamlined Action Buttons */}
-                      <div className="pt-3 border-t border-slate-100/90 dark:border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                        <a
-                          href={`/treatment?case=${item.share_token}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex-1 py-2 px-3.5 rounded-xl text-xs font-semibold text-white dark:text-slate-950 bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:via-[#f3c875] dark:to-[#c49a45] hover:bg-slate-800 dark:hover:brightness-105 shadow-sm dark:shadow-[0_2px_10px_rgba(224,180,87,0.2)] transition-all flex items-center justify-center gap-2 active:scale-98"
-                        >
-                          <Eye className="w-4 h-4 text-white dark:text-slate-950" />
-                          <span>View 3D Progression</span>
-                          <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 dark:text-slate-900" />
-                        </a>
-
-                        {/* Action buttons cluster: 3 equal buttons on mobile, compact pills on desktop */}
-                        <div className="grid grid-cols-3 sm:flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedShareCase(item)}
-                            className="py-2 px-3 rounded-xl text-xs font-semibold border transition-all flex items-center justify-center gap-1.5 active:scale-98 bg-white dark:bg-[#1A2234] text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-[#232D42] border-slate-200 dark:border-slate-700 shadow-2xs hover:dark:border-[#e0b457]/40 cursor-pointer"
-                            title="Share 3D progression"
-                          >
-                            <Share2 className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-                            <span>Share</span>
-                            {item.clinic_email && (
-                              <span className="w-1.5 h-1.5 rounded-full bg-sky-500" title="Email connected" />
-                            )}
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => setSelectedIprCase(item)}
-                            className="py-2 px-3 rounded-xl text-xs font-semibold border transition-all flex items-center justify-center gap-1.5 active:scale-98 bg-white dark:bg-[#1A2234] text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-950/30 border-slate-200 dark:border-slate-700 hover:border-amber-300 dark:hover:border-amber-700 hover:text-amber-800 dark:hover:text-[#ffd166] shadow-2xs cursor-pointer"
-                            title="View & edit IPR plan"
-                          >
-                            <Scissors className="w-3.5 h-3.5 text-amber-600 dark:text-[#ffd166]" />
-                            <span>IPR</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => setSelectedNotesCase(item)}
-                            className="py-2 px-3 rounded-xl text-xs font-semibold border transition-all flex items-center justify-center gap-1.5 active:scale-98 bg-white dark:bg-[#1A2234] text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-950/30 border-slate-200 dark:border-slate-700 hover:border-amber-300 dark:hover:border-amber-700 hover:text-amber-800 dark:hover:text-[#ffd166] shadow-2xs cursor-pointer truncate"
-                            title="Treatment Plan & Doctor Remarks"
-                          >
-                            <FileText className="w-3.5 h-3.5 text-amber-500 dark:text-[#ffd166]" />
-                            <span className="truncate">Plan</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-
-                {/* ─── Classic UI Layout (Expanded Original View) ─── */}
                 return (
                   <div
                     key={item.id}
-                    className="bg-white dark:bg-[#131A26] rounded-2xl p-6 border border-slate-200/90 dark:border-slate-800 shadow-xs hover:shadow-md hover:border-slate-300 dark:hover:border-[#e0b457]/40 transition-all duration-200 flex flex-col justify-between gap-5 group relative h-fit self-start"
+                    className="bg-white dark:bg-[#131A26] rounded-2xl p-6 border border-slate-200/90 dark:border-slate-800 shadow-xs hover:shadow-md hover:border-slate-300 dark:hover:border-[#e0b457]/40 transition-all duration-200 flex flex-col justify-between gap-5 group relative"
                   >
                     {/* Top Row: Patient Title & Clinical Badges */}
                     <div className="space-y-3">

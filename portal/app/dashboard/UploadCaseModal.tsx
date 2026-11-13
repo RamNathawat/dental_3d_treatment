@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { DoctorRecord, ClinicRecord } from "@/lib/practice-types";
 import { saveClinic, saveDoctor } from "@/lib/practice-storage";
+import { saveCaseToLocalCache } from "@/lib/case-cache";
 import {
   getSavedClinicEmails,
   saveClinicEmail,
@@ -569,6 +570,7 @@ export default function UploadCaseModal({
         updated_at: new Date().toISOString(),
       };
 
+      saveCaseToLocalCache(userId, createdCase);
       onCaseCreated(createdCase);
       setIsProcessing(false);
       onClose();

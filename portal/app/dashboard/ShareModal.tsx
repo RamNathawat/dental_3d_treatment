@@ -7,7 +7,6 @@ import {
   Copy,
   Check,
   Mail,
-  ExternalLink,
   Building2,
   Stethoscope,
   Send,
@@ -494,29 +493,6 @@ ${senderSignOff}`;
     }
   }
 
-  function handleOpenGmail() {
-    const to = recipientEmail.trim();
-    if (!to) {
-      alert("Please enter a recipient email address.");
-      return;
-    }
-    persistEmailIfChanged(to);
-
-    let gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
-      to,
-    )}&su=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
-
-    if (ccEmail.trim()) {
-      gmailUrl += `&cc=${encodeURIComponent(ccEmail.trim())}`;
-    }
-
-    window.open(gmailUrl, "_blank", "noopener,noreferrer");
-
-    if (onToast) {
-      onToast(`Gmail compose opened for ${to}`);
-    }
-  }
-
   function handleCopyEmailDraft() {
     let header = `Subject: ${emailSubject}\nTo: ${recipientEmail.trim()}`;
     if (ccEmail.trim()) {
@@ -862,7 +838,7 @@ ${senderSignOff}`;
             <div>
               <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <span>Share 3D Treatment Plan</span>
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-[#ffd166]">
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-[#1A2234] text-slate-700 dark:text-[#ffd166] border border-slate-200 dark:border-slate-700">
                   {stages} Stages
                 </span>
               </h2>
@@ -905,7 +881,7 @@ ${senderSignOff}`;
                   <>
                     <span>•</span>
                     <span className="inline-flex items-center gap-1 text-slate-700 dark:text-slate-300 font-medium">
-                      <Stethoscope className="w-3 h-3 text-amber-500 dark:text-[#ffd166]" />
+                      <Stethoscope className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
                       <span>{doctorDisplayName}</span>
                     </span>
                   </>
@@ -930,7 +906,7 @@ ${senderSignOff}`;
           <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-[#0E1420] space-y-3.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-amber-500 dark:text-[#ffd166]" />
+                <Clock className="w-3.5 h-3.5 text-slate-500 dark:text-[#ffd166]" />
                 <span className="font-semibold text-slate-900 dark:text-white text-xs">
                   Link Expiration & Access Control
                 </span>
@@ -963,7 +939,7 @@ ${senderSignOff}`;
                     className={`font-bold text-xs sm:text-sm truncate ${
                       neverExpires
                         ? "text-slate-400 dark:text-slate-500"
-                        : "text-amber-600 dark:text-[#ffd166]"
+                        : "text-slate-900 dark:text-white"
                     }`}
                   >
                     {formattedDurationLabel}
@@ -976,12 +952,12 @@ ${senderSignOff}`;
                   onClick={handleToggleDatePicker}
                   className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all inline-flex items-center gap-1.5 shadow-2xs ${
                     showDatePicker
-                      ? "bg-amber-100 dark:bg-amber-950/70 text-amber-900 dark:text-[#ffd166] border-amber-400 dark:border-amber-600"
-                      : "bg-white dark:bg-[#151D2C] text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white border-slate-200 dark:border-slate-700 hover:border-amber-400 dark:hover:border-[#ffd166]/50 cursor-pointer"
+                      ? "bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-slate-300 dark:border-slate-600 font-bold"
+                      : "bg-white dark:bg-[#151D2C] text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 cursor-pointer"
                   }`}
                   title="Click to choose a custom expiration date & time"
                 >
-                  <Calendar className="w-3.5 h-3.5 text-amber-500 dark:text-[#ffd166]" />
+                  <Calendar className="w-3.5 h-3.5 text-slate-500 dark:text-[#ffd166]" />
                   <span className="max-w-[150px] sm:max-w-[190px] truncate">
                     {neverExpires ? "Set Custom Date" : formattedDateLabel}
                   </span>
@@ -995,10 +971,10 @@ ${senderSignOff}`;
 
               {/* Expandable Custom Date & Time Picker */}
               {showDatePicker && (
-                <div className="p-3 rounded-xl bg-white dark:bg-[#151D2C] border border-amber-300 dark:border-amber-700/80 shadow-md space-y-2.5 animate-fadeIn">
+                <div className="p-3 rounded-xl bg-white dark:bg-[#151D2C] border border-slate-200 dark:border-slate-700 shadow-md space-y-2.5 animate-fadeIn">
                   <div className="flex items-center justify-between text-[11px]">
                     <span className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1">
-                      <Calendar className="w-3.5 h-3.5 text-amber-500 dark:text-[#ffd166]" />
+                      <Calendar className="w-3.5 h-3.5 text-slate-500 dark:text-[#ffd166]" />
                       <span>Select Exact Expiration Date & Time:</span>
                     </span>
                     <button
@@ -1015,7 +991,7 @@ ${senderSignOff}`;
                     type="datetime-local"
                     value={customDate}
                     onChange={(e) => handleCustomDateChange(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0D121D] text-xs font-medium text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0D121D] text-xs font-medium text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 dark:focus:ring-[#ffd166]/20 dark:focus:border-[#ffd166] transition-all"
                   />
 
                   {/* Quick Preset Chips */}
@@ -1026,35 +1002,35 @@ ${senderSignOff}`;
                     <button
                       type="button"
                       onClick={() => handleQuickAddDays(1)}
-                      className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-amber-950/60 text-slate-700 dark:text-slate-300 hover:text-amber-800 dark:hover:text-[#ffd166] transition-colors"
+                      className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors"
                     >
                       +1 Day (24h)
                     </button>
                     <button
                       type="button"
                       onClick={() => handleQuickAddDays(2)}
-                      className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-amber-950/60 text-slate-700 dark:text-slate-300 hover:text-amber-800 dark:hover:text-[#ffd166] transition-colors"
+                      className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors"
                     >
                       +2 Days
                     </button>
                     <button
                       type="button"
                       onClick={() => handleQuickAddDays(7)}
-                      className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-amber-950/60 text-slate-700 dark:text-slate-300 hover:text-amber-800 dark:hover:text-[#ffd166] transition-colors"
+                      className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors"
                     >
                       +7 Days (1 wk)
                     </button>
                     <button
                       type="button"
                       onClick={() => handleQuickAddDays(14)}
-                      className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-amber-950/60 text-slate-700 dark:text-slate-300 hover:text-amber-800 dark:hover:text-[#ffd166] transition-colors"
+                      className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors"
                     >
                       +14 Days (2 wks)
                     </button>
                     <button
                       type="button"
                       onClick={() => handleQuickAddDays(30)}
-                      className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-amber-950/60 text-slate-700 dark:text-slate-300 hover:text-amber-800 dark:hover:text-[#ffd166] transition-colors"
+                      className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors"
                     >
                       +30 Days (1 mo)
                     </button>
@@ -1076,7 +1052,7 @@ ${senderSignOff}`;
                   disabled={neverExpires}
                   value={sliderDays}
                   onChange={(e) => handleSliderChange(Number(e.target.value))}
-                  className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500 dark:accent-[#ffd166]"
+                  className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-slate-900 dark:accent-[#ffd166]"
                 />
                 <div className="flex justify-between text-[9px] font-semibold text-slate-400 dark:text-slate-500 px-0.5">
                   <span>1d</span>
@@ -1100,7 +1076,7 @@ ${senderSignOff}`;
                     type="checkbox"
                     checked={neverExpires}
                     onChange={(e) => handleToggleNeverExpires(e.target.checked)}
-                    className="w-3.5 h-3.5 rounded text-amber-500 focus:ring-amber-500 dark:bg-[#1A2234] border-slate-300 dark:border-slate-700"
+                    className="w-3.5 h-3.5 rounded text-slate-900 focus:ring-slate-900 dark:text-[#ffd166] dark:focus:ring-[#ffd166] dark:bg-[#1A2234] border-slate-300 dark:border-slate-700"
                   />
                   <span>Never expires</span>
                 </label>
@@ -1116,7 +1092,7 @@ ${senderSignOff}`;
                 className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all flex items-center gap-1.5 ${
                   isRevoked
                     ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-2xs"
-                    : "text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60"
+                    : "text-slate-600 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50/60 dark:hover:bg-rose-950/40 border border-slate-200 dark:border-slate-700 hover:border-rose-200 dark:hover:border-rose-800"
                 }`}
                 aria-label={
                   isRevoked
@@ -1162,7 +1138,7 @@ ${senderSignOff}`;
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                <Share2 className="w-3.5 h-3.5 text-amber-500 dark:text-[#ffd166]" />
+                <Share2 className="w-3.5 h-3.5 text-slate-500 dark:text-[#ffd166]" />
                 <span>3D Progression Share Link</span>
               </label>
 
@@ -1185,7 +1161,7 @@ ${senderSignOff}`;
             {showRegenerateConfirm && (
               <div className="p-4 rounded-xl bg-slate-50 dark:bg-[#0D121D] border border-slate-200 dark:border-slate-800 shadow-lg space-y-3 text-[11px] animate-fadeIn transition-colors">
                 <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-amber-500/10 dark:bg-[#ffd166]/10 text-amber-600 dark:text-[#ffd166] flex items-center justify-center flex-shrink-0 mt-0.5 border border-amber-500/20 dark:border-[#ffd166]/20">
+                  <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-[#ffd166]/10 text-slate-700 dark:text-[#ffd166] flex items-center justify-center flex-shrink-0 mt-0.5 border border-slate-200 dark:border-[#ffd166]/20">
                     <RefreshCw className="w-4 h-4" />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -1262,7 +1238,7 @@ ${senderSignOff}`;
                 <button
                   type="button"
                   onClick={() => handleShareWhatsApp()}
-                  className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl text-xs font-semibold bg-[#154D38] hover:bg-[#1b5e45] text-white active:scale-95 transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-[#154D38]/25"
+                  className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl text-xs font-semibold bg-[#25D366] hover:bg-[#20ba5a] text-white active:scale-95 transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-[#25D366]/20"
                   title="Share 3D progression directly via WhatsApp (choose any chat or group)"
                 >
                   <WhatsAppIcon className="w-4 h-4 fill-white" />
@@ -1292,10 +1268,10 @@ ${senderSignOff}`;
                   <button
                     type="button"
                     onClick={() => handleShareWhatsApp(clinicPhone || undefined, clinicDisplayName)}
-                    className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors inline-flex items-center gap-1 cursor-pointer"
                     title={clinicPhone ? `WhatsApp ${clinicDisplayName} (${clinicPhone})` : `WhatsApp ${clinicDisplayName}`}
                   >
-                    <WhatsAppIcon className="w-3 h-3 fill-slate-500" />
+                    <WhatsAppIcon className="w-3 h-3 fill-emerald-600 dark:fill-emerald-400" />
                     <span>WhatsApp Clinic</span>
                     {clinicPhone && <span className="opacity-70 font-mono text-[9px]">({clinicPhone})</span>}
                   </button>
@@ -1317,11 +1293,11 @@ ${senderSignOff}`;
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                <Mail className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                <Mail className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
                 <span>Select Recipient</span>
               </label>
               {recipientType === "both" && (
-                <span className="text-[10px] font-semibold text-purple-600 dark:text-purple-400">
+                <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400">
                   To Doctor + CC Clinic
                 </span>
               )}
@@ -1343,7 +1319,7 @@ ${senderSignOff}`;
                 }`}
                 title={doctorDisplayName || "Doctor"}
               >
-                <Stethoscope className="w-3 h-3 text-amber-500 flex-shrink-0" />
+                <Stethoscope className="w-3 h-3 text-slate-500 dark:text-slate-400 flex-shrink-0" />
                 <span className="truncate">{doctorDisplayName || "Doctor"}</span>
               </button>
 
@@ -1361,7 +1337,7 @@ ${senderSignOff}`;
                 }`}
                 title={clinicDisplayName || "Clinic"}
               >
-                <Building2 className="w-3 h-3 text-sky-500 flex-shrink-0" />
+                <Building2 className="w-3 h-3 text-slate-500 dark:text-slate-400 flex-shrink-0" />
                 <span className="truncate">{clinicDisplayName || "Clinic"}</span>
               </button>
 
@@ -1378,7 +1354,7 @@ ${senderSignOff}`;
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 }`}
               >
-                <Users className="w-3 h-3 text-purple-500 flex-shrink-0" />
+                <Users className="w-3 h-3 text-slate-500 dark:text-slate-400 flex-shrink-0" />
                 <span>Both (CC)</span>
               </button>
 
@@ -1393,7 +1369,7 @@ ${senderSignOff}`;
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 }`}
               >
-                <User className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                <User className="w-3 h-3 text-slate-500 dark:text-slate-400 flex-shrink-0" />
                 <span>Custom</span>
               </button>
             </div>
@@ -1424,7 +1400,7 @@ ${senderSignOff}`;
                       ? "clinic@smiledental.com"
                       : "recipient@email.com"
                   }
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 dark:focus:border-sky-400 transition-all font-medium"
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 dark:focus:border-slate-500 transition-all font-medium"
                 />
                 <datalist id="saved-clinic-emails-share">
                   {savedEmails.map((em) => (
@@ -1446,7 +1422,7 @@ ${senderSignOff}`;
                     value={ccEmail}
                     onChange={(e) => setCcEmail(e.target.value)}
                     placeholder="clinic@smiledental.com"
-                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all font-medium"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 dark:focus:border-slate-500 transition-all font-medium"
                   />
                 </div>
               )}
@@ -1467,7 +1443,7 @@ ${senderSignOff}`;
                       onClick={() => setRecipientEmail(em)}
                       className={`text-[10px] font-medium px-2 py-0.5 rounded-md transition-colors ${
                         isSelected
-                          ? "bg-sky-600 text-white font-bold"
+                          ? "bg-slate-900 text-white font-bold dark:bg-white dark:text-slate-900"
                           : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
                       }`}
                     >
@@ -1483,7 +1459,7 @@ ${senderSignOff}`;
                 type="checkbox"
                 checked={saveAsDefault}
                 onChange={(e) => setSaveAsDefault(e.target.checked)}
-                className="w-3.5 h-3.5 rounded text-sky-600 focus:ring-sky-500 dark:bg-[#1A2234] border-slate-300 dark:border-slate-700"
+                className="w-3.5 h-3.5 rounded text-slate-900 focus:ring-slate-900 dark:text-[#ffd166] dark:focus:ring-[#ffd166] dark:bg-[#1A2234] border-slate-300 dark:border-slate-700"
               />
               <span>Remember and link this email for future cases</span>
             </label>
@@ -1519,19 +1495,9 @@ ${senderSignOff}`;
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={handleOpenGmail}
-              className="flex-1 sm:flex-initial py-2 px-3 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#1A2234] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#232D42] transition-all flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
-              title="Open pre-filled draft in Gmail web"
-            >
-              <ExternalLink className="w-3.5 h-3.5 text-red-500" />
-              <span>Gmail</span>
-            </button>
-
-            <button
-              type="button"
               onClick={handleOpenMailClient}
-              className="flex-1 sm:flex-initial py-2 px-4 rounded-xl text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 active:scale-98 transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-sky-600/30 cursor-pointer"
-              title="Send directly via your native mail app"
+              className="flex-1 sm:flex-initial py-2 px-4 rounded-xl text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 dark:bg-gradient-to-r dark:from-[#e0b457] dark:to-[#c49a45] dark:text-slate-950 active:scale-98 transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+              title="Send email draft with 3D progression link"
             >
               <Send className="w-3.5 h-3.5" />
               <span>

@@ -74,7 +74,7 @@ export function getCaseLinkAccess(
       expiresAtDate,
       badgeLabel: "Revoked",
       badgeColorClass:
-        "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border-rose-200 dark:border-rose-900/60",
+        "bg-slate-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border-rose-200 dark:border-rose-900/60",
       badgeDotClass: "bg-rose-500",
       relativeTimeText: "Access manually revoked",
     };
@@ -112,8 +112,8 @@ export function getCaseLinkAccess(
       expiresAtDate,
       badgeLabel: label,
       badgeColorClass:
-        "bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-900/60",
-      badgeDotClass: "bg-amber-500",
+        "bg-slate-100 text-slate-600 dark:bg-amber-950/40 dark:text-amber-300 border-slate-200 dark:border-amber-900/60",
+      badgeDotClass: "bg-slate-400 dark:bg-amber-500",
       relativeTimeText: `Expired on ${expiresAtDate.toLocaleDateString(undefined, {
         month: "short",
         day: "numeric",
@@ -132,8 +132,8 @@ export function getCaseLinkAccess(
       expiresAtDate,
       badgeLabel: `${hoursRemaining}h left`,
       badgeColorClass:
-        "bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border-amber-300 dark:border-amber-700/80 animate-pulse",
-      badgeDotClass: "bg-amber-500",
+        "bg-slate-100 text-slate-800 dark:bg-amber-950/70 dark:text-[#ffd166] border-slate-200 dark:border-amber-700/80 font-medium",
+      badgeDotClass: "bg-slate-500 dark:bg-amber-500",
       relativeTimeText: `Expires in ${hoursRemaining} hour${hoursRemaining === 1 ? "" : "s"}`,
     };
   }
@@ -145,8 +145,8 @@ export function getCaseLinkAccess(
     expiresAtDate,
     badgeLabel: `${daysRemaining}d left`,
     badgeColorClass:
-      "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/60",
-    badgeDotClass: "bg-emerald-500",
+      "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200/80 dark:border-emerald-800/60",
+    badgeDotClass: "bg-[#25D366]",
     relativeTimeText: `Expires in ${daysRemaining} days (${expiresAtDate.toLocaleDateString(undefined, {
       month: "short",
       day: "numeric",

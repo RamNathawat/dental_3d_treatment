@@ -16,7 +16,7 @@ export function createAdminClient(): SupabaseClient | null {
     "https://yrjulcwnabnhgtqebrtn.supabase.co";
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!serviceRoleKey || !hasValidServiceRoleJwt()) {
+  if (!serviceRoleKey) {
     return null;
   }
 
