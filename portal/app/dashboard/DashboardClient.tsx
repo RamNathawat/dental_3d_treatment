@@ -1179,6 +1179,29 @@ export default function DashboardClient({
           caseItem={selectedEditCase}
           userId={userId}
           allCases={cases}
+          doctors={doctors}
+          clinics={clinics}
+          isSoloDoctor={isSoloDoctor}
+          defaultDoctorName={defaultDoctorName}
+          onClinicCreated={(newClinic) => {
+            setClinics((prev) => {
+              if (prev.some((c) => c.id === newClinic.id || c.name.toLowerCase() === newClinic.name.toLowerCase())) {
+                return prev;
+              }
+              return [...prev, newClinic];
+            });
+            showToast(`Clinic "${newClinic.name}" saved to directory`);
+          }}
+          onDoctorCreated={(newDoctor) => {
+            setDoctors((prev) => {
+              if (prev.some((d) => d.id === newDoctor.id || d.name.toLowerCase() === newDoctor.name.toLowerCase())) {
+                return prev;
+              }
+              return [...prev, newDoctor];
+            });
+            const doctorDisplay = newDoctor.name.startsWith("Dr.") ? newDoctor.name : `Dr. ${newDoctor.name}`;
+            showToast(`${doctorDisplay} saved to directory`);
+          }}
           onCaseUpdated={handleCaseUpdated}
           onToast={showToast}
         />

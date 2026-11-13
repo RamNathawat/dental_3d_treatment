@@ -18,6 +18,12 @@ import {
   RefreshCw,
   Trash2,
   Undo2,
+  Stethoscope,
+  Plus,
+  Sparkles,
+  Phone,
+  MapPin,
+  GraduationCap,
 } from "lucide-react";
 import { DentalCase } from "./page";
 import { createClient } from "@/lib/supabase/client";
@@ -32,6 +38,8 @@ import {
   saveClinicEmail,
   getSavedEmailForClinic,
 } from "@/lib/clinic-email-storage";
+import { DoctorRecord, ClinicRecord } from "@/lib/practice-types";
+import { saveClinic, saveDoctor } from "@/lib/practice-storage";
 
 interface EditCaseModalProps {
   isOpen: boolean;
@@ -39,6 +47,12 @@ interface EditCaseModalProps {
   caseItem: DentalCase;
   userId: string;
   allCases?: DentalCase[];
+  doctors?: DoctorRecord[];
+  clinics?: ClinicRecord[];
+  isSoloDoctor?: boolean;
+  defaultDoctorName?: string;
+  onClinicCreated?: (newClinic: ClinicRecord) => void;
+  onDoctorCreated?: (newDoctor: DoctorRecord) => void;
   onCaseUpdated: (updatedCase: DentalCase) => void;
   onToast?: (msg: string) => void;
 }
@@ -49,6 +63,12 @@ export default function EditCaseModal({
   caseItem,
   userId,
   allCases,
+  doctors = [],
+  clinics = [],
+  isSoloDoctor = false,
+  defaultDoctorName = "",
+  onClinicCreated,
+  onDoctorCreated,
   onCaseUpdated,
   onToast,
 }: EditCaseModalProps) {
@@ -58,10 +78,23 @@ export default function EditCaseModal({
   const [patientAge, setPatientAge] = useState("");
   const [patientSex, setPatientSex] = useState("");
   const [clinicName, setClinicName] = useState("");
+  const [doctorName, setDoctorName] = useState("");
+  const [isRefinement, setIsRefinement] = useState(false);
   const [clinicEmail, setClinicEmail] = useState("");
   const [savedEmails, setSavedEmails] = useState<string[]>([]);
 
-  // Re-enter 3D Models
+  // Inline Doctor/Clinic Creation State
+  const [isCustomDoctor, setIsCustomDoctor] = useState(false);
+  const [isCustomClinic, setIsCustomClinic] = useState(false);
+  const [newClinicPhone, setNewClinicPhone] = useState("");
+  const [newClinicAddress, setNewClinicAddress] = useState("");
+  const [showNewClinicDetails, setShowNewClinicDetails] = useState(false);
+  const [newDoctorSpecialization, setNewDoctorSpecialization] = useState("");
+  const [newDoctorPhone, setNewDoctorPhone] = useState("");
+  const [newDoctorEmail, setNewDoctorEmail] = useState("");
+  const [showNewDoctorDetails, setShowNewDoctorDetails] = useState(false);
+
+  // Re-enter 3D Models State
   const [upperFile, setUpperFile] = useState<File | null>(null);
   const [lowerFile, setLowerFile] = useState<File | null>(null);
   const [upperMeta, setUpperMeta] = useState<DentalZipMetadata | null>(null);
@@ -94,6 +127,22 @@ export default function EditCaseModal({
     setPatientSex(caseItem.patient_sex || "");
     setClinicName(caseItem.clinic_name || "");
 
+    const initialDocName =
+      caseItem.doctor_name ||
+      (typeof caseItem.doctor_notes === "object" && caseItem.doctor_notes?.doctor_name) ||
+      (typeof caseItem.doctor_notes === "object" && caseItem.doctor_notes?.assigned_doctor) ||
+      (isSoloDoctor && defaultDoctorName ? defaultDoctorName : "");
+    setDoctorName(initialDocName || "");
+
+    const initialRefinement =
+      Boolean(caseItem.is_refinement) ||
+      Boolean(
+        caseItem.doctor_notes &&
+          typeof caseItem.doctor_notes === "object" &&
+          caseItem.doctor_notes?.is_refinement
+      );
+    setIsRefinement(initialRefinement);
+
     const remembered = getSavedClinicEmails(allCases);
     setSavedEmails(remembered);
 
@@ -115,7 +164,11 @@ export default function EditCaseModal({
     setRemoveExistingLower(false);
     setErrorMsg("");
     setIsProcessing(false);
-  }, [isOpen, caseItem, allCases]);
+    setIsCustomClinic(false);
+    setIsCustomDoctor(false);
+    setShowNewClinicDetails(false);
+    setShowNewDoctorDetails(false);
+  }, [isOpen, caseItem, allCases, isSoloDoctor, defaultDoctorName]);
 
   if (!isOpen) return null;
 
@@ -130,169 +183,138 @@ export default function EditCaseModal({
     caseItem.lower_stages ??
     caseItem.doctor_notes?.aligner_counts?.lower ??
     currentStages;
-  const isUnequalStages =
-    !isUpperOnly && !isLowerOnly && existingUpperStages !== existingLowerStages;
   const hasExistingUpper = !isLowerOnly;
   const hasExistingLower = !isUpperOnly;
   const archLabel = isUpperOnly ? "Upper Arch Only" : isLowerOnly ? "Lower Arch Only" : "Dual-Arch Alignment";
 
-  const hasNewFiles = Boolean(upperFile || lowerFile);
+  const trimmedClinicName = clinicName.trim();
+  const matchedExistingClinic = clinics.find(
+    (c) => c.name.toLowerCase() === trimmedClinicName.toLowerCase()
+  );
+  const isNewClinic = Boolean(trimmedClinicName && !matchedExistingClinic);
+
+  const trimmedDoctorName = doctorName.trim();
+  const cleanDoctorName = trimmedDoctorName.replace(/^dr\.?\s+/i, "").toLowerCase();
+  const matchedExistingDoctor = doctors.find((d) => {
+    const existingClean = d.name.replace(/^dr\.?\s+/i, "").toLowerCase();
+    return (
+      d.name.toLowerCase() === trimmedDoctorName.toLowerCase() ||
+      existingClean === cleanDoctorName
+    );
+  });
+  const isNewDoctor = Boolean(
+    trimmedDoctorName &&
+      !matchedExistingDoctor &&
+      !(isSoloDoctor && defaultDoctorName && trimmedDoctorName.toLowerCase() === defaultDoctorName.toLowerCase())
+  );
 
   function handleClinicNameChange(name: string) {
     setClinicName(name);
-    if (!clinicEmail.trim()) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const matchedClinic = clinics.find(
+      (c) => c.name.toLowerCase() === trimmed.toLowerCase()
+    );
+    if (matchedClinic?.email) {
+      setClinicEmail(matchedClinic.email);
+    } else {
       const match = getSavedEmailForClinic(name);
-      if (match) setClinicEmail(match);
+      if (match) {
+        setClinicEmail(match);
+      }
     }
   }
 
+  function handleDoctorNameChange(name: string) {
+    setDoctorName(name);
+  }
+
   async function handleUpperSelect(file: File) {
-    if (!file.name.toLowerCase().endsWith(".zip")) {
-      setErrorMsg("Please upload a .ZIP file for the Upper jaw CAD models.");
-      return;
-    }
-    setErrorMsg("");
-    setRemoveExistingUpper(false);
     setUpperFile(file);
+    setRemoveExistingUpper(false);
     setIsInspectingUpper(true);
+    setErrorMsg("");
     try {
-      const meta = await extractDentalZipMetadata(file, "upper");
+      const meta = await extractDentalZipMetadata(file);
       setUpperMeta(meta);
-    } catch (e) {
-      console.warn("Could not extract metadata from upper zip:", e);
+    } catch {
+      setUpperMeta(null);
     } finally {
       setIsInspectingUpper(false);
     }
   }
 
   async function handleLowerSelect(file: File) {
-    if (!file.name.toLowerCase().endsWith(".zip")) {
-      setErrorMsg("Please upload a .ZIP file for the Lower jaw CAD models.");
-      return;
-    }
-    setErrorMsg("");
-    setRemoveExistingLower(false);
     setLowerFile(file);
+    setRemoveExistingLower(false);
     setIsInspectingLower(true);
+    setErrorMsg("");
     try {
-      const meta = await extractDentalZipMetadata(file, "lower");
+      const meta = await extractDentalZipMetadata(file);
       setLowerMeta(meta);
-    } catch (e) {
-      console.warn("Could not extract metadata from lower zip:", e);
+    } catch {
+      setLowerMeta(null);
     } finally {
       setIsInspectingLower(false);
     }
   }
 
-  async function handleIncomingFiles(
-    files: FileList | File[] | null,
-    targetArchHint?: "upper" | "lower"
-  ) {
-    if (!files || files.length === 0) return;
-
-    const zipFiles = Array.from(files).filter((f) =>
-      f.name.toLowerCase().endsWith(".zip")
-    );
-
-    if (zipFiles.length === 0) {
-      setErrorMsg("Please upload .ZIP archives containing CAD model exports.");
-      return;
-    }
-
+  async function handleIncomingFiles(fileList: FileList | null, preferredArch?: "upper" | "lower") {
+    if (!fileList || fileList.length === 0) return;
     setErrorMsg("");
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // Scenario A: 2 or more files selected or dropped simultaneously
-    // ──────────────────────────────────────────────────────────────────────────
-    if (zipFiles.length >= 2) {
-      const fileA = zipFiles[0]!;
-      const fileB = zipFiles[1]!;
-
-      const isUpperName = (name: string) =>
-        /(?:upper|maxill|maxillary|\bupper\b|[._-]u\b|[._-]u[._-])/i.test(name);
-      const isLowerName = (name: string) =>
-        /(?:lower|mandib|mandibular|\blower\b|[._-]l\b|[._-]l[._-])/i.test(name);
-
-      let uFile: File | null = null;
-      let lFile: File | null = null;
-
-      if (isUpperName(fileA.name) && isLowerName(fileB.name)) {
-        uFile = fileA;
-        lFile = fileB;
-      } else if (isLowerName(fileA.name) && isUpperName(fileB.name)) {
-        uFile = fileB;
-        lFile = fileA;
-      } else if (isUpperName(fileA.name) && !isUpperName(fileB.name)) {
-        uFile = fileA;
-        lFile = fileB;
-      } else if (isLowerName(fileA.name) && !isLowerName(fileB.name)) {
-        lFile = fileA;
-        uFile = fileB;
-      } else if (isUpperName(fileB.name) && !isUpperName(fileA.name)) {
-        uFile = fileB;
-        lFile = fileA;
-      } else if (isLowerName(fileB.name) && !isLowerName(fileA.name)) {
-        lFile = fileB;
-        uFile = fileA;
-      } else {
-        try {
-          const [metaA, metaB] = await Promise.all([
-            extractDentalZipMetadata(fileA),
-            extractDentalZipMetadata(fileB),
-          ]);
-          if (metaA.hasUpper && !metaA.hasLower && metaB.hasLower && !metaB.hasUpper) {
-            uFile = fileA;
-            lFile = fileB;
-          } else if (metaB.hasUpper && !metaB.hasLower && metaA.hasLower && !metaA.hasUpper) {
-            uFile = fileB;
-            lFile = fileA;
-          } else {
-            if (targetArchHint === "lower") {
-              lFile = fileA;
-              uFile = fileB;
-            } else {
-              uFile = fileA;
-              lFile = fileB;
-            }
-          }
-        } catch {
-          uFile = fileA;
-          lFile = fileB;
-        }
-      }
-
-      if (uFile && lFile) {
-        await Promise.all([handleUpperSelect(uFile), handleLowerSelect(lFile)]);
-      } else if (uFile) {
-        await handleUpperSelect(uFile);
-      } else if (lFile) {
-        await handleLowerSelect(lFile);
-      }
+    const files = Array.from(fileList).filter((f) => f.name.toLowerCase().endsWith(".zip"));
+    if (files.length === 0) {
+      setErrorMsg("Please select valid .ZIP files containing orthodontic STL stages.");
       return;
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // Scenario B: Exactly 1 file selected or dropped
-    // ──────────────────────────────────────────────────────────────────────────
-    const file = zipFiles[0]!;
-    const isUpper = /(?:upper|maxill|maxillary|\bupper\b|[._-]u\b|[._-]u[._-])/i.test(file.name);
-    const isLower = /(?:lower|mandib|mandibular|\blower\b|[._-]l\b|[._-]l[._-])/i.test(file.name);
+    if (files.length >= 2) {
+      const f1 = files[0];
+      const f2 = files[1];
+      if (!f1 || !f2) return;
+      const n1 = f1.name.toLowerCase();
+      const n2 = f2.name.toLowerCase();
 
-    if (targetArchHint === "lower") {
-      await handleLowerSelect(file);
+      if (
+        (n1.includes("upper") || n1.includes("maxill")) &&
+        (n2.includes("lower") || n2.includes("mandib"))
+      ) {
+        await handleUpperSelect(f1);
+        await handleLowerSelect(f2);
+        return;
+      } else if (
+        (n2.includes("upper") || n2.includes("maxill")) &&
+        (n1.includes("lower") || n1.includes("mandib"))
+      ) {
+        await handleUpperSelect(f2);
+        await handleLowerSelect(f1);
+        return;
+      }
+      await handleUpperSelect(f1);
+      await handleLowerSelect(f2);
       return;
     }
-    if (targetArchHint === "upper") {
+
+    const file = files[0];
+    if (!file) return;
+    const name = file.name.toLowerCase();
+
+    if (preferredArch === "upper") {
       await handleUpperSelect(file);
       return;
     }
-
-    if (isLower && !isUpper) {
+    if (preferredArch === "lower") {
       await handleLowerSelect(file);
       return;
     }
-    if (isUpper && !isLower) {
+
+    if (name.includes("upper") || name.includes("maxill")) {
       await handleUpperSelect(file);
+      return;
+    }
+    if (name.includes("lower") || name.includes("mandib")) {
+      await handleLowerSelect(file);
       return;
     }
 
@@ -326,16 +348,62 @@ export default function EditCaseModal({
     setIsProcessing(true);
     setErrorMsg("");
 
-    const resolvedPatientId = patientId.trim() || caseItem.patient_id || `PT-${Math.floor(1000 + Math.random() * 9000)}`;
+    const resolvedPatientId =
+      patientId.trim() || caseItem.patient_id || `PT-${Math.floor(1000 + Math.random() * 9000)}`;
     const parsedAge = parseInt(patientAge.trim(), 10);
     const resolvedAge = !isNaN(parsedAge) && parsedAge > 0 && parsedAge <= 120 ? parsedAge : null;
     const resolvedSex = patientSex.trim() || null;
     const resolvedClinicName = clinicName.trim() || null;
     const resolvedClinicEmail = clinicEmail.trim() || null;
+    const resolvedDoctorName = doctorName.trim() || null;
+
+    // Auto-save new clinic to CRM database
+    if (isNewClinic && resolvedClinicName && onClinicCreated) {
+      try {
+        const createdClinic = await saveClinic(userId, {
+          name: resolvedClinicName,
+          email: resolvedClinicEmail || undefined,
+          phone: newClinicPhone.trim() || undefined,
+          address: newClinicAddress.trim() || undefined,
+        });
+        onClinicCreated(createdClinic);
+      } catch (err) {
+        console.warn("Failed to auto-save new clinic:", err);
+      }
+    }
+
+    // Auto-save new doctor to CRM database
+    if (isNewDoctor && resolvedDoctorName && onDoctorCreated) {
+      try {
+        const createdDoctor = await saveDoctor(userId, {
+          name: resolvedDoctorName,
+          specialization: newDoctorSpecialization.trim() || undefined,
+          phone: newDoctorPhone.trim() || undefined,
+          email: newDoctorEmail.trim() || undefined,
+        });
+        onDoctorCreated(createdDoctor);
+      } catch (err) {
+        console.warn("Failed to auto-save new doctor:", err);
+      }
+    }
 
     if (resolvedClinicEmail) {
       saveClinicEmail(resolvedClinicEmail, resolvedClinicName);
     }
+
+    const existingNotes =
+      caseItem.doctor_notes && typeof caseItem.doctor_notes === "object"
+        ? caseItem.doctor_notes
+        : {};
+
+    const updatedDoctorNotes = {
+      ...existingNotes,
+      doctor_name: resolvedDoctorName || undefined,
+      assigned_doctor: resolvedDoctorName || undefined,
+      doctor_id: matchedExistingDoctor?.id || (existingNotes as any).doctor_id || undefined,
+      is_refinement: isRefinement,
+      clinic_email: resolvedClinicEmail || undefined,
+    };
 
     // ──────────────────────────────────────────────────────────────────────────
     // CASE A: Re-entering / replacing 3D Models or Removing an Existing Arch
@@ -348,7 +416,9 @@ export default function EditCaseModal({
 
       if (!willHaveUpper && !willHaveLower) {
         setIsProcessing(false);
-        setErrorMsg("A treatment case must contain at least one arch (Upper or Lower). To delete the entire case, use the delete button on the dashboard.");
+        setErrorMsg(
+          "A treatment case must contain at least one arch (Upper or Lower). To delete the entire case, use the delete button on the dashboard."
+        );
         return;
       }
 
@@ -371,7 +441,7 @@ export default function EditCaseModal({
           setProgressPct(pct);
         },
         caseItem.ipr || undefined,
-        caseItem.doctor_notes || undefined,
+        updatedDoctorNotes,
         resolvedPatientId,
         resolvedClinicName || undefined,
         resolvedAge ?? undefined,
@@ -381,12 +451,12 @@ export default function EditCaseModal({
         {
           removeExistingUpper,
           removeExistingLower,
-        },
+        }
       );
 
       if (result.ok && result.caseId) {
         const willBeBoth = Boolean((result.hasUpper && result.hasLower) || (willHaveUpper && willHaveLower));
-        const archType = willBeBoth ? "both" : (result.archType || (willHaveUpper ? "upper" : "lower"));
+        const archType = willBeBoth ? "both" : result.archType || (willHaveUpper ? "upper" : "lower");
         const cleanName = patientName.replace(/\s*\[(Upper|Lower|Dual)\]/i, "").trim();
         const dbName =
           archType === "upper"
@@ -396,8 +466,7 @@ export default function EditCaseModal({
             : cleanName;
 
         const resolvedUpperStages =
-          result.upperStages ??
-          (willHaveUpper ? (caseItem.upper_stages ?? caseItem.total_stages) : null);
+          result.upperStages ?? (willHaveUpper ? (caseItem.upper_stages ?? caseItem.total_stages) : null);
         const resolvedLowerStages =
           result.lowerStages ??
           (willHaveLower ? (caseItem.lower_stages ?? (result.totalStages ? 1 : null)) : null);
@@ -407,6 +476,8 @@ export default function EditCaseModal({
           patient_name: dbName,
           clinic_name: resolvedClinicName,
           clinic_email: resolvedClinicEmail,
+          doctor_name: resolvedDoctorName,
+          is_refinement: isRefinement,
           patient_id: result.patientId || resolvedPatientId,
           patient_age: resolvedAge,
           patient_sex: resolvedSex,
@@ -414,12 +485,18 @@ export default function EditCaseModal({
           upper_stages: resolvedUpperStages,
           lower_stages: resolvedLowerStages,
           doctor_notes: {
-            ...(caseItem.doctor_notes || {}),
+            ...updatedDoctorNotes,
             aligner_counts: {
               upper: resolvedUpperStages ?? undefined,
               lower: resolvedLowerStages ?? undefined,
-              total: result.totalAligners || ((resolvedUpperStages || 0) + (resolvedLowerStages || 0)),
-              is_unequal: result.isUnequal ?? (Boolean(resolvedUpperStages && resolvedLowerStages && resolvedUpperStages !== resolvedLowerStages)),
+              total: result.totalAligners || (resolvedUpperStages || 0) + (resolvedLowerStages || 0),
+              is_unequal:
+                result.isUnequal ??
+                Boolean(
+                  resolvedUpperStages &&
+                    resolvedLowerStages &&
+                    resolvedUpperStages !== resolvedLowerStages
+                ),
             },
           },
           updated_at: new Date().toISOString(),
@@ -455,7 +532,7 @@ export default function EditCaseModal({
     // ──────────────────────────────────────────────────────────────────────────
     // CASE B: Details update only (no new model files selected)
     // ──────────────────────────────────────────────────────────────────────────
-    setProgressMsg("Updating patient & clinic details...");
+    setProgressMsg("Updating case details and assignments...");
     setProgressPct(50);
 
     try {
@@ -470,6 +547,9 @@ export default function EditCaseModal({
         patient_name: dbName,
         clinic_name: resolvedClinicName,
         clinic_email: resolvedClinicEmail,
+        doctor_name: resolvedDoctorName,
+        is_refinement: isRefinement,
+        doctor_notes: updatedDoctorNotes,
         patient_id: resolvedPatientId,
         patient_age: resolvedAge,
         patient_sex: resolvedSex,
@@ -481,8 +561,14 @@ export default function EditCaseModal({
         .update(updatePayload)
         .eq("id", caseItem.id);
 
-      if (dbErr && (dbErr.message?.includes("column") || dbErr.code === "PGRST204" || dbErr.code === "42703")) {
+      if (
+        dbErr &&
+        (dbErr.message?.includes("column") || dbErr.code === "PGRST204" || dbErr.code === "42703")
+      ) {
+        // Fallback: omit extra columns if database schema hasn't run migrations
         delete updatePayload.clinic_email;
+        delete updatePayload.is_refinement;
+        delete updatePayload.doctor_name;
         const retry = await supabase.from("cases").update(updatePayload).eq("id", caseItem.id);
         if (retry.error) {
           const fallbackPayload = {
@@ -495,7 +581,7 @@ export default function EditCaseModal({
         throw new Error(dbErr.message);
       }
 
-      // Also attempt to update manifest.json in storage with fresh metadata
+      // Also update manifest.json in storage
       try {
         const manifestUrl = `https://yrjulcwnabnhgtqebrtn.supabase.co/storage/v1/object/public/treatment-models/${caseItem.id}/manifest.json?t=${Date.now()}`;
         const mRes = await fetch(manifestUrl);
@@ -505,6 +591,8 @@ export default function EditCaseModal({
           currentManifest.patientId = resolvedPatientId;
           currentManifest.clinicName = resolvedClinicName || undefined;
           currentManifest.clinicEmail = resolvedClinicEmail || undefined;
+          currentManifest.doctorName = resolvedDoctorName || undefined;
+          currentManifest.isRefinement = isRefinement;
           currentManifest.patientAge = resolvedAge ?? undefined;
           currentManifest.patientSex = resolvedSex ?? undefined;
 
@@ -528,9 +616,12 @@ export default function EditCaseModal({
         patient_name: dbName,
         clinic_name: resolvedClinicName,
         clinic_email: resolvedClinicEmail,
+        doctor_name: resolvedDoctorName,
+        is_refinement: isRefinement,
         patient_id: resolvedPatientId,
         patient_age: resolvedAge,
         patient_sex: resolvedSex,
+        doctor_notes: updatedDoctorNotes,
         updated_at: new Date().toISOString(),
       };
 
@@ -551,120 +642,477 @@ export default function EditCaseModal({
       }
       onClose();
     } catch (err: any) {
+      console.error("Failed to update case details:", err);
       setIsProcessing(false);
-      setErrorMsg(err.message || "Failed to update case details.");
+      setErrorMsg(err.message || "Failed to update case. Please try again.");
     }
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-sm animate-fadeIn"
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault();
-        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-          handleIncomingFiles(e.dataTransfer.files);
-        }
-      }}
-    >
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-sm animate-fadeIn">
       <div
         className="w-full max-w-xl bg-white dark:bg-[#131A26] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh] transition-colors"
         onClick={(e) => e.stopPropagation()}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault();
-          if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-            handleIncomingFiles(e.dataTransfer.files);
-          }
-        }}
       >
         {/* Modal Header */}
-        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+        <div className="px-5 sm:px-6 py-4 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-[#ffd166] flex items-center justify-center border border-amber-200/60 dark:border-amber-800/50">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-[#ffd166] flex items-center justify-center border border-amber-500/20">
               <Pencil className="w-4 h-4" />
             </div>
             <div>
               <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <span>Edit Case & Re-enter Models</span>
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-[#ffd166]">
-                  {isUnequalStages
-                    ? `${existingUpperStages + existingLowerStages} Trays (U: ${existingUpperStages} · L: ${existingLowerStages})`
-                    : `${currentStages} Stages`}
+                <span>Edit Case &amp; Re-enter Models</span>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                  {currentStages} Stages
                 </span>
               </h2>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Update details or re-upload 3D models without deleting the case or changing share links
+                Update case details, assigned doctor, clinic, or re-upload 3D progression models.
               </p>
             </div>
           </div>
-          {!isProcessing && (
-            <button
-              onClick={onClose}
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+          <button
+            onClick={onClose}
+            disabled={isProcessing}
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
+        <div className="p-5 sm:p-6 space-y-5 overflow-y-auto flex-1 text-xs">
+          {/* Progress / Spinner Overlay */}
+          {isProcessing && (
+            <div className="p-5 rounded-2xl bg-amber-50/50 dark:bg-[#1A2234] border border-amber-200 dark:border-[#e0b457]/30 text-center space-y-3">
+              <Loader2 className="w-8 h-8 animate-spin mx-auto text-amber-500 dark:text-[#ffd166]" />
+              <div>
+                <p className="font-semibold text-xs text-slate-800 dark:text-slate-100">
+                  {progressMsg || "Processing case update..."}
+                </p>
+                <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 mt-2.5 overflow-hidden">
+                  <div
+                    className="bg-amber-500 dark:bg-[#ffd166] h-1.5 transition-all duration-300"
+                    style={{ width: `${progressPct}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           {errorMsg && (
-            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 text-red-700 dark:text-red-400 flex items-center gap-2 text-xs">
+            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-700 dark:text-red-300 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
               <span>{errorMsg}</span>
             </div>
           )}
 
-          {isProcessing ? (
-            /* Progress State */
-            <div className="py-8 px-4 text-center space-y-3 bg-slate-50 dark:bg-[#0D121D] rounded-xl border border-slate-200 dark:border-slate-800">
-              <Loader2 className="w-8 h-8 text-amber-600 dark:text-[#ffd166] animate-spin mx-auto" />
-              <div>
-                <p className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-white">
-                  {progressMsg}
-                </p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                  Overwriting models for Case {caseItem.patient_id || caseItem.id.slice(0, 8)} while preserving share links...
-                </p>
-              </div>
-              <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
-                <div
-                  className="bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:to-[#c49a45] h-full rounded-full transition-all duration-300"
-                  style={{ width: `${progressPct}%` }}
-                />
-              </div>
-              <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 tabular-nums">
-                {progressPct}% Completed
-              </span>
-            </div>
-          ) : (
+          {!isProcessing && (
             <>
-              {/* ── Section 1: Re-enter Models (Optional) ────────────────────────── */}
-              <div className="p-4 rounded-xl border border-amber-200/70 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/10 space-y-3">
+              {/* ── Section 1: Patient & Assignment Details (Unified with New Case) ── */}
+              <div className="space-y-3">
+                {/* Patient Name & Patient ID */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center justify-between">
+                      <span>
+                        Patient / Case Name <span className="text-amber-500">*</span>
+                      </span>
+                    </label>
+                    <input
+                      type="text"
+                      disabled={isProcessing}
+                      value={patientName}
+                      onChange={(e) => setPatientName(e.target.value)}
+                      placeholder="e.g. Niya"
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
+                      <Hash className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
+                      <span>Patient ID (Optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      disabled={isProcessing}
+                      value={patientId}
+                      onChange={(e) => setPatientId(e.target.value)}
+                      placeholder="e.g. PT-1049"
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all font-mono"
+                    />
+                  </div>
+                </div>
+
+                {/* Clinic & Doctor Dropdowns */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Clinic Select */}
+                  <div className="space-y-1.5 min-w-0">
+                    <div className="flex items-center justify-between gap-1 min-w-0">
+                      <label className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 truncate">
+                        <Building2 className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166] flex-shrink-0" />
+                        <span className="truncate">Clinic / Practice</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCustomClinic(!isCustomClinic);
+                          if (!isCustomClinic) setClinicName("");
+                        }}
+                        className="text-[10px] font-semibold text-amber-600 dark:text-[#ffd166] hover:underline inline-flex items-center gap-0.5 flex-shrink-0 cursor-pointer"
+                      >
+                        <Plus className="w-2.5 h-2.5" />
+                        <span>{isCustomClinic ? "Pick from List" : "New"}</span>
+                      </button>
+                    </div>
+
+                    {!isCustomClinic && clinics.length > 0 ? (
+                      <div className="relative min-w-0">
+                        <select
+                          disabled={isProcessing}
+                          value={clinicName}
+                          onChange={(e) => {
+                            if (e.target.value === "__custom__") {
+                              setIsCustomClinic(true);
+                              setClinicName("");
+                            } else {
+                              handleClinicNameChange(e.target.value);
+                            }
+                          }}
+                          className="w-full min-w-0 max-w-full truncate px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all cursor-pointer"
+                        >
+                          <option value="">Select Clinic...</option>
+                          {clinics.map((c) => (
+                            <option key={c.id} value={c.name}>
+                              {c.name} {c.clinicId ? `(${c.clinicId})` : ""}
+                            </option>
+                          ))}
+                          <option value="__custom__">+ Enter Other / New Clinic Name...</option>
+                        </select>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <input
+                          type="text"
+                          disabled={isProcessing}
+                          value={clinicName}
+                          onChange={(e) => handleClinicNameChange(e.target.value)}
+                          placeholder="e.g. Smile Dental Clinic"
+                          className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                        />
+                        {clinics.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setIsCustomClinic(false)}
+                            className="px-2 py-2 text-[10px] font-medium text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 whitespace-nowrap rounded-lg bg-slate-100 dark:bg-slate-800 flex-shrink-0 cursor-pointer"
+                          >
+                            List
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Doctor Select */}
+                  <div className="space-y-1.5 min-w-0">
+                    <div className="flex items-center justify-between gap-1 min-w-0">
+                      <label className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 truncate">
+                        <Stethoscope className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166] flex-shrink-0" />
+                        <span className="truncate">Treating Doctor</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCustomDoctor(!isCustomDoctor);
+                          if (!isCustomDoctor) setDoctorName("");
+                        }}
+                        className="text-[10px] font-semibold text-amber-600 dark:text-[#ffd166] hover:underline inline-flex items-center gap-0.5 flex-shrink-0 cursor-pointer"
+                      >
+                        <Plus className="w-2.5 h-2.5" />
+                        <span>{isCustomDoctor ? "Pick from List" : "New"}</span>
+                      </button>
+                    </div>
+
+                    {!isCustomDoctor && doctors.length > 0 ? (
+                      <div className="relative min-w-0">
+                        <select
+                          disabled={isProcessing}
+                          value={doctorName}
+                          onChange={(e) => {
+                            if (e.target.value === "__custom__") {
+                              setIsCustomDoctor(true);
+                              setDoctorName("");
+                            } else {
+                              handleDoctorNameChange(e.target.value);
+                            }
+                          }}
+                          className="w-full min-w-0 max-w-full truncate px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all cursor-pointer"
+                        >
+                          <option value="">Select Doctor...</option>
+                          {doctors.map((d) => (
+                            <option key={d.id} value={d.name}>
+                              {d.name.startsWith("Dr.") ? d.name : `Dr. ${d.name}`}{" "}
+                              {d.specialization ? `(${d.specialization})` : ""}
+                            </option>
+                          ))}
+                          <option value="__custom__">+ Enter Other Doctor Name...</option>
+                        </select>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <input
+                          type="text"
+                          disabled={isProcessing}
+                          value={doctorName}
+                          onChange={(e) => handleDoctorNameChange(e.target.value)}
+                          placeholder="e.g. Dr. Rajesh Kumar"
+                          className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                        />
+                        {doctors.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setIsCustomDoctor(false)}
+                            className="px-2 py-2 text-[10px] font-medium text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 whitespace-nowrap rounded-lg bg-slate-100 dark:bg-slate-800 flex-shrink-0 cursor-pointer"
+                          >
+                            List
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Inline New Clinic Auto-Save Card */}
+                {isNewClinic && (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs transition-all animate-fadeIn">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2 text-amber-900 dark:text-[#ffd166] font-medium text-xs">
+                        <Sparkles className="w-4 h-4 text-amber-500 dark:text-[#ffd166] flex-shrink-0" />
+                        <span>
+                          New clinic <strong>&quot;{trimmedClinicName}&quot;</strong> will be saved to your directory
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowNewClinicDetails(!showNewClinicDetails)}
+                        className="text-xs font-semibold text-amber-700 dark:text-[#ffd166] hover:underline cursor-pointer flex items-center gap-1 flex-shrink-0"
+                      >
+                        <span>{showNewClinicDetails ? "Hide details" : "+ Add phone & address"}</span>
+                      </button>
+                    </div>
+
+                    {showNewClinicDetails && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-2.5 pt-2.5 border-t border-amber-500/20 animate-fadeIn">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
+                            <Phone className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
+                            <span>Clinic Phone</span>
+                          </label>
+                          <input
+                            type="tel"
+                            disabled={isProcessing}
+                            value={newClinicPhone}
+                            onChange={(e) => setNewClinicPhone(e.target.value)}
+                            placeholder="+91 98765 43210"
+                            className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
+                            <MapPin className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
+                            <span>Address / City</span>
+                          </label>
+                          <input
+                            type="text"
+                            disabled={isProcessing}
+                            value={newClinicAddress}
+                            onChange={(e) => setNewClinicAddress(e.target.value)}
+                            placeholder="e.g. 124 MG Road, Bangalore"
+                            className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Inline New Doctor Auto-Save Card */}
+                {isNewDoctor && (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs transition-all animate-fadeIn">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2 text-amber-900 dark:text-[#ffd166] font-medium text-xs">
+                        <Sparkles className="w-4 h-4 text-amber-500 dark:text-[#ffd166]" />
+                        <span>
+                          New doctor <strong>&quot;{trimmedDoctorName}&quot;</strong> will be saved to your directory
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowNewDoctorDetails(!showNewDoctorDetails)}
+                        className="text-xs font-semibold text-amber-700 dark:text-[#ffd166] hover:underline cursor-pointer flex items-center gap-1 flex-shrink-0"
+                      >
+                        <span>{showNewDoctorDetails ? "Hide details" : "+ Add contact"}</span>
+                      </button>
+                    </div>
+
+                    {showNewDoctorDetails && (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mt-2.5 pt-2.5 border-t border-amber-500/20 animate-fadeIn">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
+                            <GraduationCap className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
+                            <span>Specialization</span>
+                          </label>
+                          <input
+                            type="text"
+                            disabled={isProcessing}
+                            value={newDoctorSpecialization}
+                            onChange={(e) => setNewDoctorSpecialization(e.target.value)}
+                            placeholder="e.g. Orthodontist"
+                            className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
+                            <Phone className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
+                            <span>Phone</span>
+                          </label>
+                          <input
+                            type="tel"
+                            disabled={isProcessing}
+                            value={newDoctorPhone}
+                            onChange={(e) => setNewDoctorPhone(e.target.value)}
+                            placeholder="+91 98765 43210"
+                            className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
+                            <Mail className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
+                            <span>Email</span>
+                          </label>
+                          <input
+                            type="email"
+                            disabled={isProcessing}
+                            value={newDoctorEmail}
+                            onChange={(e) => setNewDoctorEmail(e.target.value)}
+                            placeholder="doctor@clinic.com"
+                            className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Clinic Mailbox Email */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                      <Mail className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
+                      <span>Clinic Mailbox Email</span>
+                      <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500">
+                        (Auto-filled for 1-click sharing)
+                      </span>
+                    </label>
+                  </div>
+                  <input
+                    type="email"
+                    list="saved-clinic-emails-edit"
+                    disabled={isProcessing}
+                    value={clinicEmail}
+                    onChange={(e) => setClinicEmail(e.target.value)}
+                    placeholder="e.g. clinic@smiledental.com"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all font-medium"
+                  />
+                  <datalist id="saved-clinic-emails-edit">
+                    {savedEmails.map((em) => (
+                      <option key={em} value={em} />
+                    ))}
+                  </datalist>
+                </div>
+
+                {/* Age & Sex & Refinement Checkbox */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end pt-1">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
+                      <span>Patient Age</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="120"
+                      disabled={isProcessing}
+                      value={patientAge}
+                      onChange={(e) => setPatientAge(e.target.value)}
+                      placeholder="e.g. 24"
+                      className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
+                      <span>Patient Sex</span>
+                    </label>
+                    <select
+                      disabled={isProcessing}
+                      value={patientSex}
+                      onChange={(e) => setPatientSex(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                    >
+                      <option value="">Not Specified</option>
+                      <option value="Female">Female</option>
+                      <option value="Male">Male</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+
+                  {/* Refinement Case Checkbox Toggle */}
+                  <div className="pt-2 sm:pt-0">
+                    <label
+                      className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium cursor-pointer transition-all select-none border w-full justify-center ${
+                        isRefinement
+                          ? "bg-amber-500/15 border-amber-500/40 text-amber-800 dark:text-[#ffd166]"
+                          : "bg-slate-100 dark:bg-[#1A2234] border-slate-200 dark:border-slate-700/80 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isRefinement}
+                        onChange={(e) => setIsRefinement(e.target.checked)}
+                        disabled={isProcessing}
+                        className="w-3.5 h-3.5 rounded text-amber-500 focus:ring-amber-500 dark:bg-slate-900 border-slate-300 dark:border-slate-700 cursor-pointer"
+                      />
+                      <span className="font-semibold">Refinement Case</span>
+                      {isRefinement && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Section 2: Re-enter / Replace 3D Models (Optional) ──────── */}
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-[#0E1420] space-y-3">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <RefreshCw className="w-4 h-4 text-amber-600 dark:text-[#ffd166]" />
-                    <span className="font-bold text-slate-800 dark:text-slate-200 text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <RefreshCw className="w-3.5 h-3.5 text-amber-500 dark:text-[#ffd166]" />
+                    <span className="font-semibold text-slate-900 dark:text-white text-xs">
                       Re-enter / Replace 3D Models (Optional)
                     </span>
                   </div>
-                  <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
-                    {isUnequalStages
-                      ? `Current: Upper: ${existingUpperStages} stg · Lower: ${existingLowerStages} stg (${existingUpperStages + existingLowerStages} Total Trays)`
-                      : `Current: ${currentStages} stages (${archLabel})`}
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
+                    Current: {currentStages} stages ({archLabel})
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
                   Drop new CAD export ZIP files below only if you want to replace the current models.
                   The existing share link will stay the same. If left empty, existing 3D models are kept.
-                  <span className="text-[10px] text-amber-600 dark:text-[#ffd166] font-medium block pt-0.5">
-                    Tip: You can select or drop both Upper &amp; Lower ZIPs simultaneously.
-                  </span>
                 </p>
 
-                {/* Dropzones for Upper & Lower Jaw */}
+                {/* Dropzones */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                   {/* Upper Jaw */}
                   <div className="space-y-1">
@@ -679,7 +1127,7 @@ export default function EditCaseModal({
                             setUpperFile(null);
                             setUpperMeta(null);
                           }}
-                          className="text-[10px] text-red-500 hover:underline"
+                          className="text-[10px] text-red-500 hover:underline cursor-pointer"
                         >
                           Remove new ZIP
                         </button>
@@ -688,7 +1136,7 @@ export default function EditCaseModal({
                           <button
                             type="button"
                             onClick={() => setRemoveExistingUpper(false)}
-                            className="text-[10px] text-amber-600 dark:text-[#ffd166] hover:underline font-semibold flex items-center gap-1"
+                            className="text-[10px] text-amber-600 dark:text-[#ffd166] hover:underline font-semibold flex items-center gap-1 cursor-pointer"
                           >
                             <Undo2 className="w-3 h-3" />
                             <span>Undo</span>
@@ -697,7 +1145,7 @@ export default function EditCaseModal({
                           <button
                             type="button"
                             onClick={() => setRemoveExistingUpper(true)}
-                            className="text-[10px] text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 hover:underline flex items-center gap-1 font-medium"
+                            className="text-[10px] text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 hover:underline flex items-center gap-1 font-medium cursor-pointer"
                             title="Remove already added Upper models from this case"
                           >
                             <Trash2 className="w-3 h-3" />
@@ -770,7 +1218,7 @@ export default function EditCaseModal({
                               e.stopPropagation();
                               setRemoveExistingUpper(false);
                             }}
-                            className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 hover:bg-rose-200 dark:hover:bg-rose-900/60 transition-colors"
+                            className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 hover:bg-rose-200 dark:hover:bg-rose-900/60 transition-colors cursor-pointer"
                           >
                             <Undo2 className="w-3 h-3" />
                             <span>Keep original models</span>
@@ -813,7 +1261,7 @@ export default function EditCaseModal({
                             setLowerFile(null);
                             setLowerMeta(null);
                           }}
-                          className="text-[10px] text-red-500 hover:underline"
+                          className="text-[10px] text-red-500 hover:underline cursor-pointer"
                         >
                           Remove new ZIP
                         </button>
@@ -822,7 +1270,7 @@ export default function EditCaseModal({
                           <button
                             type="button"
                             onClick={() => setRemoveExistingLower(false)}
-                            className="text-[10px] text-amber-600 dark:text-[#ffd166] hover:underline font-semibold flex items-center gap-1"
+                            className="text-[10px] text-amber-600 dark:text-[#ffd166] hover:underline font-semibold flex items-center gap-1 cursor-pointer"
                           >
                             <Undo2 className="w-3 h-3" />
                             <span>Undo</span>
@@ -831,7 +1279,7 @@ export default function EditCaseModal({
                           <button
                             type="button"
                             onClick={() => setRemoveExistingLower(true)}
-                            className="text-[10px] text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 hover:underline flex items-center gap-1 font-medium"
+                            className="text-[10px] text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 hover:underline flex items-center gap-1 font-medium cursor-pointer"
                             title="Remove already added Lower models from this case"
                           >
                             <Trash2 className="w-3 h-3" />
@@ -904,7 +1352,7 @@ export default function EditCaseModal({
                               e.stopPropagation();
                               setRemoveExistingLower(false);
                             }}
-                            className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 hover:bg-rose-200 dark:hover:bg-rose-900/60 transition-colors"
+                            className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 hover:bg-rose-200 dark:hover:bg-rose-900/60 transition-colors cursor-pointer"
                           >
                             <Undo2 className="w-3 h-3" />
                             <span>Keep original models</span>
@@ -935,167 +1383,31 @@ export default function EditCaseModal({
                   </div>
                 </div>
               </div>
-
-              {/* ── Section 2: Patient & Clinic Details ──────────────────────────── */}
-              <div className="space-y-3 pt-1">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5">
-                    Patient / Case Name <span className="text-amber-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    disabled={isProcessing}
-                    value={patientName}
-                    onChange={(e) => setPatientName(e.target.value)}
-                    placeholder="e.g. Niya"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5 flex items-center gap-1.5">
-                      <Hash className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
-                      <span>Patient ID</span>
-                    </label>
-                    <input
-                      type="text"
-                      disabled={isProcessing}
-                      value={patientId}
-                      onChange={(e) => setPatientId(e.target.value)}
-                      placeholder="e.g. PT-4790"
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all font-mono"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5 flex items-center gap-1.5">
-                      <Building2 className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
-                      <span>Clinic / Practice Name</span>
-                    </label>
-                    <input
-                      type="text"
-                      disabled={isProcessing}
-                      value={clinicName}
-                      onChange={(e) => handleClinicNameChange(e.target.value)}
-                      placeholder="e.g. Smile Dental Clinic"
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
-                    />
-                  </div>
-                </div>
-
-                {/* Clinic Email with Autocomplete & Remembered Chips */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
-                      <Mail className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
-                      <span>Clinic Email</span>
-                      <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500">
-                        (for 1-click mail button)
-                      </span>
-                    </label>
-                    {savedEmails.length > 0 && (
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500">
-                        {savedEmails.length} remembered
-                      </span>
-                    )}
-                  </div>
-                  <div className="relative">
-                    <input
-                      type="email"
-                      list="saved-clinic-emails-edit"
-                      disabled={isProcessing}
-                      value={clinicEmail}
-                      onChange={(e) => setClinicEmail(e.target.value)}
-                      placeholder="e.g. clinic@smiledental.com"
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
-                    />
-                    <datalist id="saved-clinic-emails-edit">
-                      {savedEmails.map((em) => (
-                        <option key={em} value={em} />
-                      ))}
-                    </datalist>
-                  </div>
-                  {savedEmails.length > 0 && (
-                    <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500">Recent:</span>
-                      {savedEmails.slice(0, 3).map((em) => (
-                        <button
-                          key={em}
-                          type="button"
-                          onClick={() => setClinicEmail(em)}
-                          className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-[#ffd166] hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-                        >
-                          {em}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5 flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
-                      <span>Age</span>
-                      <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500">(Years)</span>
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="120"
-                      disabled={isProcessing}
-                      value={patientAge}
-                      onChange={(e) => setPatientAge(e.target.value)}
-                      placeholder="e.g. 23"
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1.5 flex items-center gap-1.5">
-                      <User className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166]" />
-                      <span>Sex</span>
-                    </label>
-                    <select
-                      disabled={isProcessing}
-                      value={patientSex}
-                      onChange={(e) => setPatientSex(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all cursor-pointer"
-                    >
-                      <option value="">Not Specified</option>
-                      <option value="Female">Female</option>
-                      <option value="Male">Male</option>
-                      <option value="Other">Other</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
             </>
           )}
         </div>
 
         {/* Modal Footer */}
-        <div className="px-6 py-4 bg-slate-50/80 dark:bg-[#0D121D] border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-3">
+        <div className="px-5 sm:px-6 py-4 bg-slate-50/80 dark:bg-[#0D121D] border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-3">
           <button
             type="button"
-            disabled={isProcessing}
             onClick={onClose}
-            className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
+            disabled={isProcessing}
+            className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800/60 transition-colors cursor-pointer disabled:opacity-50"
           >
             Cancel
           </button>
 
           <button
             type="button"
-            disabled={isProcessing}
             onClick={handleSave}
-            className="px-5 py-2.5 rounded-xl font-semibold text-xs tracking-wide text-white dark:text-slate-950 bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:via-[#f3c875] dark:to-[#c49a45] hover:bg-slate-800 dark:hover:brightness-105 active:scale-98 transition-all shadow-sm flex items-center gap-2 disabled:opacity-50"
+            disabled={isProcessing || !patientName.trim()}
+            className="px-5 py-2 rounded-xl text-xs font-bold text-white dark:text-slate-950 bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:to-[#c49a45] hover:brightness-105 active:scale-98 transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
           >
-            {hasNewFiles ? (
+            {isProcessing ? (
               <>
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>Re-upload Models & Save</span>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Saving...</span>
               </>
             ) : (
               <>
@@ -1109,4 +1421,3 @@ export default function EditCaseModal({
     </div>
   );
 }
-
