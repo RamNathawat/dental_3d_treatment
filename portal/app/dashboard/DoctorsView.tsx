@@ -226,7 +226,7 @@ export default function DoctorsView({
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
           {filteredDoctors.map((doc) => {
             const assignedCases = cases.filter((c) => matchCaseToDoctor(c, doc));
             const isIncomplete = isDoctorProfileIncomplete(doc);
@@ -236,7 +236,7 @@ export default function DoctorsView({
             return (
               <div
                 key={doc.id}
-                className="bg-white dark:bg-[#131A26] rounded-2xl p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs hover:border-slate-300 dark:hover:border-[#e0b457]/40 transition-all flex flex-col justify-between gap-3 group"
+                className="bg-white dark:bg-[#131A26] rounded-2xl p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs hover:border-slate-300 dark:hover:border-[#e0b457]/40 transition-all flex flex-col justify-between gap-3 group h-fit self-start"
               >
                 <div className="space-y-3">
                   <div className="flex items-start justify-between gap-2">
