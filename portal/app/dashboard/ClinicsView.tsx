@@ -14,9 +14,20 @@ import {
   X,
   Check,
   FolderOpen,
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  ExternalLink,
 } from "lucide-react";
 import { ClinicRecord } from "@/lib/practice-types";
-import { saveClinic, deleteClinic } from "@/lib/practice-storage";
+import {
+  saveClinic,
+  deleteClinic,
+  isClinicProfileIncomplete,
+  getClinicMissingFields,
+  matchCaseToClinic,
+} from "@/lib/practice-storage";
 import { DentalCase } from "./page";
 
 interface ClinicsViewProps {
@@ -37,6 +48,7 @@ export default function ClinicsView({
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingClinic, setEditingClinic] = useState<ClinicRecord | null>(null);
+  const [expandedClinicIds, setExpandedClinicIds] = useState<Record<string, boolean>>({});
 
   // Form states
   const [name, setName] = useState("");
@@ -46,6 +58,13 @@ export default function ClinicsView({
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  function toggleClinicExpand(clinicId: string) {
+    setExpandedClinicIds((prev) => ({
+      ...prev,
+      [clinicId]: !prev[clinicId],
+    }));
+  }
 
   function openCreateModal() {
     setEditingClinic(null);
@@ -123,15 +142,6 @@ export default function ClinicsView({
     }
   }
 
-  // Count assigned cases for each clinic
-  function getClinicCaseCount(clinicName: string) {
-    const cleanCln = clinicName.toLowerCase().trim();
-    return cases.filter((c) => {
-      const assigned = (c.clinic_name || "").toLowerCase().trim();
-      return assigned === cleanCln || assigned.includes(cleanCln) || cleanCln.includes(assigned);
-    }).length;
-  }
-
   const filteredClinics = clinics.filter((cln) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
@@ -207,11 +217,15 @@ export default function ClinicsView({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredClinics.map((cln) => {
-            const caseCount = getClinicCaseCount(cln.name);
+            const assignedCases = cases.filter((c) => matchCaseToClinic(c, cln));
+            const isIncomplete = isClinicProfileIncomplete(cln);
+            const missingFields = getClinicMissingFields(cln);
+            const isExpanded = Boolean(expandedClinicIds[cln.id]);
+
             return (
               <div
                 key={cln.id}
-                className="bg-white dark:bg-[#131A26] rounded-2xl p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs hover:border-slate-300 dark:hover:border-[#e0b457]/40 transition-all flex flex-col justify-between gap-4 group"
+                className="bg-white dark:bg-[#131A26] rounded-2xl p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs hover:border-slate-300 dark:hover:border-[#e0b457]/40 transition-all flex flex-col justify-between gap-3 group"
               >
                 <div className="space-y-3">
                   <div className="flex items-start justify-between gap-2">
@@ -254,6 +268,28 @@ export default function ClinicsView({
                     </div>
                   </div>
 
+                  {/* Incomplete Profile Alert Badge */}
+                  {isIncomplete && (
+                    <div className="flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-900 dark:text-[#ffd166] animate-fadeIn">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <AlertCircle className="w-3.5 h-3.5 text-amber-500 dark:text-[#ffd166] flex-shrink-0" />
+                        <span className="truncate">
+                          Missing {missingFields.join(", ")}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEditModal(cln);
+                        }}
+                        className="text-[10px] font-bold underline hover:brightness-125 flex-shrink-0 cursor-pointer"
+                      >
+                        Complete
+                      </button>
+                    </div>
+                  )}
+
                   {/* Details */}
                   <div className="space-y-1.5 pt-1 text-[11px] text-slate-600 dark:text-slate-400">
                     {cln.address && (
@@ -277,13 +313,88 @@ export default function ClinicsView({
                   </div>
                 </div>
 
-                {/* Footer: Cases Assigned */}
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px]">
-                  <span className="text-slate-400">Total Cases:</span>
-                  <span className="font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
-                    {caseCount} {caseCount === 1 ? "Case" : "Cases"}
-                  </span>
-                </div>
+                {/* Footer: Cases Assigned & Expand Toggle */}
+                <button
+                  type="button"
+                  onClick={() => toggleClinicExpand(cln.id)}
+                  className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px] w-full text-left cursor-pointer group/btn hover:text-amber-600 dark:hover:text-[#ffd166] transition-colors"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-400 group-hover/btn:text-slate-600 dark:group-hover/btn:text-slate-300">
+                      Assigned Cases:
+                    </span>
+                    <span className="font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
+                      {assignedCases.length} {assignedCases.length === 1 ? "Case" : "Cases"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                    <span>{isExpanded ? "Hide Cases" : "View Cases"}</span>
+                    {isExpanded ? (
+                      <ChevronUp className="w-3.5 h-3.5" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    )}
+                  </div>
+                </button>
+
+                {/* Expanded Cases Drawer */}
+                {isExpanded && (
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800/60 space-y-2 animate-fadeIn">
+                    <div className="flex items-center justify-between text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                      <span>Assigned Cases ({assignedCases.length})</span>
+                    </div>
+
+                    {assignedCases.length === 0 ? (
+                      <p className="text-xs text-slate-400 dark:text-slate-500 italic py-2 text-center bg-slate-50 dark:bg-slate-900/30 rounded-xl">
+                        No cases assigned to this clinic yet.
+                      </p>
+                    ) : (
+                      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 divide-y divide-slate-100 dark:divide-slate-800/40">
+                        {assignedCases.map((c) => (
+                          <div
+                            key={c.id}
+                            className="pt-1.5 first:pt-0 flex items-center justify-between gap-2 text-xs"
+                          >
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 truncate">
+                                <span className="font-semibold text-slate-800 dark:text-slate-100 truncate">
+                                  {c.patient_name}
+                                </span>
+                                {c.patient_id && (
+                                  <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">
+                                    #{c.patient_id}
+                                  </span>
+                                )}
+                                {c.is_refinement && (
+                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/10 text-amber-700 dark:text-[#ffd166]">
+                                    Refinement
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
+                                {c.doctor_name
+                                  ? `Dr. ${c.doctor_name.replace(/^dr\.?\s*/i, "")}`
+                                  : "No doctor specified"}
+                              </div>
+                            </div>
+
+                            <a
+                              href={`/treatment?case=${c.share_token}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Open 3D Progression"
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 dark:bg-[#1A2234] hover:bg-amber-500/20 text-slate-700 dark:text-slate-200 hover:text-amber-800 dark:hover:text-[#ffd166] text-[10px] font-semibold transition-colors flex-shrink-0"
+                            >
+                              <Eye className="w-3 h-3 text-amber-500 dark:text-[#ffd166]" />
+                              <span>3D View</span>
+                              <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                            </a>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -318,78 +429,92 @@ export default function ClinicsView({
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Downtown Smile Dental"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#131A26] text-slate-900 dark:text-white focus:outline-none"
+                  placeholder="e.g. Smile Dental Clinic"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#131A26] text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                 />
               </div>
 
               <div className="space-y-1">
                 <label className="font-semibold text-slate-800 dark:text-slate-200">
-                  Clinic Branch Code / ID
+                  Clinic ID / Branch Code
                 </label>
                 <input
                   type="text"
                   value={clinicId}
                   onChange={(e) => setClinicId(e.target.value)}
                   placeholder="e.g. CLN-01"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#131A26] text-slate-900 dark:text-white font-mono focus:outline-none"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#131A26] text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                 />
               </div>
 
               <div className="space-y-1">
                 <label className="font-semibold text-slate-800 dark:text-slate-200">
-                  Clinic Address / Branch Location
+                  Branch Address / City
                 </label>
                 <input
                   type="text"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
-                  placeholder="e.g. 450 Medical Plaza, Suite 200"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#131A26] text-slate-900 dark:text-white focus:outline-none"
+                  placeholder="e.g. 123 Healthcare Ave, Metro City"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#131A26] text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                 />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-800 dark:text-slate-200">
+                    Mailbox Email
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="clinic@smiledental.com"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#131A26] text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-800 dark:text-slate-200">
+                    Phone / WhatsApp
+                  </label>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+91 98765 43210"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#131A26] text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                  />
+                </div>
               </div>
 
               <div className="space-y-1">
                 <label className="font-semibold text-slate-800 dark:text-slate-200">
-                  Clinic Mailbox Email (For Sharing & Notifications)
+                  Notes / Operating Hours
                 </label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="clinic@smiledental.com"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#131A26] text-slate-900 dark:text-white focus:outline-none"
+                <textarea
+                  rows={2}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="e.g. Open Mon-Sat 9am-7pm, primary aligner delivery hub."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#131A26] text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 resize-none"
                 />
               </div>
 
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-800 dark:text-slate-200">
-                  Phone Number
-                </label>
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+1 (555) 019-2834"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#131A26] text-slate-900 dark:text-white focus:outline-none"
-                />
-              </div>
-
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-end gap-2">
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800/80">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting || !name.trim()}
-                  className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:to-[#c49a45] text-white dark:text-slate-950 hover:brightness-105 active:scale-98 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  className="px-5 py-2 rounded-xl bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:to-[#c49a45] text-white dark:text-slate-950 font-bold hover:brightness-105 active:scale-98 transition-all disabled:opacity-50"
                 >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>{isSubmitting ? "Saving..." : editingClinic ? "Save Changes" : "Add Clinic"}</span>
+                  {isSubmitting ? "Saving..." : editingClinic ? "Save Changes" : "Create Clinic"}
                 </button>
               </div>
             </form>
@@ -399,4 +524,3 @@ export default function ClinicsView({
     </div>
   );
 }
-

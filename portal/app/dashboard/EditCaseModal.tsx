@@ -399,8 +399,10 @@ export default function EditCaseModal({
     // Auto-save new doctor to CRM database
     if (isNewDoctor && resolvedDoctorName && onDoctorCreated) {
       try {
+        const autoDocId = `DOC-${String((doctors?.length || 0) + 1).padStart(2, "0")}`;
         const createdDoctor = await saveDoctor(userId, {
           name: resolvedDoctorName,
+          doctorId: autoDocId,
           specialization: newDoctorSpecialization.trim() || undefined,
           phone: newDoctorPhone.trim() || undefined,
           email: newDoctorEmail.trim() || undefined,

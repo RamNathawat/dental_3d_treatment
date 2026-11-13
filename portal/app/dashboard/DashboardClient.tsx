@@ -47,6 +47,8 @@ import {
   fetchPracticeProfile,
   fetchDoctors,
   fetchClinics,
+  isDoctorProfileIncomplete,
+  isClinicProfileIncomplete,
 } from "@/lib/practice-storage";
 import { getCaseTrayInfo } from "@/lib/case-tray-info";
 import { getCaseLinkAccess } from "@/lib/link-access";
@@ -448,9 +450,20 @@ export default function DashboardClient({
                   <Stethoscope className={`w-4 h-4 ${currentTab === "doctors" ? "text-slate-900 dark:text-[#ffd166]" : "text-slate-400"}`} />
                   <span>Doctors Directory</span>
                 </div>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 shadow-2xs border border-slate-200/60 dark:border-slate-700/60">
-                  {doctors.length}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  {doctors.filter(isDoctorProfileIncomplete).length > 0 && (
+                    <span
+                      title={`${doctors.filter(isDoctorProfileIncomplete).length} doctor(s) have incomplete contact details`}
+                      className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-500/15 text-amber-700 dark:text-[#ffd166] border border-amber-500/30 inline-flex items-center gap-1"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                      <span>{doctors.filter(isDoctorProfileIncomplete).length}</span>
+                    </span>
+                  )}
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 shadow-2xs border border-slate-200/60 dark:border-slate-700/60">
+                    {doctors.length}
+                  </span>
+                </div>
               </button>
             )}
 
@@ -466,9 +479,20 @@ export default function DashboardClient({
                 <Building2 className={`w-4 h-4 ${currentTab === "clinics" ? "text-slate-900 dark:text-[#ffd166]" : "text-slate-400"}`} />
                 <span>Clinics Directory</span>
               </div>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 shadow-2xs border border-slate-200/60 dark:border-slate-700/60">
-                {clinics.length}
-              </span>
+              <div className="flex items-center gap-1.5">
+                {clinics.filter(isClinicProfileIncomplete).length > 0 && (
+                  <span
+                    title={`${clinics.filter(isClinicProfileIncomplete).length} clinic(s) have incomplete details`}
+                    className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-500/15 text-amber-700 dark:text-[#ffd166] border border-amber-500/30 inline-flex items-center gap-1"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                    <span>{clinics.filter(isClinicProfileIncomplete).length}</span>
+                  </span>
+                )}
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 shadow-2xs border border-slate-200/60 dark:border-slate-700/60">
+                  {clinics.length}
+                </span>
+              </div>
             </button>
           </nav>
         </div>

@@ -14,9 +14,21 @@ import {
   Check,
   UserCheck,
   FolderOpen,
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  ExternalLink,
+  Building2,
 } from "lucide-react";
 import { DoctorRecord } from "@/lib/practice-types";
-import { saveDoctor, deleteDoctor } from "@/lib/practice-storage";
+import {
+  saveDoctor,
+  deleteDoctor,
+  isDoctorProfileIncomplete,
+  getDoctorMissingFields,
+  matchCaseToDoctor,
+} from "@/lib/practice-storage";
 import { DentalCase } from "./page";
 
 interface DoctorsViewProps {
@@ -37,6 +49,7 @@ export default function DoctorsView({
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDoctor, setEditingDoctor] = useState<DoctorRecord | null>(null);
+  const [expandedDoctorIds, setExpandedDoctorIds] = useState<Record<string, boolean>>({});
 
   // Form states
   const [name, setName] = useState("");
@@ -46,6 +59,13 @@ export default function DoctorsView({
   const [specialization, setSpecialization] = useState("Orthodontist");
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  function toggleDoctorExpand(docId: string) {
+    setExpandedDoctorIds((prev) => ({
+      ...prev,
+      [docId]: !prev[docId],
+    }));
+  }
 
   function openCreateModal() {
     setEditingDoctor(null);
@@ -208,11 +228,15 @@ export default function DoctorsView({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredDoctors.map((doc) => {
-            const caseCount = getDoctorCaseCount(doc.name);
+            const assignedCases = cases.filter((c) => matchCaseToDoctor(c, doc));
+            const isIncomplete = isDoctorProfileIncomplete(doc);
+            const missingFields = getDoctorMissingFields(doc);
+            const isExpanded = Boolean(expandedDoctorIds[doc.id]);
+
             return (
               <div
                 key={doc.id}
-                className="bg-white dark:bg-[#131A26] rounded-2xl p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs hover:border-slate-300 dark:hover:border-[#e0b457]/40 transition-all flex flex-col justify-between gap-4 group"
+                className="bg-white dark:bg-[#131A26] rounded-2xl p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs hover:border-slate-300 dark:hover:border-[#e0b457]/40 transition-all flex flex-col justify-between gap-3 group"
               >
                 <div className="space-y-3">
                   <div className="flex items-start justify-between gap-2">
@@ -258,6 +282,28 @@ export default function DoctorsView({
                     </div>
                   </div>
 
+                  {/* Incomplete Profile Alert Badge */}
+                  {isIncomplete && (
+                    <div className="flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-900 dark:text-[#ffd166] animate-fadeIn">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <AlertCircle className="w-3.5 h-3.5 text-amber-500 dark:text-[#ffd166] flex-shrink-0" />
+                        <span className="truncate">
+                          Missing {missingFields.join(", ")}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEditModal(doc);
+                        }}
+                        className="text-[10px] font-bold underline hover:brightness-125 flex-shrink-0 cursor-pointer"
+                      >
+                        Complete
+                      </button>
+                    </div>
+                  )}
+
                   {/* Contact Info */}
                   <div className="space-y-1.5 pt-1 text-[11px] text-slate-600 dark:text-slate-400">
                     {doc.email && (
@@ -275,13 +321,91 @@ export default function DoctorsView({
                   </div>
                 </div>
 
-                {/* Footer: Cases Assigned */}
-                <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px]">
-                  <span className="text-slate-400">Assigned Cases:</span>
-                  <span className="font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
-                    {caseCount} {caseCount === 1 ? "Case" : "Cases"}
-                  </span>
-                </div>
+                {/* Footer: Cases Assigned & Expand Toggle */}
+                <button
+                  type="button"
+                  onClick={() => toggleDoctorExpand(doc.id)}
+                  className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px] w-full text-left cursor-pointer group/btn hover:text-amber-600 dark:hover:text-[#ffd166] transition-colors"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-400 group-hover/btn:text-slate-600 dark:group-hover/btn:text-slate-300">
+                      Assigned Cases:
+                    </span>
+                    <span className="font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
+                      {assignedCases.length} {assignedCases.length === 1 ? "Case" : "Cases"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                    <span>{isExpanded ? "Hide Cases" : "View Cases"}</span>
+                    {isExpanded ? (
+                      <ChevronUp className="w-3.5 h-3.5" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    )}
+                  </div>
+                </button>
+
+                {/* Expanded Cases Drawer */}
+                {isExpanded && (
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800/60 space-y-2 animate-fadeIn">
+                    <div className="flex items-center justify-between text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                      <span>Assigned Cases ({assignedCases.length})</span>
+                    </div>
+
+                    {assignedCases.length === 0 ? (
+                      <p className="text-xs text-slate-400 dark:text-slate-500 italic py-2 text-center bg-slate-50 dark:bg-slate-900/30 rounded-xl">
+                        No cases assigned to this doctor yet.
+                      </p>
+                    ) : (
+                      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 divide-y divide-slate-100 dark:divide-slate-800/40">
+                        {assignedCases.map((c) => (
+                          <div
+                            key={c.id}
+                            className="pt-1.5 first:pt-0 flex items-center justify-between gap-2 text-xs"
+                          >
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 truncate">
+                                <span className="font-semibold text-slate-800 dark:text-slate-100 truncate">
+                                  {c.patient_name}
+                                </span>
+                                {c.patient_id && (
+                                  <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">
+                                    #{c.patient_id}
+                                  </span>
+                                )}
+                                {c.is_refinement && (
+                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/10 text-amber-700 dark:text-[#ffd166]">
+                                    Refinement
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500 truncate">
+                                {c.clinic_name && (
+                                  <span className="inline-flex items-center gap-0.5 truncate">
+                                    <Building2 className="w-2.5 h-2.5 text-slate-400" />
+                                    <span>{c.clinic_name}</span>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <a
+                              href={`/treatment?case=${c.share_token}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Open 3D Progression"
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 dark:bg-[#1A2234] hover:bg-amber-500/20 text-slate-700 dark:text-slate-200 hover:text-amber-800 dark:hover:text-[#ffd166] text-[10px] font-semibold transition-colors flex-shrink-0"
+                            >
+                              <Eye className="w-3 h-3 text-amber-500 dark:text-[#ffd166]" />
+                              <span>3D View</span>
+                              <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                            </a>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
