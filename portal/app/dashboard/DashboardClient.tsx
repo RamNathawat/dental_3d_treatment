@@ -872,7 +872,12 @@ export default function DashboardClient({
                                 <>
                                   <span className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-300">
                                     <Stethoscope className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
-                                    <span>Dr. {item.doctor_name || item.doctor_notes?.assigned_doctor}</span>
+                                    <span>
+                                      {(() => {
+                                        const docRaw = (item.doctor_name || item.doctor_notes?.assigned_doctor || "").trim();
+                                        return docRaw.toLowerCase().startsWith("dr.") ? docRaw : `Dr. ${docRaw}`;
+                                      })()}
+                                    </span>
                                   </span>
                                   <span className="text-slate-300 dark:text-slate-700">•</span>
                                 </>
@@ -1149,7 +1154,7 @@ export default function DashboardClient({
         />
       )}
 
-      {/* ─── Share Modal (Copy Link & Send to Clinic) ────────────────────── */}
+      {/* ─── Share Modal (Copy Link & Send to Doctor / Clinic) ───────────── */}
       {selectedShareCase && (
         <ShareModal
           isOpen={Boolean(selectedShareCase)}
@@ -1157,6 +1162,9 @@ export default function DashboardClient({
           caseItem={selectedShareCase}
           doctorName={email !== "Doctor" ? email.split("@")[0] : undefined}
           allCases={cases}
+          doctors={doctors}
+          clinics={clinics}
+          practiceProfile={practiceProfile}
           onEmailUpdated={handleEmailUpdated}
           onCaseUpdated={handleCaseUpdated}
           onToast={showToast}

@@ -123,6 +123,8 @@ export function buildWhatsAppShareText({
   metadataBadgeText,
   archBadgeText,
   clinicName,
+  doctorName,
+  brandName,
   shareUrl,
 }: {
   patientName: string;
@@ -131,21 +133,28 @@ export function buildWhatsAppShareText({
   metadataBadgeText?: string;
   archBadgeText?: string;
   clinicName?: string | null;
+  doctorName?: string | null;
+  brandName?: string | null;
   shareUrl: string;
 }): string {
+  const brandHeader = brandName ? `${brandName} 3D Treatment Progression` : "Orthodontic 3D Treatment Progression";
   const lines: string[] = [
-    `🦷 *Orthodontic 3D Treatment Progression*`,
+    `🦷 *${brandHeader}*`,
     `*Patient:* ${patientName}${patientId ? ` (#${patientId})` : ""}`,
   ];
 
+  if (doctorName) {
+    const cleanDoc = doctorName.trim().toLowerCase().startsWith("dr.") ? doctorName.trim() : `Dr. ${doctorName.trim()}`;
+    lines.push(`*Doctor:* ${cleanDoc}`);
+  }
+  if (clinicName) {
+    lines.push(`*Clinic:* ${clinicName}`);
+  }
   if (metadataBadgeText) {
     lines.push(`*Prescription:* ${metadataBadgeText}`);
   }
   if (stages) {
     lines.push(`*Stages:* ${stages} Stages${archBadgeText ? ` (${archBadgeText})` : ""}`);
-  }
-  if (clinicName) {
-    lines.push(`*Clinic:* ${clinicName}`);
   }
 
   lines.push(

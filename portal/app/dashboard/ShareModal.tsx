@@ -9,6 +9,7 @@ import {
   Mail,
   ExternalLink,
   Building2,
+  Stethoscope,
   Send,
   Eye,
   Clock,
@@ -22,6 +23,8 @@ import {
   Unlock,
   AlertTriangle,
   ChevronDown,
+  User,
+  Users,
 } from "lucide-react";
 import { DentalCase } from "./page";
 import {
@@ -41,6 +44,7 @@ import {
   calculateExpiryFromDays,
   formatForDateTimeInput,
 } from "@/lib/link-access";
+import { DoctorRecord, ClinicRecord, PracticeProfile } from "@/lib/practice-types";
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -48,6 +52,9 @@ interface ShareModalProps {
   caseItem: DentalCase;
   doctorName?: string;
   allCases?: DentalCase[];
+  doctors?: DoctorRecord[];
+  clinics?: ClinicRecord[];
+  practiceProfile?: PracticeProfile | null;
   onEmailUpdated?: (caseId: string, email: string) => void;
   onCaseUpdated?: (updatedCase: DentalCase) => void;
   onToast?: (msg: string) => void;
@@ -59,6 +66,9 @@ export default function ShareModal({
   caseItem,
   doctorName = "Doctor",
   allCases,
+  doctors = [],
+  clinics = [],
+  practiceProfile,
   onEmailUpdated,
   onCaseUpdated,
   onToast,
@@ -67,6 +77,9 @@ export default function ShareModal({
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedDraft, setCopiedDraft] = useState(false);
   const [recipientEmail, setRecipientEmail] = useState("");
+  const [ccEmail, setCcEmail] = useState("");
+  const [recipientType, setRecipientType] = useState<"doctor" | "clinic" | "both" | "custom">("doctor");
+  const [showCcInput, setShowCcInput] = useState(false);
   const [savedEmails, setSavedEmails] = useState<string[]>([]);
   const [saveAsDefault, setSaveAsDefault] = useState(true);
   const [isUpdatingDb, setIsUpdatingDb] = useState(false);
@@ -130,30 +143,75 @@ export default function ShareModal({
     const remembered = getSavedClinicEmails(allCases);
     setSavedEmails(remembered);
 
-    let initialEmail = "";
+    // Resolve Doctor contact details
+    const assignedDocNameRaw =
+      caseItem.doctor_name ||
+      (typeof caseItem.doctor_notes === "object" && caseItem.doctor_notes?.doctor_name) ||
+      (typeof caseItem.doctor_notes === "object" && caseItem.doctor_notes?.assigned_doctor) ||
+      "";
+    const assignedDocIdRaw =
+      (typeof caseItem.doctor_notes === "object" && caseItem.doctor_notes?.doctor_id) || "";
+
+    const matchedDoc = doctors?.find((d) => {
+      if (assignedDocIdRaw && (d.id === assignedDocIdRaw || d.doctorId === assignedDocIdRaw)) {
+        return true;
+      }
+      if (!assignedDocNameRaw) return false;
+      const cleanTarget = assignedDocNameRaw.replace(/^dr\.\s*/i, "").trim().toLowerCase();
+      const cleanName = d.name.replace(/^dr\.\s*/i, "").trim().toLowerCase();
+      return cleanName === cleanTarget;
+    });
+
+    const docEmail =
+      matchedDoc?.email ||
+      (typeof caseItem.doctor_notes === "object" && caseItem.doctor_notes?.doctor_email) ||
+      "";
+
+    // Resolve Clinic contact details
+    let initClinicEmail = "";
     if (caseItem.clinic_email && caseItem.clinic_email.includes("@")) {
-      initialEmail = caseItem.clinic_email.trim();
+      initClinicEmail = caseItem.clinic_email.trim();
     } else if (
       caseItem.doctor_notes &&
       typeof caseItem.doctor_notes === "object" &&
       caseItem.doctor_notes.clinic_email
     ) {
-      initialEmail = String(caseItem.doctor_notes.clinic_email).trim();
+      initClinicEmail = String(caseItem.doctor_notes.clinic_email).trim();
     } else if (caseItem.clinic_name) {
       const match = getSavedEmailForClinic(caseItem.clinic_name);
-      if (match) initialEmail = match;
+      if (match) initClinicEmail = match;
     }
 
-    if (!initialEmail && remembered.length > 0) {
-      initialEmail = remembered[0];
+    if (!initClinicEmail) {
+      const clinicMatch = clinics?.find(
+        (c) => c.name.trim().toLowerCase() === (caseItem.clinic_name || "").trim().toLowerCase()
+      );
+      if (clinicMatch?.email) initClinicEmail = clinicMatch.email.trim();
     }
 
-    setRecipientEmail(initialEmail);
+    if (docEmail) {
+      setRecipientType("doctor");
+      setRecipientEmail(docEmail);
+      setCcEmail("");
+    } else if (initClinicEmail) {
+      setRecipientType("clinic");
+      setRecipientEmail(initClinicEmail);
+      setCcEmail("");
+    } else if (remembered.length > 0) {
+      setRecipientType("custom");
+      setRecipientEmail(remembered[0]);
+      setCcEmail("");
+    } else {
+      setRecipientType("doctor");
+      setRecipientEmail("");
+      setCcEmail("");
+    }
+
     setCopiedLink(false);
     setCopiedDraft(false);
     setShowRegenerateConfirm(false);
     setShowDatePicker(false);
-  }, [isOpen, caseItem, allCases]);
+  }, [isOpen, caseItem, allCases, doctors, clinics]);
 
   if (!isOpen) return null;
 
@@ -268,27 +326,90 @@ export default function ShareModal({
     }
   }
 
-  const emailSubject = trayInfo.isUnequal
-    ? `[3D Treatment Progression] ${displayName} (Upper: ${trayInfo.upper} · Lower: ${trayInfo.lower} · ${trayInfo.total} Trays) - Clinical Review Link`
-    : `[3D Treatment Progression] ${displayName} (${stages} Stages · ${trayInfo.total} Trays) - Clinical Review Link`;
+  // Resolve assigned doctor
+  const assignedDoctorNameRaw =
+    currentCase.doctor_name ||
+    (typeof currentCase.doctor_notes === "object" && currentCase.doctor_notes?.doctor_name) ||
+    (typeof currentCase.doctor_notes === "object" && currentCase.doctor_notes?.assigned_doctor) ||
+    "";
+  const assignedDoctorIdRaw =
+    (typeof currentCase.doctor_notes === "object" && currentCase.doctor_notes?.doctor_id) || "";
 
-  const emailBody = `Dear ${currentCase.clinic_name || "Hope you are doing well"},
+  const matchedDoctor = doctors?.find((d) => {
+    if (assignedDoctorIdRaw && (d.id === assignedDoctorIdRaw || d.doctorId === assignedDoctorIdRaw)) {
+      return true;
+    }
+    if (!assignedDoctorNameRaw) return false;
+    const cleanTarget = assignedDoctorNameRaw.replace(/^dr\.\s*/i, "").trim().toLowerCase();
+    const cleanName = d.name.replace(/^dr\.\s*/i, "").trim().toLowerCase();
+    return cleanName === cleanTarget;
+  });
 
-The interactive 3D orthodontic treatment progression plan for ${displayName} is ready for clinical review.
+  const doctorDisplayName = matchedDoctor?.name
+    ? (matchedDoctor.name.toLowerCase().startsWith("dr.") ? matchedDoctor.name : `Dr. ${matchedDoctor.name}`)
+    : (assignedDoctorNameRaw ? (assignedDoctorNameRaw.toLowerCase().startsWith("dr.") ? assignedDoctorNameRaw : `Dr. ${assignedDoctorNameRaw}`) : "");
+
+  const doctorEmail =
+    matchedDoctor?.email ||
+    (typeof currentCase.doctor_notes === "object" && currentCase.doctor_notes?.doctor_email) ||
+    "";
+  const doctorPhone =
+    matchedDoctor?.phone ||
+    (typeof currentCase.doctor_notes === "object" && currentCase.doctor_notes?.doctor_phone) ||
+    "";
+
+  // Resolve assigned clinic
+  const matchedClinic = clinics?.find(
+    (c) => c.name.trim().toLowerCase() === (currentCase.clinic_name || "").trim().toLowerCase()
+  );
+  const clinicDisplayName = currentCase.clinic_name || matchedClinic?.name || "";
+  const clinicEmail = currentCase.clinic_email || matchedClinic?.email || "";
+  const clinicPhone = matchedClinic?.phone || "";
+
+  const brandName = practiceProfile?.brandName || practiceProfile?.firmName || "Orthodontic 3D Studio";
+
+  // Dynamic Email Subject & Body tailored to recipient
+  const emailSubject = (() => {
+    const baseInfo = trayInfo.isUnequal
+      ? `(Upper: ${trayInfo.upper} · Lower: ${trayInfo.lower} · ${trayInfo.total} Trays)`
+      : `(${stages} Stages · ${trayInfo.total} Trays)`;
+
+    if (recipientType === "doctor" && doctorDisplayName) {
+      return `[3D Treatment Plan] ${displayName} ${baseInfo} - Ready for Clinical Review`;
+    }
+    if (recipientType === "clinic" && clinicDisplayName) {
+      return `[3D Treatment Plan] ${displayName} ${baseInfo} - Clinical Review Link`;
+    }
+    return `[3D Treatment Progression] ${displayName} ${baseInfo} - Clinical Review Link`;
+  })();
+
+  const emailBody = (() => {
+    let greeting = `Dear ${clinicDisplayName || "Hope you are doing well"},`;
+    if (recipientType === "doctor" && doctorDisplayName) {
+      greeting = `Dear ${doctorDisplayName},`;
+    } else if (recipientType === "both" && doctorDisplayName && clinicDisplayName) {
+      greeting = `Dear ${doctorDisplayName} and ${clinicDisplayName} Team,`;
+    }
+
+    const senderSignOff = brandName || `Dr. ${doctorName}\nOrthodontic 3D Clinical Studio`;
+
+    return `${greeting}
+
+The interactive 3D orthodontic treatment progression plan for ${displayName} is ready for clinical review and approval.
 
 • Patient Name: ${displayName}
-• Patient ID: ${currentCase.patient_id || "N/A"}
+• Patient ID: ${currentCase.patient_id || "N/A"}${doctorDisplayName ? `\n• Prescribing Doctor: ${doctorDisplayName}` : ""}${clinicDisplayName ? `\n• Clinic / Practice: ${clinicDisplayName}` : ""}
 • Treatment Trays: ${trayInfo.metadataBadgeText}
-• Progression Stages: ${stages} Stages (${trayInfo.archBadgeText})
-${currentCase.clinic_name ? `• Clinic / Practice: ${currentCase.clinic_name}\n` : ""}${currentCase.patient_age ? `• Patient Age: ${currentCase.patient_age} yrs\n` : ""}
+• Progression Stages: ${stages} Stages (${trayInfo.archBadgeText})${currentCase.patient_age ? `\n• Patient Age: ${currentCase.patient_age} yrs` : ""}
+
 🔗 Interactive 3D Progression Link:
 ${shareUrl}
 
 You can rotate, zoom, inspect individual aligner stages, examine tooth movements, and verify attachments directly in any browser on desktop or mobile without installing software.
 
 Best regards,
-Dr. ${doctorName}
-Orthodontic 3D Clinical Studio`;
+${senderSignOff}`;
+  })();
 
   async function persistEmailIfChanged(emailToSave: string) {
     const clean = emailToSave.trim().toLowerCase();
@@ -327,20 +448,26 @@ Orthodontic 3D Clinical Studio`;
     setTimeout(() => setCopiedLink(false), 2500);
   }
 
-  function handleShareWhatsApp() {
+  function handleShareWhatsApp(targetPhone?: string, recipientLabel?: string) {
     const text = buildWhatsAppShareText({
       patientName: displayName,
       patientId: currentCase.patient_id,
       stages,
       metadataBadgeText: trayInfo.metadataBadgeText,
       archBadgeText: trayInfo.archBadgeText,
-      clinicName: currentCase.clinic_name,
+      clinicName: clinicDisplayName,
+      doctorName: doctorDisplayName,
+      brandName,
       shareUrl,
     });
-    const url = getWhatsAppShareUrl({ text });
+    const url = getWhatsAppShareUrl({ text, phoneNumber: targetPhone });
     window.open(url, "_blank", "noopener,noreferrer");
     if (onToast) {
-      onToast("WhatsApp opened with 3D progression link");
+      if (recipientLabel && targetPhone) {
+        onToast(`WhatsApp opened for ${recipientLabel}`);
+      } else {
+        onToast("WhatsApp opened with 3D progression link");
+      }
     }
   }
 
@@ -352,9 +479,13 @@ Orthodontic 3D Clinical Studio`;
     }
     persistEmailIfChanged(to);
 
-    const mailtoUrl = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(
+    let mailtoUrl = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(
       emailSubject,
     )}&body=${encodeURIComponent(emailBody)}`;
+
+    if (ccEmail.trim()) {
+      mailtoUrl += `&cc=${encodeURIComponent(ccEmail.trim())}`;
+    }
 
     window.location.href = mailtoUrl;
 
@@ -371,9 +502,13 @@ Orthodontic 3D Clinical Studio`;
     }
     persistEmailIfChanged(to);
 
-    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
+    let gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
       to,
     )}&su=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
+
+    if (ccEmail.trim()) {
+      gmailUrl += `&cc=${encodeURIComponent(ccEmail.trim())}`;
+    }
 
     window.open(gmailUrl, "_blank", "noopener,noreferrer");
 
@@ -383,7 +518,11 @@ Orthodontic 3D Clinical Studio`;
   }
 
   function handleCopyEmailDraft() {
-    navigator.clipboard.writeText(`Subject: ${emailSubject}\n\n${emailBody}`);
+    let header = `Subject: ${emailSubject}\nTo: ${recipientEmail.trim()}`;
+    if (ccEmail.trim()) {
+      header += `\nCC: ${ccEmail.trim()}`;
+    }
+    navigator.clipboard.writeText(`${header}\n\n${emailBody}`);
     setCopiedDraft(true);
     if (recipientEmail.trim()) {
       persistEmailIfChanged(recipientEmail.trim());
@@ -755,12 +894,21 @@ Orthodontic 3D Clinical Studio`;
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+              <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 flex-wrap">
                 {currentCase.clinic_name && (
                   <span className="inline-flex items-center gap-1">
                     <Building2 className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
                     <span>{currentCase.clinic_name}</span>
                   </span>
+                )}
+                {doctorDisplayName && (
+                  <>
+                    <span>•</span>
+                    <span className="inline-flex items-center gap-1 text-slate-700 dark:text-slate-300 font-medium">
+                      <Stethoscope className="w-3 h-3 text-amber-500 dark:text-[#ffd166]" />
+                      <span>{doctorDisplayName}</span>
+                    </span>
+                  </>
                 )}
                 <span>•</span>
                 <span>{trayInfo.metadataBadgeText}</span>
@@ -1113,7 +1261,7 @@ Orthodontic 3D Clinical Studio`;
 
                 <button
                   type="button"
-                  onClick={handleShareWhatsApp}
+                  onClick={() => handleShareWhatsApp()}
                   className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl text-xs font-semibold bg-[#154D38] hover:bg-[#1b5e45] text-white active:scale-95 transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-[#154D38]/25"
                   title="Share 3D progression directly via WhatsApp (choose any chat or group)"
                 >
@@ -1122,46 +1270,186 @@ Orthodontic 3D Clinical Studio`;
                 </button>
               </div>
             </div>
+
+            {/* Quick 1-Click WhatsApp Shortcuts */}
+            {(doctorDisplayName || clinicDisplayName) && (
+              <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                <span className="text-[10px] text-slate-400 font-medium">Quick WhatsApp:</span>
+                {doctorDisplayName && (
+                  <button
+                    type="button"
+                    onClick={() => handleShareWhatsApp(doctorPhone || undefined, doctorDisplayName)}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                    title={doctorPhone ? `WhatsApp ${doctorDisplayName} (${doctorPhone})` : `WhatsApp ${doctorDisplayName}`}
+                  >
+                    <WhatsAppIcon className="w-3 h-3 fill-emerald-600 dark:fill-emerald-400" />
+                    <span>WhatsApp {doctorDisplayName}</span>
+                    {doctorPhone && <span className="opacity-70 font-mono text-[9px]">({doctorPhone})</span>}
+                  </button>
+                )}
+
+                {clinicDisplayName && (
+                  <button
+                    type="button"
+                    onClick={() => handleShareWhatsApp(clinicPhone || undefined, clinicDisplayName)}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                    title={clinicPhone ? `WhatsApp ${clinicDisplayName} (${clinicPhone})` : `WhatsApp ${clinicDisplayName}`}
+                  >
+                    <WhatsAppIcon className="w-3 h-3 fill-slate-500" />
+                    <span>WhatsApp Clinic</span>
+                    {clinicPhone && <span className="opacity-70 font-mono text-[9px]">({clinicPhone})</span>}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* ── Divider ──────────────────────────────────────────────────────── */}
           <div className="relative flex items-center py-1">
             <div className="flex-grow border-t border-slate-200 dark:border-slate-800" />
             <span className="flex-shrink mx-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-              Or Send to Clinic Mailbox
+              Send to Doctor or Clinic Mailbox
             </span>
             <div className="flex-grow border-t border-slate-200 dark:border-slate-800" />
           </div>
 
-          {/* ── Section 2: Send directly to Clinic Mailbox ──────────────────── */}
-          <div className="space-y-2">
+          {/* ── Section 2: Send directly to Doctor or Clinic Mailbox ────────── */}
+          <div className="space-y-3">
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                 <Mail className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
-                <span>Enter email id</span>
+                <span>Select Recipient</span>
               </label>
-              {currentCase.clinic_email && (
-                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold inline-flex items-center gap-1">
-                  <Check className="w-2.5 h-2.5" />
-                  <span>Linked</span>
+              {recipientType === "both" && (
+                <span className="text-[10px] font-semibold text-purple-600 dark:text-purple-400">
+                  To Doctor + CC Clinic
                 </span>
               )}
             </div>
 
-            <div className="relative">
-              <input
-                type="email"
-                list="saved-clinic-emails-share"
-                value={recipientEmail}
-                onChange={(e) => setRecipientEmail(e.target.value)}
-                placeholder="e.g. clinic@smiledental.com"
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs sm:text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 dark:focus:border-sky-400 transition-all font-medium"
-              />
-              <datalist id="saved-clinic-emails-share">
-                {savedEmails.map((em) => (
-                  <option key={em} value={em} />
-                ))}
-              </datalist>
+            {/* Recipient Segmented Selector */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 p-1 bg-slate-100 dark:bg-[#0D121D] rounded-xl text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => {
+                  setRecipientType("doctor");
+                  setRecipientEmail(doctorEmail || "");
+                  setCcEmail("");
+                }}
+                className={`py-1.5 px-2 rounded-lg text-center transition-all truncate flex items-center justify-center gap-1 cursor-pointer ${
+                  recipientType === "doctor"
+                    ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white shadow-2xs font-bold"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+                title={doctorDisplayName || "Doctor"}
+              >
+                <Stethoscope className="w-3 h-3 text-amber-500 flex-shrink-0" />
+                <span className="truncate">{doctorDisplayName || "Doctor"}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setRecipientType("clinic");
+                  setRecipientEmail(clinicEmail || "");
+                  setCcEmail("");
+                }}
+                className={`py-1.5 px-2 rounded-lg text-center transition-all truncate flex items-center justify-center gap-1 cursor-pointer ${
+                  recipientType === "clinic"
+                    ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white shadow-2xs font-bold"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+                title={clinicDisplayName || "Clinic"}
+              >
+                <Building2 className="w-3 h-3 text-sky-500 flex-shrink-0" />
+                <span className="truncate">{clinicDisplayName || "Clinic"}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setRecipientType("both");
+                  setRecipientEmail(doctorEmail || clinicEmail || "");
+                  setCcEmail(doctorEmail ? clinicEmail : "");
+                }}
+                className={`py-1.5 px-2 rounded-lg text-center transition-all truncate flex items-center justify-center gap-1 cursor-pointer ${
+                  recipientType === "both"
+                    ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white shadow-2xs font-bold"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Users className="w-3 h-3 text-purple-500 flex-shrink-0" />
+                <span>Both (CC)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setRecipientType("custom");
+                }}
+                className={`py-1.5 px-2 rounded-lg text-center transition-all truncate flex items-center justify-center gap-1 cursor-pointer ${
+                  recipientType === "custom"
+                    ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white shadow-2xs font-bold"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <User className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                <span>Custom</span>
+              </button>
+            </div>
+
+            {/* Email Input Fields */}
+            <div className="space-y-2">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                    {recipientType === "both" ? "To (Doctor Mailbox):" : "Recipient Email:"}
+                  </span>
+                  {recipientEmail && recipientEmail.includes("@") && (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold inline-flex items-center gap-1">
+                      <Check className="w-2.5 h-2.5" />
+                      <span>Ready</span>
+                    </span>
+                  )}
+                </div>
+                <input
+                  type="email"
+                  list="saved-clinic-emails-share"
+                  value={recipientEmail}
+                  onChange={(e) => setRecipientEmail(e.target.value)}
+                  placeholder={
+                    recipientType === "doctor"
+                      ? "doctor@practice.com"
+                      : recipientType === "clinic"
+                      ? "clinic@smiledental.com"
+                      : "recipient@email.com"
+                  }
+                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 dark:focus:border-sky-400 transition-all font-medium"
+                />
+                <datalist id="saved-clinic-emails-share">
+                  {savedEmails.map((em) => (
+                    <option key={em} value={em} />
+                  ))}
+                </datalist>
+              </div>
+
+              {/* CC Input (visible if Both or toggled) */}
+              {(recipientType === "both" || showCcInput) && (
+                <div className="space-y-1 animate-fadeIn">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      CC (Clinic Mailbox):
+                    </span>
+                  </div>
+                  <input
+                    type="email"
+                    value={ccEmail}
+                    onChange={(e) => setCcEmail(e.target.value)}
+                    placeholder="clinic@smiledental.com"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all font-medium"
+                  />
+                </div>
+              )}
             </div>
 
             {/* Remembered Quick-Chips */}
@@ -1190,14 +1478,14 @@ Orthodontic 3D Clinical Studio`;
               </div>
             )}
 
-            <label className="flex items-center gap-2 pt-1 text-[11px] text-slate-600 dark:text-slate-300 cursor-pointer select-none">
+            <label className="flex items-center gap-2 pt-0.5 text-[11px] text-slate-600 dark:text-slate-300 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={saveAsDefault}
                 onChange={(e) => setSaveAsDefault(e.target.checked)}
                 className="w-3.5 h-3.5 rounded text-sky-600 focus:ring-sky-500 dark:bg-[#1A2234] border-slate-300 dark:border-slate-700"
               />
-              <span>Remember and save this email for this clinic & case</span>
+              <span>Remember and link this email for future cases</span>
             </label>
           </div>
         </div>
@@ -1208,7 +1496,7 @@ Orthodontic 3D Clinical Studio`;
           <button
             type="button"
             onClick={handleCopyEmailDraft}
-            className={`py-2 px-3 rounded-xl text-xs font-semibold border transition-all flex items-center justify-center gap-1.5 ${
+            className={`py-2 px-3 rounded-xl text-xs font-semibold border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
               copiedDraft
                 ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700"
                 : "bg-white dark:bg-[#1A2234] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#232D42] border-slate-200 dark:border-slate-700 shadow-2xs"
@@ -1232,7 +1520,7 @@ Orthodontic 3D Clinical Studio`;
             <button
               type="button"
               onClick={handleOpenGmail}
-              className="flex-1 sm:flex-initial py-2 px-3 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#1A2234] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#232D42] transition-all flex items-center justify-center gap-1.5 shadow-2xs"
+              className="flex-1 sm:flex-initial py-2 px-3 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#1A2234] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#232D42] transition-all flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
               title="Open pre-filled draft in Gmail web"
             >
               <ExternalLink className="w-3.5 h-3.5 text-red-500" />
@@ -1242,11 +1530,19 @@ Orthodontic 3D Clinical Studio`;
             <button
               type="button"
               onClick={handleOpenMailClient}
-              className="flex-1 sm:flex-initial py-2 px-4 rounded-xl text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 active:scale-98 transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-sky-600/30"
-              title="Send directly to clinic mailbox via native mail app"
+              className="flex-1 sm:flex-initial py-2 px-4 rounded-xl text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 active:scale-98 transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-sky-600/30 cursor-pointer"
+              title="Send directly via your native mail app"
             >
               <Send className="w-3.5 h-3.5" />
-              <span>Send to Clinic Mailbox</span>
+              <span>
+                {recipientType === "doctor"
+                  ? `Send to ${doctorDisplayName || "Doctor"}`
+                  : recipientType === "clinic"
+                  ? `Send to ${clinicDisplayName || "Clinic"}`
+                  : recipientType === "both"
+                  ? "Send to Doctor (CC Clinic)"
+                  : "Send Email"}
+              </span>
             </button>
           </div>
         </div>
