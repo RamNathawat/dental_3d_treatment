@@ -17,6 +17,7 @@ import {
   Activity,
   FolderOpen,
   ArrowUpRight,
+  ArrowLeft,
   Clock,
   Copy,
   Scissors,
@@ -80,7 +81,15 @@ export default function DashboardClient({
   >({});
   const [isMounted, setIsMounted] = useState<boolean>(false);
   const [currentTab, setCurrentTab] = useState<"cases" | "doctors" | "clinics" | "settings">("cases");
+  const [previousTab, setPreviousTab] = useState<"cases" | "doctors" | "clinics">("cases");
   const [practiceProfile, setPracticeProfile] = useState<PracticeProfile | null>(null);
+
+  const handleOpenSettings = () => {
+    if (currentTab !== "settings") {
+      setPreviousTab(currentTab);
+    }
+    setCurrentTab("settings");
+  };
   const [doctors, setDoctors] = useState<DoctorRecord[]>([]);
   const [clinics, setClinics] = useState<ClinicRecord[]>([]);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -452,7 +461,7 @@ export default function DashboardClient({
           <div className="w-full">
             {practiceProfile?.logoUrl ? (
               <div
-                onClick={() => setCurrentTab("settings")}
+                onClick={handleOpenSettings}
                 title="Practice & Brand Settings"
                 className="w-full flex items-center justify-start cursor-pointer group"
               >
@@ -576,7 +585,7 @@ export default function DashboardClient({
         {/* Sidebar Footer: Doctor Profile, Brand Settings & Sign Out */}
         <div className="pt-4 border-t border-slate-100 dark:border-slate-800/80 space-y-2">
           <button
-            onClick={() => setCurrentTab("settings")}
+            onClick={handleOpenSettings}
             className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
               currentTab === "settings"
                 ? "bg-slate-100 dark:bg-slate-800/80 text-slate-900 dark:text-white shadow-2xs"
@@ -619,35 +628,50 @@ export default function DashboardClient({
         {/* Mobile Header */}
         <header className="lg:hidden sticky top-0 z-20 bg-white/95 dark:bg-[#0D121D]/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 px-4 py-3 space-y-2.5 transition-colors">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              {practiceProfile?.logoUrl ? (
-                <div className="h-8 flex items-center justify-start overflow-hidden">
-                  <img
-                    src={practiceProfile.logoUrl}
-                    alt={practiceProfile.brandName || "Brand Logo"}
-                    className="max-h-8 w-auto max-w-[160px] object-contain object-left"
-                  />
-                </div>
-              ) : (
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-slate-900 dark:bg-gradient-to-br dark:from-[#e0b457] dark:to-[#c49a45] text-white dark:text-slate-950 flex items-center justify-center font-bold text-xs tracking-wider">
-                    3D
+            {currentTab === "settings" ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentTab(previousTab || "cases")}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-[#151D2C] hover:bg-slate-200 dark:hover:bg-[#1E293B] border border-slate-200 dark:border-slate-800 transition-all cursor-pointer active:scale-95 shadow-2xs"
+                  aria-label="Back to dashboard"
+                >
+                  <ArrowLeft className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+                  <span>Back</span>
+                </button>
+                <span className="text-xs font-bold text-slate-900 dark:text-white">Settings</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2.5">
+                {practiceProfile?.logoUrl ? (
+                  <div className="h-8 flex items-center justify-start overflow-hidden">
+                    <img
+                      src={practiceProfile.logoUrl}
+                      alt={practiceProfile.brandName || "Brand Logo"}
+                      className="max-h-8 w-auto max-w-[160px] object-contain object-left"
+                    />
                   </div>
-                  <div>
-                    <h1 className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[150px]">
-                      {practiceProfile?.brandName || "Orthodontic Studio"}
-                    </h1>
-                    <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
-                      {practiceProfile?.firmName || `Dr. ${email.split("@")[0]}`}
-                    </p>
+                ) : (
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-slate-900 dark:bg-gradient-to-br dark:from-[#e0b457] dark:to-[#c49a45] text-white dark:text-slate-950 flex items-center justify-center font-bold text-xs tracking-wider">
+                      3D
+                    </div>
+                    <div>
+                      <h1 className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[150px]">
+                        {practiceProfile?.brandName || "Orthodontic Studio"}
+                      </h1>
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
+                        {practiceProfile?.firmName || `Dr. ${email.split("@")[0]}`}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
             <div className="flex items-center gap-1.5">
               <button
-                onClick={() => setCurrentTab("settings")}
+                onClick={handleOpenSettings}
                 title="Settings"
                 className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-colors cursor-pointer ${
                   currentTab === "settings"
@@ -674,40 +698,42 @@ export default function DashboardClient({
           </div>
 
           {/* Mobile Tab Switcher */}
-          <div className={`grid ${isSoloDoctor ? "grid-cols-2" : "grid-cols-3"} gap-1 p-1 bg-slate-100 dark:bg-[#0B0F17] rounded-xl text-xs font-semibold`}>
-            <button
-              onClick={() => setCurrentTab("cases")}
-              className={`py-1.5 rounded-lg text-center transition-all ${
-                currentTab === "cases"
-                  ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white shadow-xs"
-                  : "text-slate-500 dark:text-slate-400"
-              }`}
-            >
-              Cases ({cases.length})
-            </button>
-            {!isSoloDoctor && (
+          {currentTab !== "settings" && (
+            <div className={`grid ${isSoloDoctor ? "grid-cols-2" : "grid-cols-3"} gap-1 p-1 bg-slate-100 dark:bg-[#0B0F17] rounded-xl text-xs font-semibold`}>
               <button
-                onClick={() => setCurrentTab("doctors")}
+                onClick={() => setCurrentTab("cases")}
                 className={`py-1.5 rounded-lg text-center transition-all ${
-                  currentTab === "doctors"
+                  currentTab === "cases"
                     ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white shadow-xs"
                     : "text-slate-500 dark:text-slate-400"
                 }`}
               >
-                Doctors ({doctors.length})
+                Cases ({cases.length})
               </button>
-            )}
-            <button
-              onClick={() => setCurrentTab("clinics")}
-              className={`py-1.5 rounded-lg text-center transition-all ${
-                currentTab === "clinics"
-                  ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white shadow-xs"
-                  : "text-slate-500 dark:text-slate-400"
-              }`}
-            >
-              Clinics ({clinics.length})
-            </button>
-          </div>
+              {!isSoloDoctor && (
+                <button
+                  onClick={() => setCurrentTab("doctors")}
+                  className={`py-1.5 rounded-lg text-center transition-all ${
+                    currentTab === "doctors"
+                      ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white shadow-xs"
+                      : "text-slate-500 dark:text-slate-400"
+                  }`}
+                >
+                  Doctors ({doctors.length})
+                </button>
+              )}
+              <button
+                onClick={() => setCurrentTab("clinics")}
+                className={`py-1.5 rounded-lg text-center transition-all ${
+                  currentTab === "clinics"
+                    ? "bg-white dark:bg-[#1E293B] text-slate-900 dark:text-white shadow-xs"
+                    : "text-slate-500 dark:text-slate-400"
+                }`}
+              >
+                Clinics ({clinics.length})
+              </button>
+            </div>
+          )}
         </header>
 
         {/* Content Container */}
@@ -719,12 +745,13 @@ export default function DashboardClient({
               userEmail={email}
               onProfileSaved={(prof) => {
                 setPracticeProfile(prof);
-                showToast("Settings saved successfully");
+                setCurrentTab("cases");
               }}
               onToast={showToast}
               onSignOut={handleSignOut}
               isDark={isDark}
               onToggleTheme={toggleTheme}
+              onBack={() => setCurrentTab(previousTab || "cases")}
             />
           ) : currentTab === "doctors" ? (
             <DoctorsView

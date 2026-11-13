@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import {
   Settings,
+  ArrowLeft,
   Layers,
   Building2,
   Stethoscope,
@@ -35,6 +36,7 @@ interface SettingsViewProps {
   onSignOut?: () => void;
   isDark?: boolean;
   onToggleTheme?: () => void;
+  onBack?: () => void;
 }
 
 export default function SettingsView({
@@ -46,6 +48,7 @@ export default function SettingsView({
   onSignOut,
   isDark = false,
   onToggleTheme,
+  onBack,
 }: SettingsViewProps) {
   const [firmType, setFirmType] = useState<FirmType>(initialProfile?.firmType || "lab");
   const [firmName, setFirmName] = useState(initialProfile?.firmName || "");
@@ -135,37 +138,31 @@ export default function SettingsView({
 
   return (
     <div className="space-y-6 animate-fadeIn pb-16">
-      {/* ─── Page Header with Single Save Action ────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-200/60 dark:border-slate-800/60">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
-            <Settings className="w-6 h-6 text-amber-500 dark:text-[#ffd166]" />
-            <span>Settings</span>
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Manage your firm identity, white-label branding, and account preferences.
-          </p>
-        </div>
-
-        {/* The single save action */}
-        <button
-          type="button"
-          onClick={() => handleSave()}
-          disabled={isSaving}
-          className="flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl font-semibold text-xs tracking-wide text-white dark:text-slate-950 bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:to-[#c49a45] hover:brightness-105 active:scale-98 transition-all shadow-sm cursor-pointer disabled:opacity-50 self-start sm:self-auto"
-        >
-          {isSaving ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Saving...</span>
-            </>
-          ) : (
-            <>
-              <Check className="w-4 h-4" />
-              <span>Save Changes</span>
-            </>
+      {/* ─── Page Header with Back Button ──────────────────────────────── */}
+      <div className="flex items-center justify-between pb-2 border-b border-slate-200/60 dark:border-slate-800/60">
+        <div className="flex items-center gap-3">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="hidden sm:inline-flex group items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-[#0D121D] hover:bg-slate-100 dark:hover:bg-[#161F30] border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 shadow-2xs transition-all cursor-pointer active:scale-95 flex-shrink-0"
+              title="Back to dashboard"
+              aria-label="Back to dashboard"
+            >
+              <ArrowLeft className="w-4 h-4 text-slate-500 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white transition-transform group-hover:-translate-x-0.5" />
+              <span>Back</span>
+            </button>
           )}
-        </button>
+          <div>
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
+              <Settings className="w-6 h-6 text-amber-500 dark:text-[#ffd166]" />
+              <span>Settings</span>
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              Manage your firm identity, white-label branding, and account preferences.
+            </p>
+          </div>
+        </div>
       </div>
 
       <form onSubmit={handleSave} className="space-y-6">
@@ -671,6 +668,31 @@ export default function SettingsView({
               Your account is authenticated via Google Single Sign-On (SSO). Profile security, multi-factor authentication, and email management are managed directly through your Google Account.
             </p>
           </div>
+        </div>
+
+        {/* ─── Bottom Action Bar: Save Changes ────────────────────────────── */}
+        <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-t border-slate-200/60 dark:border-slate-800/60">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Make sure to save your changes to apply updates to your branding and preferences.
+          </p>
+
+          <button
+            type="submit"
+            disabled={isSaving}
+            className="flex items-center justify-center gap-2 py-2.5 px-6 rounded-xl font-semibold text-xs tracking-wide text-white dark:text-slate-950 bg-slate-900 dark:bg-gradient-to-r dark:from-[#e0b457] dark:to-[#c49a45] hover:brightness-105 active:scale-98 transition-all shadow-sm cursor-pointer disabled:opacity-50 flex-shrink-0"
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Saving...</span>
+              </>
+            ) : (
+              <>
+                <Check className="w-4 h-4" />
+                <span>Save Changes</span>
+              </>
+            )}
+          </button>
         </div>
       </form>
     </div>
