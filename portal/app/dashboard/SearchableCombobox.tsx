@@ -16,6 +16,7 @@ interface SearchableComboboxProps {
   value: string;
   onChange: (value: string) => void;
   onSelect?: (item: ComboboxItem) => void;
+  onOpenChange?: (open: boolean) => void;
   items: ComboboxItem[];
   placeholder?: string;
   icon?: React.ReactNode;
@@ -30,6 +31,7 @@ export default function SearchableCombobox({
   value,
   onChange,
   onSelect,
+  onOpenChange,
   items,
   placeholder,
   icon,
@@ -91,6 +93,13 @@ export default function SearchableCombobox({
       document.removeEventListener("touchstart", handleClickOutside);
     };
   }, [isOpen]);
+
+  // Notify parent of open/close state
+  useEffect(() => {
+    if (onOpenChange) {
+      onOpenChange(isOpen);
+    }
+  }, [isOpen, onOpenChange]);
 
   // Scroll highlighted item into view
   useEffect(() => {
@@ -163,7 +172,10 @@ export default function SearchableCombobox({
   }
 
   return (
-    <div ref={containerRef} className={`relative min-w-0 w-full ${className}`}>
+    <div
+      ref={containerRef}
+      className={`relative min-w-0 w-full ${isOpen ? "z-50" : "z-10"} ${className}`}
+    >
       {/* Input Box */}
       <div className="relative flex items-center min-w-0">
         {icon && (
@@ -236,11 +248,11 @@ export default function SearchableCombobox({
 
       {/* Floating Filtered Suggestions Dropdown */}
       {isOpen && (
-        <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white dark:bg-[#131A26] border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden animate-fadeIn">
+        <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white dark:bg-[#161D2B] border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl ring-1 ring-black/10 dark:ring-white/10 overflow-hidden animate-fadeIn">
           <ul
             ref={listRef}
             role="listbox"
-            className="max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60 py-1"
+            className="max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60 py-1 bg-white dark:bg-[#161D2B]"
           >
             {filteredItems.map((item, index) => {
               const isHighlighted = highlightedIndex === index;
@@ -294,7 +306,7 @@ export default function SearchableCombobox({
                 className={`px-3 py-2 text-xs cursor-pointer flex items-center justify-between gap-2 transition-colors ${
                   highlightedIndex === filteredItems.length
                     ? "bg-amber-500/15 text-amber-900 dark:text-[#ffd166]"
-                    : "bg-slate-50/50 dark:bg-slate-900/30 text-amber-700 dark:text-[#ffd166] hover:bg-amber-500/10"
+                    : "bg-slate-50 dark:bg-[#1B2333] text-amber-700 dark:text-[#ffd166] hover:bg-amber-500/15"
                 }`}
               >
                 <div className="flex items-center gap-2 min-w-0 truncate">
@@ -322,3 +334,4 @@ export default function SearchableCombobox({
     </div>
   );
 }
+

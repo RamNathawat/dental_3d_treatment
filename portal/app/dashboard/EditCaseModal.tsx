@@ -92,6 +92,8 @@ export default function EditCaseModal({
   const [newDoctorPhone, setNewDoctorPhone] = useState("");
   const [newDoctorEmail, setNewDoctorEmail] = useState("");
   const [showNewDoctorDetails, setShowNewDoctorDetails] = useState(false);
+  const [isClinicOpen, setIsClinicOpen] = useState(false);
+  const [isDoctorOpen, setIsDoctorOpen] = useState(false);
 
   // Re-enter 3D Models State
   const [upperFile, setUpperFile] = useState<File | null>(null);
@@ -769,25 +771,13 @@ export default function EditCaseModal({
                 </div>
 
                 {/* Clinic & Doctor Searchable Comboboxes */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0 items-start">
                   {/* Clinic Searchable Combobox */}
                   <div className="space-y-1.5 min-w-0">
-                    <div className="flex items-center justify-between gap-1 min-w-0">
-                      <label className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 truncate">
-                        <Building2 className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166] flex-shrink-0" />
-                        <span className="truncate">Clinic / Practice</span>
-                      </label>
-                      {clinicName && (
-                        <button
-                          type="button"
-                          onClick={() => setClinicName("")}
-                          className="text-[10px] font-semibold text-amber-600 dark:text-[#ffd166] hover:underline inline-flex items-center gap-0.5 flex-shrink-0 cursor-pointer"
-                        >
-                          <Plus className="w-2.5 h-2.5" />
-                          <span>New</span>
-                        </button>
-                      )}
-                    </div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 truncate">
+                      <Building2 className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166] flex-shrink-0" />
+                      <span className="truncate">Clinic / Practice</span>
+                    </label>
 
                     <SearchableCombobox
                       entityName="Clinic"
@@ -796,6 +786,7 @@ export default function EditCaseModal({
                       value={clinicName}
                       disabled={isProcessing}
                       items={clinicComboboxItems}
+                      onOpenChange={setIsClinicOpen}
                       onChange={(val) => handleClinicNameChange(val)}
                       onSelect={(item) => {
                         handleClinicNameChange(item.name);
@@ -804,26 +795,60 @@ export default function EditCaseModal({
                         }
                       }}
                     />
+
+                    {/* Inline New Clinic Auto-Save Card (shown only when combobox is closed) */}
+                    {isNewClinic && !isClinicOpen && (
+                      <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs transition-all animate-fadeIn">
+                        <div className="flex items-center justify-between gap-1 flex-wrap">
+                          <div className="flex items-center gap-1.5 text-amber-900 dark:text-[#ffd166] font-medium text-[11px] truncate">
+                            <Sparkles className="w-3 h-3 text-amber-500 dark:text-[#ffd166] flex-shrink-0" />
+                            <span className="truncate">
+                              New clinic: <strong>&quot;{trimmedClinicName}&quot;</strong>
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowNewClinicDetails(!showNewClinicDetails)}
+                            className="text-[10px] font-semibold text-amber-700 dark:text-[#ffd166] hover:underline cursor-pointer flex-shrink-0"
+                          >
+                            <span>{showNewClinicDetails ? "Hide" : "+ Details"}</span>
+                          </button>
+                        </div>
+
+                        {showNewClinicDetails && (
+                          <div className="space-y-1.5 mt-2 pt-2 border-t border-amber-500/20 animate-fadeIn">
+                            <div>
+                              <input
+                                type="tel"
+                                disabled={isProcessing}
+                                value={newClinicPhone}
+                                onChange={(e) => setNewClinicPhone(e.target.value)}
+                                placeholder="Clinic Phone (+91...)"
+                                className="w-full px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+                              />
+                            </div>
+                            <div>
+                              <input
+                                type="text"
+                                disabled={isProcessing}
+                                value={newClinicAddress}
+                                onChange={(e) => setNewClinicAddress(e.target.value)}
+                                placeholder="Address / City"
+                                className="w-full px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Doctor Searchable Combobox */}
                   <div className="space-y-1.5 min-w-0">
-                    <div className="flex items-center justify-between gap-1 min-w-0">
-                      <label className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 truncate">
-                        <Stethoscope className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166] flex-shrink-0" />
-                        <span className="truncate">Treating Doctor</span>
-                      </label>
-                      {doctorName && (
-                        <button
-                          type="button"
-                          onClick={() => setDoctorName("")}
-                          className="text-[10px] font-semibold text-amber-600 dark:text-[#ffd166] hover:underline inline-flex items-center gap-0.5 flex-shrink-0 cursor-pointer"
-                        >
-                          <Plus className="w-2.5 h-2.5" />
-                          <span>New</span>
-                        </button>
-                      )}
-                    </div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 truncate">
+                      <Stethoscope className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166] flex-shrink-0" />
+                      <span className="truncate">Treating Doctor</span>
+                    </label>
 
                     <SearchableCombobox
                       entityName="Doctor"
@@ -832,136 +857,68 @@ export default function EditCaseModal({
                       value={doctorName}
                       disabled={isProcessing}
                       items={doctorComboboxItems}
+                      onOpenChange={setIsDoctorOpen}
                       onChange={(val) => handleDoctorNameChange(val)}
                       onSelect={(item) => {
                         handleDoctorNameChange(item.name);
                       }}
                     />
+
+                    {/* Inline New Doctor Auto-Save Card (shown only when combobox is closed) */}
+                    {isNewDoctor && !isDoctorOpen && (
+                      <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs transition-all animate-fadeIn">
+                        <div className="flex items-center justify-between gap-1 flex-wrap">
+                          <div className="flex items-center gap-1.5 text-amber-900 dark:text-[#ffd166] font-medium text-[11px] truncate">
+                            <Sparkles className="w-3 h-3 text-amber-500 dark:text-[#ffd166] flex-shrink-0" />
+                            <span className="truncate">
+                              New doctor: <strong>&quot;{trimmedDoctorName}&quot;</strong>
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowNewDoctorDetails(!showNewDoctorDetails)}
+                            className="text-[10px] font-semibold text-amber-700 dark:text-[#ffd166] hover:underline cursor-pointer flex-shrink-0"
+                          >
+                            <span>{showNewDoctorDetails ? "Hide" : "+ Details"}</span>
+                          </button>
+                        </div>
+
+                        {showNewDoctorDetails && (
+                          <div className="space-y-1.5 mt-2 pt-2 border-t border-amber-500/20 animate-fadeIn">
+                            <div>
+                              <input
+                                type="text"
+                                disabled={isProcessing}
+                                value={newDoctorSpecialization}
+                                onChange={(e) => setNewDoctorSpecialization(e.target.value)}
+                                placeholder="Specialization (e.g. Orthodontist)"
+                                className="w-full px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <input
+                                type="tel"
+                                disabled={isProcessing}
+                                value={newDoctorPhone}
+                                onChange={(e) => setNewDoctorPhone(e.target.value)}
+                                placeholder="Phone"
+                                className="w-full px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+                              />
+                              <input
+                                type="email"
+                                disabled={isProcessing}
+                                value={newDoctorEmail}
+                                onChange={(e) => setNewDoctorEmail(e.target.value)}
+                                placeholder="Email"
+                                className="w-full px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500/30"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
-
-                {/* Inline New Clinic Auto-Save Card */}
-                {isNewClinic && (
-                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs transition-all animate-fadeIn">
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="flex items-center gap-2 text-amber-900 dark:text-[#ffd166] font-medium text-xs">
-                        <Sparkles className="w-4 h-4 text-amber-500 dark:text-[#ffd166] flex-shrink-0" />
-                        <span>
-                          New clinic <strong>&quot;{trimmedClinicName}&quot;</strong> will be saved to your directory
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowNewClinicDetails(!showNewClinicDetails)}
-                        className="text-xs font-semibold text-amber-700 dark:text-[#ffd166] hover:underline cursor-pointer flex items-center gap-1 flex-shrink-0"
-                      >
-                        <span>{showNewClinicDetails ? "Hide details" : "+ Add phone & address"}</span>
-                      </button>
-                    </div>
-
-                    {showNewClinicDetails && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-2.5 pt-2.5 border-t border-amber-500/20 animate-fadeIn">
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
-                            <Phone className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
-                            <span>Clinic Phone</span>
-                          </label>
-                          <input
-                            type="tel"
-                            disabled={isProcessing}
-                            value={newClinicPhone}
-                            onChange={(e) => setNewClinicPhone(e.target.value)}
-                            placeholder="+91 98765 43210"
-                            className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
-                            <MapPin className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
-                            <span>Address / City</span>
-                          </label>
-                          <input
-                            type="text"
-                            disabled={isProcessing}
-                            value={newClinicAddress}
-                            onChange={(e) => setNewClinicAddress(e.target.value)}
-                            placeholder="e.g. 124 MG Road, Bangalore"
-                            className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Inline New Doctor Auto-Save Card */}
-                {isNewDoctor && (
-                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs transition-all animate-fadeIn">
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="flex items-center gap-2 text-amber-900 dark:text-[#ffd166] font-medium text-xs">
-                        <Sparkles className="w-4 h-4 text-amber-500 dark:text-[#ffd166]" />
-                        <span>
-                          New doctor <strong>&quot;{trimmedDoctorName}&quot;</strong> will be saved to your directory
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowNewDoctorDetails(!showNewDoctorDetails)}
-                        className="text-xs font-semibold text-amber-700 dark:text-[#ffd166] hover:underline cursor-pointer flex items-center gap-1 flex-shrink-0"
-                      >
-                        <span>{showNewDoctorDetails ? "Hide details" : "+ Add contact"}</span>
-                      </button>
-                    </div>
-
-                    {showNewDoctorDetails && (
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mt-2.5 pt-2.5 border-t border-amber-500/20 animate-fadeIn">
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
-                            <GraduationCap className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
-                            <span>Specialization</span>
-                          </label>
-                          <input
-                            type="text"
-                            disabled={isProcessing}
-                            value={newDoctorSpecialization}
-                            onChange={(e) => setNewDoctorSpecialization(e.target.value)}
-                            placeholder="e.g. Orthodontist"
-                            className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
-                            <Phone className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
-                            <span>Phone</span>
-                          </label>
-                          <input
-                            type="tel"
-                            disabled={isProcessing}
-                            value={newDoctorPhone}
-                            onChange={(e) => setNewDoctorPhone(e.target.value)}
-                            placeholder="+91 98765 43210"
-                            className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-200 mb-1 flex items-center gap-1.5">
-                            <Mail className="w-3 h-3 text-slate-400 dark:text-[#ffd166]" />
-                            <span>Email</span>
-                          </label>
-                          <input
-                            type="email"
-                            disabled={isProcessing}
-                            value={newDoctorEmail}
-                            onChange={(e) => setNewDoctorEmail(e.target.value)}
-                            placeholder="doctor@clinic.com"
-                            className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
                 {/* Clinic Mailbox Email */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
