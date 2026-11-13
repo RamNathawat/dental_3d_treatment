@@ -236,7 +236,7 @@ export default function DoctorsView({
             return (
               <div
                 key={doc.id}
-                className="bg-white dark:bg-[#131A26] rounded-2xl p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs hover:border-slate-300 dark:hover:border-[#e0b457]/40 transition-all flex flex-col justify-between gap-3 group h-fit self-start"
+                className="bg-white dark:bg-[#131A26] rounded-2xl p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs hover:border-slate-300 dark:hover:border-[#e0b457]/40 transition-all flex flex-col gap-3 group h-fit"
               >
                 <div className="space-y-3">
                   <div className="flex items-start justify-between gap-2">
