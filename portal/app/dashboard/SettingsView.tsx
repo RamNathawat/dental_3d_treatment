@@ -214,11 +214,10 @@ export default function SettingsView({
               onClick={() => {
                 if (!isDark && onToggleTheme) onToggleTheme();
               }}
-              className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-3 ${
-                isDark
+              className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-3 ${isDark
                   ? "bg-[#131A26] border-[#e0b457] ring-1 ring-[#e0b457]/40 shadow-sm"
                   : "bg-slate-50 dark:bg-[#131A26] border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 opacity-75 hover:opacity-100"
-              }`}
+                }`}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -244,11 +243,10 @@ export default function SettingsView({
               onClick={() => {
                 if (isDark && onToggleTheme) onToggleTheme();
               }}
-              className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-3 ${
-                !isDark
+              className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-3 ${!isDark
                   ? "bg-amber-50/40 border-amber-500 ring-1 ring-amber-500/30 shadow-sm"
                   : "bg-[#0D121D] border-slate-800 hover:border-slate-700 opacity-75 hover:opacity-100"
-              }`}
+                }`}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -294,11 +292,10 @@ export default function SettingsView({
               <button
                 type="button"
                 onClick={() => setFirmType("lab")}
-                className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                  firmType === "lab"
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${firmType === "lab"
                     ? "bg-amber-500/10 border-amber-500 text-slate-900 dark:text-white ring-1 ring-amber-500/30"
                     : "bg-slate-50 dark:bg-[#131A26] border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700"
-                }`}
+                  }`}
               >
                 <div className="flex items-center justify-between mb-2">
                   <Layers className="w-5 h-5 text-amber-500 dark:text-[#ffd166]" />
@@ -313,11 +310,10 @@ export default function SettingsView({
               <button
                 type="button"
                 onClick={() => setFirmType("clinic")}
-                className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                  firmType === "clinic"
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${firmType === "clinic"
                     ? "bg-amber-500/10 border-amber-500 text-slate-900 dark:text-white ring-1 ring-amber-500/30"
                     : "bg-slate-50 dark:bg-[#131A26] border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700"
-                }`}
+                  }`}
               >
                 <div className="flex items-center justify-between mb-2">
                   <Building2 className="w-5 h-5 text-amber-500 dark:text-[#ffd166]" />
@@ -332,11 +328,10 @@ export default function SettingsView({
               <button
                 type="button"
                 onClick={() => setFirmType("solo")}
-                className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                  firmType === "solo"
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${firmType === "solo"
                     ? "bg-amber-500/10 border-amber-500 text-slate-900 dark:text-white ring-1 ring-amber-500/30"
                     : "bg-slate-50 dark:bg-[#131A26] border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700"
-                }`}
+                  }`}
               >
                 <div className="flex items-center justify-between mb-2">
                   <Stethoscope className="w-5 h-5 text-amber-500 dark:text-[#ffd166]" />
@@ -377,7 +372,7 @@ export default function SettingsView({
               </div>
               <div>
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                  Branding & White-Labeling
+                  Branding
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   Custom logo and brand display shown to patients on shared 3D treatment links.
