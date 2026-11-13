@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import {
   X,
   Pencil,
@@ -26,6 +26,7 @@ import {
   GraduationCap,
 } from "lucide-react";
 import { DentalCase } from "./page";
+import SearchableCombobox, { ComboboxItem } from "./SearchableCombobox";
 import { createClient } from "@/lib/supabase/client";
 import {
   processDentalZipInBrowser,
@@ -84,8 +85,6 @@ export default function EditCaseModal({
   const [savedEmails, setSavedEmails] = useState<string[]>([]);
 
   // Inline Doctor/Clinic Creation State
-  const [isCustomDoctor, setIsCustomDoctor] = useState(false);
-  const [isCustomClinic, setIsCustomClinic] = useState(false);
   const [newClinicPhone, setNewClinicPhone] = useState("");
   const [newClinicAddress, setNewClinicAddress] = useState("");
   const [showNewClinicDetails, setShowNewClinicDetails] = useState(false);
@@ -164,8 +163,6 @@ export default function EditCaseModal({
     setRemoveExistingLower(false);
     setErrorMsg("");
     setIsProcessing(false);
-    setIsCustomClinic(false);
-    setIsCustomDoctor(false);
     setShowNewClinicDetails(false);
     setShowNewDoctorDetails(false);
   }, [isOpen, caseItem, allCases, isSoloDoctor, defaultDoctorName]);
@@ -228,6 +225,31 @@ export default function EditCaseModal({
   function handleDoctorNameChange(name: string) {
     setDoctorName(name);
   }
+
+  const clinicComboboxItems: ComboboxItem[] = useMemo(() => {
+    return clinics.map((c) => ({
+      id: c.id,
+      name: c.name,
+      subtitle: c.address || c.email || (c.phone ? `Ph: ${c.phone}` : undefined),
+      badge: c.clinicId || undefined,
+      searchTerms: [c.name, c.clinicId || "", c.address || "", c.email || "", c.phone || ""],
+      raw: c,
+    }));
+  }, [clinics]);
+
+  const doctorComboboxItems: ComboboxItem[] = useMemo(() => {
+    return doctors.map((d) => {
+      const formattedName = d.name.startsWith("Dr.") ? d.name : `Dr. ${d.name}`;
+      return {
+        id: d.id,
+        name: formattedName,
+        subtitle: d.specialization || d.email || (d.phone ? `Ph: ${d.phone}` : undefined),
+        badge: d.doctorId || d.specialization || undefined,
+        searchTerms: [d.name, formattedName, d.doctorId || "", d.specialization || "", d.phone || "", d.email || ""],
+        raw: d,
+      };
+    });
+  }, [doctors]);
 
   async function handleUpperSelect(file: File) {
     setUpperFile(file);
@@ -746,141 +768,75 @@ export default function EditCaseModal({
                   </div>
                 </div>
 
-                {/* Clinic & Doctor Dropdowns */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* Clinic Select */}
+                {/* Clinic & Doctor Searchable Comboboxes */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0">
+                  {/* Clinic Searchable Combobox */}
                   <div className="space-y-1.5 min-w-0">
                     <div className="flex items-center justify-between gap-1 min-w-0">
                       <label className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 truncate">
                         <Building2 className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166] flex-shrink-0" />
                         <span className="truncate">Clinic / Practice</span>
                       </label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsCustomClinic(!isCustomClinic);
-                          if (!isCustomClinic) setClinicName("");
-                        }}
-                        className="text-[10px] font-semibold text-amber-600 dark:text-[#ffd166] hover:underline inline-flex items-center gap-0.5 flex-shrink-0 cursor-pointer"
-                      >
-                        <Plus className="w-2.5 h-2.5" />
-                        <span>{isCustomClinic ? "Pick from List" : "New"}</span>
-                      </button>
+                      {clinicName && (
+                        <button
+                          type="button"
+                          onClick={() => setClinicName("")}
+                          className="text-[10px] font-semibold text-amber-600 dark:text-[#ffd166] hover:underline inline-flex items-center gap-0.5 flex-shrink-0 cursor-pointer"
+                        >
+                          <Plus className="w-2.5 h-2.5" />
+                          <span>New</span>
+                        </button>
+                      )}
                     </div>
 
-                    {!isCustomClinic && clinics.length > 0 ? (
-                      <div className="relative min-w-0">
-                        <select
-                          disabled={isProcessing}
-                          value={clinicName}
-                          onChange={(e) => {
-                            if (e.target.value === "__custom__") {
-                              setIsCustomClinic(true);
-                              setClinicName("");
-                            } else {
-                              handleClinicNameChange(e.target.value);
-                            }
-                          }}
-                          className="w-full min-w-0 max-w-full truncate px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all cursor-pointer"
-                        >
-                          <option value="">Select Clinic...</option>
-                          {clinics.map((c) => (
-                            <option key={c.id} value={c.name}>
-                              {c.name} {c.clinicId ? `(${c.clinicId})` : ""}
-                            </option>
-                          ))}
-                          <option value="__custom__">+ Enter Other / New Clinic Name...</option>
-                        </select>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <input
-                          type="text"
-                          disabled={isProcessing}
-                          value={clinicName}
-                          onChange={(e) => handleClinicNameChange(e.target.value)}
-                          placeholder="e.g. Smile Dental Clinic"
-                          className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
-                        />
-                        {clinics.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setIsCustomClinic(false)}
-                            className="px-2 py-2 text-[10px] font-medium text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 whitespace-nowrap rounded-lg bg-slate-100 dark:bg-slate-800 flex-shrink-0 cursor-pointer"
-                          >
-                            List
-                          </button>
-                        )}
-                      </div>
-                    )}
+                    <SearchableCombobox
+                      entityName="Clinic"
+                      icon={<Building2 className="w-3.5 h-3.5" />}
+                      placeholder="Type to search or enter clinic..."
+                      value={clinicName}
+                      disabled={isProcessing}
+                      items={clinicComboboxItems}
+                      onChange={(val) => handleClinicNameChange(val)}
+                      onSelect={(item) => {
+                        handleClinicNameChange(item.name);
+                        if (item.raw?.email) {
+                          setClinicEmail(item.raw.email);
+                        }
+                      }}
+                    />
                   </div>
 
-                  {/* Doctor Select */}
+                  {/* Doctor Searchable Combobox */}
                   <div className="space-y-1.5 min-w-0">
                     <div className="flex items-center justify-between gap-1 min-w-0">
                       <label className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 truncate">
                         <Stethoscope className="w-3.5 h-3.5 text-slate-400 dark:text-[#ffd166] flex-shrink-0" />
                         <span className="truncate">Treating Doctor</span>
                       </label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsCustomDoctor(!isCustomDoctor);
-                          if (!isCustomDoctor) setDoctorName("");
-                        }}
-                        className="text-[10px] font-semibold text-amber-600 dark:text-[#ffd166] hover:underline inline-flex items-center gap-0.5 flex-shrink-0 cursor-pointer"
-                      >
-                        <Plus className="w-2.5 h-2.5" />
-                        <span>{isCustomDoctor ? "Pick from List" : "New"}</span>
-                      </button>
+                      {doctorName && (
+                        <button
+                          type="button"
+                          onClick={() => setDoctorName("")}
+                          className="text-[10px] font-semibold text-amber-600 dark:text-[#ffd166] hover:underline inline-flex items-center gap-0.5 flex-shrink-0 cursor-pointer"
+                        >
+                          <Plus className="w-2.5 h-2.5" />
+                          <span>New</span>
+                        </button>
+                      )}
                     </div>
 
-                    {!isCustomDoctor && doctors.length > 0 ? (
-                      <div className="relative min-w-0">
-                        <select
-                          disabled={isProcessing}
-                          value={doctorName}
-                          onChange={(e) => {
-                            if (e.target.value === "__custom__") {
-                              setIsCustomDoctor(true);
-                              setDoctorName("");
-                            } else {
-                              handleDoctorNameChange(e.target.value);
-                            }
-                          }}
-                          className="w-full min-w-0 max-w-full truncate px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all cursor-pointer"
-                        >
-                          <option value="">Select Doctor...</option>
-                          {doctors.map((d) => (
-                            <option key={d.id} value={d.name}>
-                              {d.name.startsWith("Dr.") ? d.name : `Dr. ${d.name}`}{" "}
-                              {d.specialization ? `(${d.specialization})` : ""}
-                            </option>
-                          ))}
-                          <option value="__custom__">+ Enter Other Doctor Name...</option>
-                        </select>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <input
-                          type="text"
-                          disabled={isProcessing}
-                          value={doctorName}
-                          onChange={(e) => handleDoctorNameChange(e.target.value)}
-                          placeholder="e.g. Dr. Rajesh Kumar"
-                          className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0D121D] text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
-                        />
-                        {doctors.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setIsCustomDoctor(false)}
-                            className="px-2 py-2 text-[10px] font-medium text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 whitespace-nowrap rounded-lg bg-slate-100 dark:bg-slate-800 flex-shrink-0 cursor-pointer"
-                          >
-                            List
-                          </button>
-                        )}
-                      </div>
-                    )}
+                    <SearchableCombobox
+                      entityName="Doctor"
+                      icon={<Stethoscope className="w-3.5 h-3.5" />}
+                      placeholder="Type to search or enter doctor..."
+                      value={doctorName}
+                      disabled={isProcessing}
+                      items={doctorComboboxItems}
+                      onChange={(val) => handleDoctorNameChange(val)}
+                      onSelect={(item) => {
+                        handleDoctorNameChange(item.name);
+                      }}
+                    />
                   </div>
                 </div>
 
