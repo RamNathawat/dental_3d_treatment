@@ -170,7 +170,7 @@ export default function TreatmentViewerClient() {
       } else {
         const script = document.createElement("script");
         script.type = "module";
-        script.src = `/assets/treatment-main-D-ODoBf9.js?t=${Date.now()}`;
+        script.src = `/assets/treatment-main-BxCA4Ewq.js?t=${Date.now()}`;
         document.body.appendChild(script);
       }
     }

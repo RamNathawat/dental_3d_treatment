@@ -234,6 +234,12 @@ export function createTreatmentApp(
   let upperToothDisplacements: Record<number, number> | null = null;
   let lowerToothDisplacements: Record<number, number> | null = null;
 
+  // Milestone 4: CAD blockout mode flag
+  let isBlockoutStudioActive =
+    options.initialMode === "blockout" ||
+    (typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("mode") === "blockout");
+
   // ── DOM ──────────────────────────────────────────────────────────────────
 
   const canvas = document.createElement("canvas");
@@ -245,6 +251,11 @@ export function createTreatmentApp(
       hudEl.textContent = `${(stats.visibleTriangles / 1_000_000).toFixed(1)}M tri · ${stats.fps} fps`;
     },
     onToothHover: (hit) => {
+      // Completely disable tooth hover tooltip when in Undercut & Blockout Studio
+      if (isBlockoutStudioActive || blockoutStudioInstance) {
+        toothTooltipEl.hidden = true;
+        return;
+      }
       if (!hit) {
         toothTooltipEl.hidden = true;
         return;
@@ -418,29 +429,287 @@ export function createTreatmentApp(
   notesDrawerEl.style.display = "none";
   notesDrawerEl.style.visibility = "hidden";
 
+  // ── Theme State & Shared Toggle ──────────────────────────────────────────
+  let isDarkMode = false;
+  const savedTheme =
+    typeof localStorage !== "undefined"
+      ? localStorage.getItem("dental_theme")
+      : null;
+  if (
+    savedTheme === "dark" ||
+    (!savedTheme &&
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches)
+  ) {
+    isDarkMode = true;
+  }
+
+  const toggleTheme = () => {
+    isDarkMode = !isDarkMode;
+    if (isDarkMode) {
+      appEl.classList.add("tv-app--dark");
+      if (typeof document !== "undefined") {
+        document.documentElement.classList.add("dark");
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+      themeToggleBtn.textContent = "Light";
+      themeToggleBtn.title = "Switch to Light Mode";
+      cadThemeToggleBtn.textContent = "Light";
+      cadThemeToggleBtn.title = "Switch to Light Mode";
+      try {
+        localStorage.setItem("dental_theme", "dark");
+      } catch {}
+      viewport.setBackgroundColor?.(0x0f141f);
+    } else {
+      appEl.classList.remove("tv-app--dark");
+      if (typeof document !== "undefined") {
+        document.documentElement.classList.remove("dark");
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+      themeToggleBtn.textContent = "Dark";
+      themeToggleBtn.title = "Switch to Dark Mode";
+      cadThemeToggleBtn.textContent = "Dark";
+      cadThemeToggleBtn.title = "Switch to Dark Mode";
+      try {
+        localStorage.setItem("dental_theme", "light");
+      } catch {}
+      viewport.setBackgroundColor?.(0xebe7e0);
+    }
+  };
+
+  const themeToggleBtn = makeBtn(
+    isDarkMode ? "Light" : "Dark",
+    () => toggleTheme(),
+    "tv-btn--tool tv-btn--theme-toggle",
+  );
+  themeToggleBtn.title = isDarkMode
+    ? "Switch to Light Mode"
+    : "Switch to Dark Mode";
+
+  // ── Dedicated CAD Top Bar (Undercut & Blockout Studio) ───────────────────
+  const cadExitDashboardBtn = document.createElement("a");
+  cadExitDashboardBtn.href = "/dashboard";
+  cadExitDashboardBtn.className = "tv-cad-top-bar__btn tv-cad-top-bar__btn--back";
+  cadExitDashboardBtn.title = "Return to Doctor Dashboard";
+  cadExitDashboardBtn.innerHTML = `
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="19" y1="12" x2="5" y2="12"></line>
+      <polyline points="12 19 5 12 12 5"></polyline>
+    </svg>
+    <span>Dashboard</span>
+  `;
+
+  const cadProgressionBtn = makeBtn(
+    "3D Progression",
+    () => toggleBlockoutStudio(),
+    "tv-cad-top-bar__btn tv-cad-top-bar__btn--progression",
+  );
+  cadProgressionBtn.title = "Switch back to 3D Treatment Progression timeline";
+
+  const cadPatientChipEl = div("tv-cad-top-bar__chip", [
+    span("tv-cad-top-bar__dot", ""),
+    span(
+      "tv-cad-top-bar__patient-name",
+      state.manifest.patientName ?? state.manifest.caseId,
+    ),
+    span("tv-cad-top-bar__badge", "CAD Engine"),
+  ]);
+
+  const cadArchUpperBtn = document.createElement("button");
+  cadArchUpperBtn.type = "button";
+  cadArchUpperBtn.className = "tv-cad-arch-btn tv-cad-arch-btn--active";
+  cadArchUpperBtn.textContent = "Upper Arch";
+  cadArchUpperBtn.title = "Switch to Upper Maxillary arch";
+  cadArchUpperBtn.addEventListener("click", () => {
+    if (blockoutStudioInstance) {
+      blockoutStudioInstance.setArch("upper");
+    }
+  });
+
+  const cadArchLowerBtn = document.createElement("button");
+  cadArchLowerBtn.type = "button";
+  cadArchLowerBtn.className = "tv-cad-arch-btn";
+  cadArchLowerBtn.textContent = "Lower Arch";
+  cadArchLowerBtn.title = "Switch to Lower Mandibular arch";
+  cadArchLowerBtn.addEventListener("click", () => {
+    if (blockoutStudioInstance) {
+      blockoutStudioInstance.setArch("lower");
+    }
+  });
+
+  const cadArchPillEl = div("tv-cad-arch-pill", [
+    cadArchUpperBtn,
+    cadArchLowerBtn,
+  ]);
+
+  const cadStagePrevBtn = makeBtn(
+    "‹",
+    () => {
+      if (blockoutStudioInstance) {
+        const target = Math.max(0, state.currentIndex - 1);
+        blockoutStudioInstance.setStageIndex(target);
+      }
+    },
+    "tv-cad-stepper-btn",
+  );
+  cadStagePrevBtn.title = "Previous stage";
+
+  const cadStageLabel = span("tv-cad-stage-label", "★ Stage 1 (Reference)");
+
+  const cadStageNextBtn = makeBtn(
+    "›",
+    () => {
+      if (blockoutStudioInstance) {
+        const maxStages = state.manifest.treatmentStages.length;
+        const target = Math.min(maxStages - 1, state.currentIndex + 1);
+        blockoutStudioInstance.setStageIndex(target);
+      }
+    },
+    "tv-cad-stepper-btn",
+  );
+  cadStageNextBtn.title = "Next stage";
+
+  const cadStageControlEl = div("tv-cad-stage-stepper", [
+    cadStagePrevBtn,
+    cadStageLabel,
+    cadStageNextBtn,
+  ]);
+
+  const cadCamFrontBtn = makeBtn("Front", () => viewport.setView("top"), "tv-cad-tool-btn");
+  cadCamFrontBtn.title = "Frontal smile camera view";
+  const cadCamOcclusalBtn = makeBtn("Occlusal", () => viewport.setView("front"), "tv-cad-tool-btn");
+  cadCamOcclusalBtn.title = "Top-down occlusal camera view";
+  const cadCamResetBtn = makeBtn(
+    "Reset",
+    () => {
+      viewport.setView("top");
+      viewport.fitAll();
+    },
+    "tv-cad-tool-btn tv-cad-tool-btn--accent",
+  );
+  cadCamResetBtn.title = "Reset and frame dental models in frontal smile position";
+
+  const cadThemeToggleBtn = makeBtn(
+    isDarkMode ? "Light" : "Dark",
+    () => toggleTheme(),
+    "tv-cad-tool-btn",
+  );
+  cadThemeToggleBtn.title = isDarkMode
+    ? "Switch to Light Mode"
+    : "Switch to Dark Mode";
+
+  const cadTopBarEl = div("tv-cad-top-bar", [
+    div("tv-cad-top-bar__left", [
+      cadExitDashboardBtn,
+      cadProgressionBtn,
+      cadPatientChipEl,
+    ]),
+    div("tv-cad-top-bar__center", [
+      cadArchPillEl,
+      cadStageControlEl,
+    ]),
+    div("tv-cad-top-bar__right", [
+      cadCamFrontBtn,
+      cadCamOcclusalBtn,
+      cadCamResetBtn,
+      cadThemeToggleBtn,
+    ]),
+  ]);
+
+  function syncCadTopBar(arch: "upper" | "lower", stageIndex: number): void {
+    const isUp = arch === "upper";
+    cadArchUpperBtn.classList.toggle("tv-cad-arch-btn--active", isUp);
+    cadArchLowerBtn.classList.toggle("tv-cad-arch-btn--active", !isUp);
+
+    const totalStages = state.manifest.treatmentStages.length || 1;
+    if (stageIndex === 0) {
+      cadStageLabel.textContent = "★ Stage 1 (Reference Model)";
+    } else {
+      cadStageLabel.textContent = `Transitional (Stage ${stageIndex + 1} of ${totalStages})`;
+    }
+
+    (cadStagePrevBtn as HTMLButtonElement).disabled = stageIndex <= 0;
+    (cadStageNextBtn as HTMLButtonElement).disabled = stageIndex >= totalStages - 1;
+  }
+
   // ── Milestone 4: Automated Undercut & Blockout Studio ─────────────────────
   let blockoutStudioInstance: BlockoutStudio | null = null;
+  let savedArchState: { upper: boolean; lower: boolean } | null = null;
+
   const toggleBlockoutStudio = () => {
     if (blockoutStudioInstance) {
       blockoutStudioInstance.unmount();
       blockoutStudioInstance = null;
+      isBlockoutStudioActive = false;
+      appEl.classList.remove("tv-app--blockout-mode");
       blockoutHeaderBtn.classList.remove("tv-btn--active");
+      toothTooltipEl.hidden = true;
+
+      // Restore previous progression arch visibility
+      if (savedArchState) {
+        state.upperVisible = savedArchState.upper;
+        state.lowerVisible = savedArchState.lower;
+        savedArchState = null;
+      }
+      viewport.setLayerVisible(activeUpperId, state.upperVisible);
+      viewport.setLayerVisible(activeLowerId, state.lowerVisible);
+      syncUI();
     } else {
+      // Save progression arch visibility
+      savedArchState = {
+        upper: state.upperVisible,
+        lower: state.lowerVisible,
+      };
+
+      isBlockoutStudioActive = true;
+      const initialArch = state.upperVisible ? "upper" : "lower";
+      const isInitialUpper = initialArch === "upper";
+
+      // Enforce single arch isolation in 3D viewport
+      state.upperVisible = isInitialUpper;
+      state.lowerVisible = !isInitialUpper;
+      viewport.setLayerVisible(activeUpperId, isInitialUpper);
+      viewport.setLayerVisible(activeLowerId, !isInitialUpper);
+      viewport.setView("top");
+      viewport.fitAll();
+
+      appEl.classList.add("tv-app--blockout-mode");
+      blockoutHeaderBtn.classList.add("tv-btn--active");
+      toothTooltipEl.hidden = true;
+
+      // Close any progression drawers
+      if (state.notesOpen) setNotesOpen(false);
+      movementDrawerEl.hidden = true;
+      contactsLegendEl.hidden = true;
+      iprLegendEl.hidden = true;
+      overlayPanelEl.hidden = true;
+
+      syncCadTopBar(initialArch, Math.max(0, state.currentIndex));
+
       blockoutStudioInstance = new BlockoutStudio({
         viewport,
         manifest: state.manifest,
-        initialArch: state.upperVisible ? "upper" : "lower",
+        initialArch,
         initialStageIndex: Math.max(0, state.currentIndex),
         onExit: () => {
-          blockoutStudioInstance = null;
-          blockoutHeaderBtn.classList.remove("tv-btn--active");
+          toggleBlockoutStudio();
         },
         onStageChange: (idx) => {
-          navigate(idx);
+          void navigate(idx);
+          syncCadTopBar(blockoutStudioInstance?.getArch() ?? "upper", idx);
+        },
+        onArchChange: (arch) => {
+          const isUp = arch === "upper";
+          state.upperVisible = isUp;
+          state.lowerVisible = !isUp;
+          viewport.setLayerVisible(activeUpperId, isUp);
+          viewport.setLayerVisible(activeLowerId, !isUp);
+          viewport.setView("top");
+          viewport.fitAll();
+          syncCadTopBar(arch, state.currentIndex);
         },
       });
       blockoutStudioInstance.mount(stageEl);
-      blockoutHeaderBtn.classList.add("tv-btn--active");
     }
   };
 
@@ -482,57 +751,6 @@ export function createTreatmentApp(
     "tv-btn--tool",
   );
   recenterBtn.title = "Reset and frame dental models in frontal smile position";
-
-  // Dark / Light Mode Theme Toggle Button (replaces Cases button per requirement)
-  let isDarkMode = false;
-  const savedTheme =
-    typeof localStorage !== "undefined"
-      ? localStorage.getItem("dental_theme")
-      : null;
-  if (
-    savedTheme === "dark" ||
-    (!savedTheme &&
-      typeof window !== "undefined" &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches)
-  ) {
-    isDarkMode = true;
-  }
-
-  const themeToggleBtn = makeBtn(
-    isDarkMode ? "Light" : "Dark",
-    () => {
-      isDarkMode = !isDarkMode;
-      if (isDarkMode) {
-        appEl.classList.add("tv-app--dark");
-        if (typeof document !== "undefined") {
-          document.documentElement.classList.add("dark");
-          document.documentElement.setAttribute("data-theme", "dark");
-        }
-        themeToggleBtn.textContent = "Light";
-        themeToggleBtn.title = "Switch to Light Mode";
-        try {
-          localStorage.setItem("dental_theme", "dark");
-        } catch {}
-        viewport.setBackgroundColor?.(0x0f141f);
-      } else {
-        appEl.classList.remove("tv-app--dark");
-        if (typeof document !== "undefined") {
-          document.documentElement.classList.remove("dark");
-          document.documentElement.setAttribute("data-theme", "light");
-        }
-        themeToggleBtn.textContent = "Dark";
-        themeToggleBtn.title = "Switch to Dark Mode";
-        try {
-          localStorage.setItem("dental_theme", "light");
-        } catch {}
-        viewport.setBackgroundColor?.(0xebe7e0);
-      }
-    },
-    "tv-btn--tool tv-btn--theme-toggle",
-  );
-  themeToggleBtn.title = isDarkMode
-    ? "Switch to Light Mode"
-    : "Switch to Dark Mode";
 
   const toggleSidebarBtn = makeBtn(
     "Stages",
@@ -1142,12 +1360,17 @@ export function createTreatmentApp(
         themeToggleBtn,
       ]),
     ]),
+    cadTopBarEl,
     div("tv-main-container", [
       sidebarBackdrop,
       sidebarEl,
       stageEl,
     ]),
   ]);
+
+  if (isBlockoutStudioActive) {
+    appEl.classList.add("tv-app--blockout-mode");
+  }
 
   if (isDarkMode) {
     appEl.classList.add("tv-app--dark");

@@ -620,3 +620,272 @@
   transition: width 0.2s ease;
 }
 
+/* ── Dedicated CAD Top Bar (Undercut & Blockout Studio) ─────────────────── */
+.tv-cad-top-bar {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 56px;
+  background: var(--tv-surface-0);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--tv-border);
+  box-shadow: var(--tv-shadow-sm);
+  z-index: 60;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  gap: 12px;
+  box-sizing: border-box;
+}
+
+.tv-app--blockout-mode .tv-cad-top-bar {
+  display: flex !important;
+}
+
+.tv-cad-top-bar__left,
+.tv-cad-top-bar__center,
+.tv-cad-top-bar__right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tv-cad-top-bar__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid var(--tv-border);
+  background: var(--tv-surface-1, var(--tv-surface-glass));
+  color: var(--tv-text);
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.tv-cad-top-bar__btn:hover {
+  background: var(--tv-surface-hover);
+  border-color: var(--tv-border-hover, var(--tv-gold));
+  color: var(--tv-text);
+}
+
+.tv-cad-top-bar__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--tv-surface-sunken);
+  border: 1px solid var(--tv-border-subtle);
+  border-radius: 9999px;
+  font-size: 11px;
+}
+
+.tv-cad-top-bar__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+}
+
+.tv-cad-top-bar__patient-name {
+  font-weight: 600;
+  color: var(--tv-text);
+}
+
+.tv-cad-top-bar__badge {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--tv-gold);
+  background: var(--tv-gold-light);
+  padding: 1px 6px;
+  border-radius: 9999px;
+}
+
+.tv-cad-arch-pill {
+  display: inline-flex;
+  background: var(--tv-surface-sunken);
+  border: 1px solid var(--tv-border);
+  border-radius: 9999px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.tv-cad-arch-btn {
+  background: none;
+  border: none;
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 9999px;
+  color: var(--tv-text-sub);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.tv-cad-arch-btn:hover {
+  color: var(--tv-text);
+}
+
+.tv-cad-arch-btn--active {
+  background: var(--tv-gold);
+  color: #0b0f17 !important;
+  font-weight: 700;
+  box-shadow: 0 1px 6px rgba(196, 154, 69, 0.35);
+}
+
+.tv-cad-stage-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--tv-surface-sunken);
+  border: 1px solid var(--tv-border);
+  border-radius: 8px;
+  padding: 3px 8px;
+}
+
+.tv-cad-stepper-btn {
+  background: none;
+  border: none;
+  color: var(--tv-text);
+  font-size: 15px;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.tv-cad-stepper-btn:hover:not(:disabled) {
+  background: var(--tv-surface-hover);
+}
+
+.tv-cad-stepper-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.tv-cad-stage-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tv-text);
+  white-space: nowrap;
+  min-width: 140px;
+  text-align: center;
+}
+
+.tv-cad-tool-btn {
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid var(--tv-border);
+  background: var(--tv-surface-1, var(--tv-surface-glass));
+  color: var(--tv-text-sub);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tv-cad-tool-btn:hover {
+  background: var(--tv-surface-hover);
+  color: var(--tv-text);
+}
+
+.tv-cad-tool-btn--accent {
+  background: var(--tv-gold-light);
+  border-color: var(--tv-border-gold-subtle);
+  color: var(--tv-gold);
+}
+
+/* ── Dedicated Blockout Mode Viewport Layout ──────────────────────────────── */
+.tv-app--blockout-mode .tv-header,
+.tv-app--blockout-mode .tv-sidebar,
+.tv-app--blockout-mode .tv-sidebar-backdrop,
+.tv-app--blockout-mode .tv-bottom-dock,
+.tv-app--blockout-mode .tv-dock-expand-pill,
+.tv-app--blockout-mode .tv-stage__top-bar,
+.tv-app--blockout-mode .tv-camera-dock,
+.tv-app--blockout-mode .tv-tooth-tooltip,
+.tv-app--blockout-mode .tv-contacts-legend,
+.tv-app--blockout-mode .tv-ipr-legend,
+.tv-app--blockout-mode .tv-overlay-panel,
+.tv-app--blockout-mode .tv-movement-drawer,
+.tv-app--blockout-mode .tv-notes-drawer,
+.tv-app--blockout-mode .tv-notes-backdrop {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+}
+
+.tv-app--blockout-mode .tv-main-container {
+  position: absolute;
+  top: 56px !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  height: calc(100vh - 56px) !important;
+  width: 100vw !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.tv-app--blockout-mode .tv-stage {
+  position: absolute;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.tv-app--blockout-mode .tv-canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.tv-app--blockout-mode .bo-studio-panel {
+  top: 14px;
+  right: 16px;
+  bottom: 14px;
+  height: auto;
+  max-height: calc(100vh - 84px);
+  z-index: 55;
+}
+
+@media (max-width: 768px) {
+  .tv-cad-top-bar {
+    padding: 0 8px;
+    height: 50px;
+  }
+  .tv-cad-top-bar__chip,
+  .tv-cad-tool-btn:not(.tv-cad-tool-btn--accent) {
+    display: none;
+  }
+  .tv-app--blockout-mode .tv-main-container,
+  .tv-app--blockout-mode .tv-stage {
+    top: 50px !important;
+    height: calc(100vh - 50px) !important;
+  }
+  .tv-app--blockout-mode .bo-studio-panel {
+    top: auto;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    max-height: 68vh;
+  }
+}
+

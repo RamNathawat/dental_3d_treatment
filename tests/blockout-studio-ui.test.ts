@@ -160,4 +160,27 @@ describe("Blockout Studio UI & Interaction", () => {
 
     studio.unmount();
   });
+
+  it("fires onArchChange callback and exposes getArch and getStageIndex", () => {
+    let changedArch: string | null = null;
+    const container = document.createElement("div");
+    const studio = new BlockoutStudio({
+      viewport: mockViewport,
+      manifest,
+      initialArch: "upper",
+      onArchChange: (arch) => {
+        changedArch = arch;
+      },
+    });
+    studio.mount(container);
+
+    expect(studio.getArch()).toBe("upper");
+    expect(studio.getStageIndex()).toBe(0);
+
+    studio.setArch("lower");
+    expect(changedArch).toBe("lower");
+    expect(studio.getArch()).toBe("lower");
+
+    studio.unmount();
+  });
 });

@@ -46,6 +46,7 @@ export interface BlockoutStudioOptions {
   initialStageIndex?: number;
   onExit?: () => void;
   onStageChange?: (stageIndex: number) => void;
+  onArchChange?: (arch: "upper" | "lower") => void;
 }
 
 export class BlockoutStudio {
@@ -94,6 +95,7 @@ export class BlockoutStudio {
 
   private onExitCallback?: () => void;
   private onStageChangeCallback?: (stageIndex: number) => void;
+  private onArchChangeCallback?: (arch: "upper" | "lower") => void;
 
   constructor(options: BlockoutStudioOptions) {
     this.viewport = options.viewport;
@@ -102,6 +104,7 @@ export class BlockoutStudio {
     this.currentStageIndex = options.initialStageIndex ?? 0;
     this.onExitCallback = options.onExit;
     this.onStageChangeCallback = options.onStageChange;
+    this.onArchChangeCallback = options.onArchChange;
 
     this.threeScene = this.viewport.getThreeScene ? this.viewport.getThreeScene() : null;
     this.threeCamera = this.viewport.getThreeCamera ? this.viewport.getThreeCamera() : null;
@@ -120,6 +123,9 @@ export class BlockoutStudio {
       side: DoubleSide,
       depthTest: true,
       depthWrite: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -1.0,
+      polygonOffsetUnits: -2.0,
     });
   }
 
@@ -149,6 +155,14 @@ export class BlockoutStudio {
     this.restoreBaseColors();
   }
 
+  public getArch(): "upper" | "lower" {
+    return this.isUpper ? "upper" : "lower";
+  }
+
+  public getStageIndex(): number {
+    return this.currentStageIndex;
+  }
+
   public setArch(arch: "upper" | "lower"): void {
     if ((arch === "upper") === this.isUpper) return;
     this.isUpper = arch === "upper";
@@ -157,6 +171,9 @@ export class BlockoutStudio {
     this.stageSculptDeltas.clear();
     this.loadCurrentStageBlockout();
     this.updateUI();
+    if (this.onArchChangeCallback) {
+      this.onArchChangeCallback(arch);
+    }
   }
 
   public setStageIndex(index: number): void {

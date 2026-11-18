@@ -21,7 +21,20 @@ import type {
   StageBlockoutResult,
 } from "./types";
 import { analyzeUndercuts } from "./undercut-analyzer";
-import { identifyToothAtPoint } from "../tooth-data";
+import {
+  computeToothCentroids,
+  identifyToothAtPoint,
+  LOWER_DENTAL_CONTACTS,
+  UPPER_DENTAL_CONTACTS,
+} from "../tooth-data";
+
+interface ResolvedContact {
+  center: Vector3;
+  tangent: Vector3;
+  spanDist: number;
+  toothA: number;
+  toothB: number;
+}
 
 /**
  * Generates blockout geometry for a dental arch according to the clinical protocol.
@@ -78,6 +91,33 @@ export function generateBlockout(
   const maxSpanAngle = 0.95;
   const bounds = { minX, maxX, minZ, maxZ };
 
+  // Pre-calculate interdental contact locations using real tooth centroids
+  const toothCentroids = computeToothCentroids(baseGeometry, isUpper);
+  const contactDefinitions = isUpper ? UPPER_DENTAL_CONTACTS : LOWER_DENTAL_CONTACTS;
+  const resolvedContacts: ResolvedContact[] = [];
+
+  for (const def of contactDefinitions) {
+    const cA = toothCentroids[def.toothA];
+    const cB = toothCentroids[def.toothB];
+    if (cA && cB) {
+      const vA = new Vector3(cA[0], cA[1], cA[2]);
+      const vB = new Vector3(cB[0], cB[1], cB[2]);
+      const center = new Vector3().addVectors(vA, vB).multiplyScalar(0.5);
+      const tangent = new Vector3(vB.x - vA.x, 0, vB.z - vA.z);
+      const spanDist = tangent.length();
+      if (spanDist > 0.001) {
+        tangent.normalize();
+        resolvedContacts.push({
+          center,
+          tangent,
+          spanDist,
+          toothA: def.toothA,
+          toothB: def.toothB,
+        });
+      }
+    }
+  }
+
   // Track arch curve crown peak heights
   const numSectors = 120;
   const peakY = new Float32Array(numSectors);
@@ -118,6 +158,7 @@ export function generateBlockout(
   // Arrays for the standalone "Red Digital Wax" overlay
   const waxVertexIndices: number[] = [];
   const waxOffsets = new Float32Array(count * 3);
+  const vertexDisplacements = new Float32Array(count);
 
   const vPos = new Vector3();
   const vNorm = new Vector3();
@@ -153,20 +194,64 @@ export function generateBlockout(
     // Component 1: Interproximal Wax Blockout
     // ────────────────────────────────────────────────────────────────────────
     if (protocol.interproximal.enabled) {
-      // Interproximal areas are characterized by:
-      // 1. Being on the crown body (1.0mm - 5.5mm from incisal tip)
-      // 2. Having horizontal normals angled sideways toward adjacent teeth rather than purely facial/lingual
-      const isCrownHeight = distFromTip >= 1.0 && distFromTip <= 5.8;
-      const horizontalNormalAngle = Math.abs(vNorm.x);
+      if (resolvedContacts.length > 0) {
+        // Anatomical contact zone check: find nearest interdental contact
+        let nearestContact: ResolvedContact | null = null;
+        let nearestDistSq = Infinity;
 
-      // Strong lateral direction + recess indicates interproximal embrasure
-      if (isCrownHeight && horizontalNormalAngle > 0.45) {
-        const proxFactor = Math.min(1.0, (horizontalNormalAngle - 0.45) / 0.4);
-        const proxDisp = protocol.interproximal.thicknessMm * proxFactor;
-        if (proxDisp > displacementMagnitude) {
-          displacementMagnitude = proxDisp;
-          // Displace outward along lateral normal to bridge interdental gap
-          dispVector.set(vNorm.x * 0.8, 0, vNorm.z * 0.8).normalize().multiplyScalar(proxDisp);
+        for (const rc of resolvedContacts) {
+          const dx = vPos.x - rc.center.x;
+          const dz = vPos.z - rc.center.z;
+          const distSq = dx * dx + dz * dz;
+          if (distSq < nearestDistSq) {
+            nearestDistSq = distSq;
+            nearestContact = rc;
+          }
+        }
+
+        if (nearestContact && nearestDistSq < 10.0) {
+          const dy = Math.abs(vPos.y - nearestContact.center.y);
+          if (dy < 4.2) {
+            // Compute coordinate along the tangent line between adjacent teeth
+            const dx = vPos.x - nearestContact.center.x;
+            const dz = vPos.z - nearestContact.center.z;
+            const dTangent = Math.abs(dx * nearestContact.tangent.x + dz * nearestContact.tangent.z);
+            // Normal alignment with interdental tangent: in an embrasure groove, surface faces adjacent tooth
+            const dotTangent = Math.abs(vNorm.x * nearestContact.tangent.x + vNorm.z * nearestContact.tangent.z);
+
+            // True embrasures have normal pointing toward adjacent tooth and sit within narrow interdental corridor
+            const isEmbrasure = dTangent < 1.7 && dotTangent > 0.28;
+            // Missing tooth edentulous span bridging
+            const isEdentulousSpan =
+              protocol.interproximal.bridgeSpaces &&
+              nearestContact.spanDist > 8.5 &&
+              dTangent < nearestContact.spanDist * 0.45;
+
+            if (isEmbrasure || isEdentulousSpan) {
+              const embrasureFactor = isEdentulousSpan
+                ? 1.0
+                : Math.max(0, 1.0 - dTangent / 1.7) * Math.min(1.0, (dotTangent - 0.28) / 0.4);
+              const proxDisp = protocol.interproximal.thicknessMm * embrasureFactor;
+
+              if (proxDisp > displacementMagnitude) {
+                displacementMagnitude = proxDisp;
+                dispVector.copy(vNorm).multiplyScalar(proxDisp);
+              }
+            }
+          }
+        }
+      } else {
+        // Fallback for simple unit test / cylinder geometries
+        const isCrownHeight = distFromTip >= 1.0 && distFromTip <= 5.8;
+        const horizontalNormalAngle = Math.abs(vNorm.x);
+
+        if (isCrownHeight && horizontalNormalAngle > 0.65) {
+          const proxFactor = Math.min(1.0, (horizontalNormalAngle - 0.65) / 0.3);
+          const proxDisp = protocol.interproximal.thicknessMm * proxFactor;
+          if (proxDisp > displacementMagnitude) {
+            displacementMagnitude = proxDisp;
+            dispVector.set(vNorm.x * 0.8, 0, vNorm.z * 0.8).normalize().multiplyScalar(proxDisp);
+          }
         }
       }
     }
@@ -224,7 +309,8 @@ export function generateBlockout(
     }
 
     // Apply displacement to merged geometry and record for discrete wax overlay
-    if (displacementMagnitude > 0.02) {
+    vertexDisplacements[i] = displacementMagnitude;
+    if (displacementMagnitude > 0.04) {
       const idx0 = i * 3;
       const idx1 = idx0 + 1;
       const idx2 = idx0 + 2;
@@ -251,6 +337,7 @@ export function generateBlockout(
       baseGeometry,
       mergedPositions,
       waxVertexIndices,
+      vertexDisplacements,
     );
   }
 
@@ -269,47 +356,74 @@ export function generateBlockout(
 /**
  * Builds a visual mesh for the added digital wax volume.
  * Rendered in dental wax red to visually contrast against the resin tooth model.
+ * Strictly checks baseGeometry.index and filters out degenerate or cross-palate triangles.
  */
 function createWaxOverlayGeometry(
   baseGeom: BufferGeometry,
   displacedPositions: Float32Array,
   modifiedIndices: number[],
-): BufferGeometry {
+  displacements: Float32Array,
+): BufferGeometry | null {
   const basePos = baseGeom.getAttribute("position");
-  const waxGeom = baseGeom.clone();
-
-  // Highlight modified vertices with slight outward displacement for crisp depth
-  const posArr = new Float32Array(basePos.array);
+  if (!basePos || modifiedIndices.length === 0) return null;
   const count = basePos.count;
+
+  // Track modified vertices with non-trivial displacement
   const isModified = new Uint8Array(count);
-
   for (const idx of modifiedIndices) {
-    isModified[idx] = 1;
-    posArr[idx * 3] = displacedPositions[idx * 3]!;
-    posArr[idx * 3 + 1] = displacedPositions[idx * 3 + 1]!;
-    posArr[idx * 3 + 2] = displacedPositions[idx * 3 + 2]!;
-  }
-
-  waxGeom.setAttribute("position", new BufferAttribute(posArr, 3));
-  waxGeom.computeVertexNormals();
-
-  // Filter triangles: only include triangles where at least one vertex has wax applied
-  const numTris = Math.floor(count / 3);
-  const waxTris: number[] = [];
-
-  for (let t = 0; t < numTris; t++) {
-    const i0 = t * 3;
-    const i1 = t * 3 + 1;
-    const i2 = t * 3 + 2;
-
-    if (isModified[i0] || isModified[i1] || isModified[i2]) {
-      waxTris.push(
-        posArr[i0 * 3]!, posArr[i0 * 3 + 1]!, posArr[i0 * 3 + 2]!,
-        posArr[i1 * 3]!, posArr[i1 * 3 + 1]!, posArr[i1 * 3 + 2]!,
-        posArr[i2 * 3]!, posArr[i2 * 3 + 1]!, posArr[i2 * 3 + 2]!,
-      );
+    if (displacements[idx]! > 0.04) {
+      isModified[idx] = 1;
     }
   }
+
+  const waxTris: number[] = [];
+  const index = baseGeom.index;
+
+  const v0 = new Vector3();
+  const v1 = new Vector3();
+  const v2 = new Vector3();
+
+  const addTriangle = (i0: number, i1: number, i2: number) => {
+    // Only include triangle if at least one vertex has actual wax displacement applied
+    const modifiedCount = isModified[i0]! + isModified[i1]! + isModified[i2]!;
+    if (modifiedCount === 0) return;
+
+    v0.set(displacedPositions[i0 * 3]!, displacedPositions[i0 * 3 + 1]!, displacedPositions[i0 * 3 + 2]!);
+    v1.set(displacedPositions[i1 * 3]!, displacedPositions[i1 * 3 + 1]!, displacedPositions[i1 * 3 + 2]!);
+    v2.set(displacedPositions[i2 * 3]!, displacedPositions[i2 * 3 + 1]!, displacedPositions[i2 * 3 + 2]!);
+
+    // Guard against degenerate or extreme cross-arch triangles (palate span is >28mm)
+    const d01 = v0.distanceTo(v1);
+    const d12 = v1.distanceTo(v2);
+    const d20 = v2.distanceTo(v0);
+    if (d01 > 16.0 || d12 > 16.0 || d20 > 16.0) return;
+
+    waxTris.push(
+      v0.x, v0.y, v0.z,
+      v1.x, v1.y, v1.z,
+      v2.x, v2.y, v2.z,
+    );
+  };
+
+  if (index) {
+    const triCount = index.count / 3;
+    for (let t = 0; t < triCount; t++) {
+      const i0 = index.getX(t * 3);
+      const i1 = index.getX(t * 3 + 1);
+      const i2 = index.getX(t * 3 + 2);
+      addTriangle(i0, i1, i2);
+    }
+  } else {
+    const triCount = Math.floor(count / 3);
+    for (let t = 0; t < triCount; t++) {
+      const i0 = t * 3;
+      const i1 = t * 3 + 1;
+      const i2 = t * 3 + 2;
+      addTriangle(i0, i1, i2);
+    }
+  }
+
+  if (waxTris.length === 0) return null;
 
   const finalWaxGeom = new BufferGeometry();
   finalWaxGeom.setAttribute("position", new BufferAttribute(new Float32Array(waxTris), 3));
