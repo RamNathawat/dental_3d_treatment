@@ -11,11 +11,11 @@
 /* ── Blockout Studio Main Drawer / Panel ─────────────────────────────────── */
 .bo-studio-panel {
   position: absolute;
-  top: 16px;
-  right: 16px;
-  bottom: 80px;
-  width: 370px;
-  max-width: calc(100vw - 32px);
+  top: 70px;
+  right: 18px;
+  bottom: 84px;
+  width: 375px;
+  max-width: calc(100vw - 36px);
   background: var(--tv-surface-glass);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
@@ -48,7 +48,7 @@
     top: auto;
     left: 8px;
     right: 8px;
-    bottom: 74px;
+    bottom: 64px;
     width: auto;
     max-width: none;
     max-height: 72vh;
@@ -59,9 +59,9 @@
 
 /* ── Header ───────────────────────────────────────────────────────────────── */
 .bo-header {
-  padding: 14px 16px;
+  padding: 14px 18px;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--tv-border-subtle);
   background: var(--tv-surface-0);
@@ -70,7 +70,13 @@
 .bo-title-group {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
+}
+
+.bo-subtitle {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--tv-text-muted);
 }
 
 .bo-badge {
@@ -618,6 +624,204 @@
   background: var(--tv-gold);
   border-radius: 9999px;
   transition: width 0.2s ease;
+}
+
+/* ── CAD Studio Bottom Dock (Utilising empty bottom row) ─────────────────── */
+.bo-bottom-dock {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 18px;
+  background: var(--tv-surface-glass);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--tv-border);
+  border-radius: 9999px;
+  box-shadow: var(--tv-shadow-lg), 0 10px 32px rgba(0, 0, 0, 0.35);
+  font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: var(--tv-text);
+  animation: boDockSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+}
+
+@keyframes boDockSlideUp {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+/* Center dock in available stage viewport on desktop */
+@media (min-width: 1025px) {
+  .bo-bottom-dock {
+    left: calc((100% - 390px) / 2);
+  }
+}
+
+/* Stepper within dock */
+.bo-dock-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bo-dock-step-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--tv-border-subtle);
+  background: var(--tv-surface-0);
+  color: var(--tv-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.bo-dock-step-btn:hover:not(:disabled) {
+  border-color: var(--tv-gold);
+  background: var(--tv-surface-hover);
+  color: var(--tv-gold);
+}
+
+.bo-dock-step-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.bo-dock-stage-info {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--tv-text);
+}
+
+.bo-dock-stage-total {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--tv-text-muted);
+}
+
+/* Vertical divider inside dock */
+.bo-dock-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--tv-border-subtle);
+  flex-shrink: 0;
+}
+
+/* Metrics row inside dock */
+.bo-dock-metrics {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.bo-dock-metric {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: default;
+}
+
+.bo-dock-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.bo-dock-dot--amber {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.45);
+}
+
+.bo-dock-dot--cyan {
+  background: #06b6d4;
+  box-shadow: 0 0 8px rgba(6, 182, 212, 0.45);
+}
+
+.bo-dock-dot--gold {
+  background: var(--tv-gold);
+  box-shadow: 0 0 8px var(--tv-gold-glow);
+}
+
+.bo-dock-metric-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--tv-text-muted);
+}
+
+.bo-dock-metric-val {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--tv-text);
+  margin-left: 2px;
+}
+
+/* CTA & progress container inside dock */
+.bo-dock-cta-wrap {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.bo-dock-cta-wrap .bo-btn-propagate {
+  width: auto;
+  min-height: 34px;
+  padding: 8px 18px;
+  border-radius: 9999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.bo-dock-cta-wrap .bo-propagate-progress {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--tv-surface-0);
+  border: 1px solid var(--tv-border);
+  border-radius: 10px;
+  padding: 7px 14px;
+  box-shadow: var(--tv-shadow-md), 0 4px 16px rgba(0, 0, 0, 0.25);
+  min-width: 230px;
+}
+
+/* Responsive Dock for Mobile / Tablets */
+@media (max-width: 900px) {
+  .bo-bottom-dock {
+    left: 8px;
+    right: 8px;
+    transform: none;
+    bottom: 8px;
+    border-radius: 14px;
+    padding: 8px 12px;
+    gap: 10px;
+    overflow-x: auto;
+    justify-content: space-between;
+  }
+
+  .bo-bottom-dock::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* ── Dedicated CAD Top Bar (Undercut & Blockout Studio) ─────────────────── */

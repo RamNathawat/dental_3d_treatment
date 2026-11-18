@@ -512,7 +512,6 @@ export function createTreatmentApp(
       "tv-cad-top-bar__patient-name",
       state.manifest.patientName ?? state.manifest.caseId,
     ),
-    span("tv-cad-top-bar__badge", "CAD Engine"),
   ]);
 
   const cadArchUpperBtn = document.createElement("button");
@@ -540,39 +539,6 @@ export function createTreatmentApp(
   const cadArchPillEl = div("tv-cad-arch-pill", [
     cadArchUpperBtn,
     cadArchLowerBtn,
-  ]);
-
-  const cadStagePrevBtn = makeBtn(
-    "‹",
-    () => {
-      if (blockoutStudioInstance) {
-        const target = Math.max(0, state.currentIndex - 1);
-        blockoutStudioInstance.setStageIndex(target);
-      }
-    },
-    "tv-cad-stepper-btn",
-  );
-  cadStagePrevBtn.title = "Previous stage";
-
-  const cadStageLabel = span("tv-cad-stage-label", "★ Stage 1 (Reference)");
-
-  const cadStageNextBtn = makeBtn(
-    "›",
-    () => {
-      if (blockoutStudioInstance) {
-        const maxStages = state.manifest.treatmentStages.length;
-        const target = Math.min(maxStages - 1, state.currentIndex + 1);
-        blockoutStudioInstance.setStageIndex(target);
-      }
-    },
-    "tv-cad-stepper-btn",
-  );
-  cadStageNextBtn.title = "Next stage";
-
-  const cadStageControlEl = div("tv-cad-stage-stepper", [
-    cadStagePrevBtn,
-    cadStageLabel,
-    cadStageNextBtn,
   ]);
 
   const cadCamFrontBtn = makeBtn("Front", () => viewport.setView("top"), "tv-cad-tool-btn");
@@ -606,7 +572,6 @@ export function createTreatmentApp(
     ]),
     div("tv-cad-top-bar__center", [
       cadArchPillEl,
-      cadStageControlEl,
     ]),
     div("tv-cad-top-bar__right", [
       cadCamFrontBtn,
@@ -616,20 +581,10 @@ export function createTreatmentApp(
     ]),
   ]);
 
-  function syncCadTopBar(arch: "upper" | "lower", stageIndex: number): void {
+  function syncCadTopBar(arch: "upper" | "lower", _stageIndex?: number): void {
     const isUp = arch === "upper";
     cadArchUpperBtn.classList.toggle("tv-cad-arch-btn--active", isUp);
     cadArchLowerBtn.classList.toggle("tv-cad-arch-btn--active", !isUp);
-
-    const totalStages = state.manifest.treatmentStages.length || 1;
-    if (stageIndex === 0) {
-      cadStageLabel.textContent = "★ Stage 1 (Reference Model)";
-    } else {
-      cadStageLabel.textContent = `Transitional (Stage ${stageIndex + 1} of ${totalStages})`;
-    }
-
-    (cadStagePrevBtn as HTMLButtonElement).disabled = stageIndex <= 0;
-    (cadStageNextBtn as HTMLButtonElement).disabled = stageIndex >= totalStages - 1;
   }
 
   // ── Milestone 4: Automated Undercut & Blockout Studio ─────────────────────
@@ -719,7 +674,7 @@ export function createTreatmentApp(
     () => toggleBlockoutStudio(),
     "tv-btn--tool tv-btn--blockout",
   );
-  blockoutHeaderBtn.title = "Milestone 4: Undercut Survey, Digital Wax Blockout & Print Prep";
+  blockoutHeaderBtn.title = "Undercut Survey, Digital Wax Blockout & Print Prep";
 
   // Treatment Plan button in header
   const notesHeaderBtn = makeBtn(

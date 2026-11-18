@@ -54,6 +54,7 @@ export class BlockoutStudio {
   private manifest: CaseManifest;
   private container: HTMLElement | null = null;
   private panelEl: HTMLElement | null = null;
+  private dockEl: HTMLElement | null = null;
 
   private isUpper = true;
   private currentStageIndex = 0;
@@ -150,6 +151,10 @@ export class BlockoutStudio {
     if (this.panelEl && this.panelEl.parentNode) {
       this.panelEl.parentNode.removeChild(this.panelEl);
       this.panelEl = null;
+    }
+    if (this.dockEl && this.dockEl.parentNode) {
+      this.dockEl.parentNode.removeChild(this.dockEl);
+      this.dockEl = null;
     }
     // Restore base tooth vertex colors
     this.restoreBaseColors();
@@ -322,17 +327,21 @@ export class BlockoutStudio {
     this.isBatchProcessing = true;
 
     const totalStages = this.manifest.treatmentStages.length;
-    const progressEl = this.panelEl?.querySelector<HTMLElement>(".bo-propagate-progress");
-    const progressBar = this.panelEl?.querySelector<HTMLElement>(".bo-progress-bar-fill");
-    const progressLabel = this.panelEl?.querySelector<HTMLElement>(".bo-progress-label");
+    const progressEls = this.container?.querySelectorAll<HTMLElement>(".bo-propagate-progress");
+    const progressBars = this.container?.querySelectorAll<HTMLElement>(".bo-progress-bar-fill");
+    const progressLabels = this.container?.querySelectorAll<HTMLElement>(".bo-progress-label");
 
-    if (progressEl) progressEl.hidden = false;
+    progressEls?.forEach((el) => {
+      el.hidden = false;
+    });
 
     try {
       // Clear downstream stage caches so they regenerate with approved protocol
       for (let i = 1; i < totalStages; i++) {
-        if (progressBar) progressBar.style.width = `${((i + 1) / totalStages) * 100}%`;
-        if (progressLabel) progressLabel.textContent = `Processing Stage ${i + 1} of ${totalStages}...`;
+        const pct = `${((i + 1) / totalStages) * 100}%`;
+        const text = `Processing Stage ${i + 1} of ${totalStages}...`;
+        progressBars?.forEach((b) => (b.style.width = pct));
+        progressLabels?.forEach((l) => (l.textContent = text));
 
         // Small yield so browser UI stays responsive
         await new Promise((r) => setTimeout(r, 40));
@@ -341,9 +350,13 @@ export class BlockoutStudio {
         this.stageResults.delete(i);
       }
 
-      if (progressLabel) progressLabel.textContent = `✓ Protocol applied to all ${totalStages} transitional stages!`;
+      progressLabels?.forEach((l) => {
+        l.textContent = `✓ Protocol applied to all ${totalStages} transitional stages!`;
+      });
       setTimeout(() => {
-        if (progressEl) progressEl.hidden = true;
+        progressEls?.forEach((el) => {
+          el.hidden = true;
+        });
       }, 2500);
     } finally {
       this.isBatchProcessing = false;
@@ -444,8 +457,8 @@ export class BlockoutStudio {
     panel.innerHTML = `
       <div class="bo-header">
         <div class="bo-title-group">
-          <div class="bo-badge">Milestone 4 CAD Engine</div>
           <h2 class="bo-title">Undercut &amp; Blockout Studio</h2>
+          <span class="bo-subtitle">Clinical CAD Wax Blockout &amp; Survey</span>
         </div>
         <button type="button" class="bo-btn-exit" title="Exit Blockout Studio and return to Treatment Viewer">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -463,22 +476,6 @@ export class BlockoutStudio {
         </div>
         <div class="bo-stage-tag ${this.currentStageIndex === 0 ? "bo-stage-tag--ref" : ""}">
           ${this.currentStageIndex === 0 ? "★ Stage 1 (Reference Model)" : `Transitional Model (Stage ${this.currentStageIndex + 1})`}
-        </div>
-      </div>
-
-      <!-- Quick Metrics Strip -->
-      <div class="bo-metrics-strip">
-        <div class="bo-metric">
-          <span class="bo-metric-label">Max Undercut</span>
-          <span class="bo-metric-val bo-metric-max">-</span>
-        </div>
-        <div class="bo-metric">
-          <span class="bo-metric-label">Avg Retention</span>
-          <span class="bo-metric-val bo-metric-avg">-</span>
-        </div>
-        <div class="bo-metric">
-          <span class="bo-metric-label">Blockout Area</span>
-          <span class="bo-metric-val bo-metric-area">-</span>
         </div>
       </div>
 
@@ -647,23 +644,80 @@ export class BlockoutStudio {
           </div>
         </div>
       </div>
+    `;
 
-      <!-- Batch Propagation & Progress Bar -->
-      <div class="bo-footer">
+    // 2. CAD Studio Bottom Dock (Utilising empty bottom row)
+    const totalStages = this.manifest.treatmentStages.length || 1;
+    const dock = document.createElement("div");
+    dock.className = "bo-bottom-dock";
+    this.dockEl = dock;
+
+    dock.innerHTML = `
+      <!-- Stage Stepper & Reference Tag -->
+      <div class="bo-dock-stepper">
+        <button type="button" class="bo-dock-step-btn bo-dock-step-prev" title="Previous stage" ${this.currentStageIndex === 0 ? "disabled" : ""}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+        </button>
+        <div class="bo-dock-stage-info">
+          <span class="bo-dock-stage-number">Stage ${this.currentStageIndex + 1}</span>
+          <span class="bo-dock-stage-total">/ ${totalStages}</span>
+        </div>
+        <button type="button" class="bo-dock-step-btn bo-dock-step-next" title="Next stage" ${this.currentStageIndex >= totalStages - 1 ? "disabled" : ""}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </button>
+        <div class="bo-stage-tag ${this.currentStageIndex === 0 ? "bo-stage-tag--ref" : ""}">
+          ${this.currentStageIndex === 0 ? "★ Reference Model" : `Transitional Model (Stage ${this.currentStageIndex + 1})`}
+        </div>
+      </div>
+
+      <div class="bo-dock-divider"></div>
+
+      <!-- Live Undercut Retention Metrics -->
+      <div class="bo-dock-metrics">
+        <div class="bo-dock-metric" title="Maximum detected undercut depth">
+          <span class="bo-dock-dot bo-dock-dot--amber"></span>
+          <span class="bo-dock-metric-label">Max Undercut</span>
+          <span class="bo-dock-metric-val bo-metric-max">-</span>
+        </div>
+        <div class="bo-dock-metric" title="Average retention depth across blocked areas">
+          <span class="bo-dock-dot bo-dock-dot--cyan"></span>
+          <span class="bo-dock-metric-label">Avg Retention</span>
+          <span class="bo-dock-metric-val bo-metric-avg">-</span>
+        </div>
+        <div class="bo-dock-metric" title="Total surface area covered by digital wax">
+          <span class="bo-dock-dot bo-dock-dot--gold"></span>
+          <span class="bo-dock-metric-label">Blockout Area</span>
+          <span class="bo-dock-metric-val bo-metric-area">-</span>
+        </div>
+      </div>
+
+      <div class="bo-dock-divider"></div>
+
+      <!-- Master Action CTA & Batch Propagation -->
+      <div class="bo-dock-cta-wrap">
         <div class="bo-propagate-progress" hidden>
           <div class="bo-progress-label">Processing transitional models...</div>
           <div class="bo-progress-bar-bg">
             <div class="bo-progress-bar-fill" style="width: 0%"></div>
           </div>
         </div>
-        <button type="button" class="bo-btn-propagate">
-          ★ Approve Protocol &amp; Apply to All Stages
+        <button type="button" class="bo-btn-propagate" title="Approve current protocol and apply to all transitional stages">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+          </svg>
+          <span>Approve Protocol &amp; Apply to All Stages</span>
         </button>
       </div>
     `;
 
     this.container.appendChild(panel);
+    this.container.appendChild(dock);
     this.bindPanelEvents();
+    this.bindDockEvents();
     this.renderToothChart();
   }
 
@@ -866,6 +920,30 @@ export class BlockoutStudio {
     this.panelEl.querySelector(".bo-btn-propagate")?.addEventListener("click", () => this.propagateToAllStages());
   }
 
+  private bindDockEvents(): void {
+    if (!this.dockEl) return;
+
+    const prevBtn = this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-prev");
+    const nextBtn = this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-next");
+
+    prevBtn?.addEventListener("click", () => {
+      if (this.currentStageIndex > 0) {
+        this.setStageIndex(this.currentStageIndex - 1);
+      }
+    });
+
+    nextBtn?.addEventListener("click", () => {
+      const total = this.manifest.treatmentStages.length;
+      if (this.currentStageIndex < total - 1) {
+        this.setStageIndex(this.currentStageIndex + 1);
+      }
+    });
+
+    this.dockEl.querySelector(".bo-btn-propagate")?.addEventListener("click", () => {
+      this.propagateToAllStages();
+    });
+  }
+
   private renderHolesList(): void {
     if (!this.panelEl) return;
     const listEl = this.panelEl.querySelector(".bo-holes-list");
@@ -889,14 +967,20 @@ export class BlockoutStudio {
   }
 
   private updateMetricsDisplay(result: StageBlockoutResult): void {
-    if (!this.panelEl || !result.survey) return;
-    const maxEl = this.panelEl.querySelector(".bo-metric-max");
-    const avgEl = this.panelEl.querySelector(".bo-metric-avg");
-    const areaEl = this.panelEl.querySelector(".bo-metric-area");
+    if (!result.survey) return;
+    const maxEls = this.container?.querySelectorAll(".bo-metric-max");
+    const avgEls = this.container?.querySelectorAll(".bo-metric-avg");
+    const areaEls = this.container?.querySelectorAll(".bo-metric-area");
 
-    if (maxEl) maxEl.textContent = `${result.survey.maxDepthMm.toFixed(2)} mm`;
-    if (avgEl) avgEl.textContent = `${result.survey.avgDepthMm.toFixed(2)} mm`;
-    if (areaEl) areaEl.textContent = `${result.survey.undercutAreaMm2.toFixed(1)} mm²`;
+    maxEls?.forEach((el) => {
+      el.textContent = `${result.survey!.maxDepthMm.toFixed(2)} mm`;
+    });
+    avgEls?.forEach((el) => {
+      el.textContent = `${result.survey!.avgDepthMm.toFixed(2)} mm`;
+    });
+    areaEls?.forEach((el) => {
+      el.textContent = `${result.survey!.undercutAreaMm2.toFixed(1)} mm²`;
+    });
   }
 
   private updateUndoRedoButtons(): void {
@@ -908,9 +992,11 @@ export class BlockoutStudio {
   }
 
   private updateUI(): void {
-    if (!this.panelEl) return;
-    const stageTag = this.panelEl.querySelector(".bo-stage-tag");
-    if (stageTag) {
+    const totalStages = this.manifest.treatmentStages.length || 1;
+
+    // Update all stage tags across panel and bottom dock
+    const stageTags = this.container?.querySelectorAll(".bo-stage-tag");
+    stageTags?.forEach((stageTag) => {
       if (this.currentStageIndex === 0) {
         stageTag.className = "bo-stage-tag bo-stage-tag--ref";
         stageTag.textContent = "★ Stage 1 (Reference Model)";
@@ -918,9 +1004,22 @@ export class BlockoutStudio {
         stageTag.className = "bo-stage-tag";
         stageTag.textContent = `Transitional Model (Stage ${this.currentStageIndex + 1})`;
       }
+    });
+
+    // Update dock stepper indicator and button disabled states
+    if (this.dockEl) {
+      const stageNumEl = this.dockEl.querySelector(".bo-dock-stage-number");
+      if (stageNumEl) {
+        stageNumEl.textContent = `Stage ${this.currentStageIndex + 1}`;
+      }
+      const prevBtn = this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-prev");
+      const nextBtn = this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-next");
+      if (prevBtn) prevBtn.disabled = this.currentStageIndex <= 0;
+      if (nextBtn) nextBtn.disabled = this.currentStageIndex >= totalStages - 1;
     }
 
-    this.panelEl.querySelectorAll<HTMLButtonElement>(".bo-pill-btn").forEach((btn) => {
+    // Update arch pill buttons
+    this.container?.querySelectorAll<HTMLButtonElement>(".bo-pill-btn").forEach((btn) => {
       const arch = btn.dataset["arch"] === "upper";
       btn.classList.toggle("bo-pill-btn--active", arch === this.isUpper);
     });

@@ -91,9 +91,15 @@ describe("Blockout Studio UI & Interaction", () => {
     const panel = container.querySelector(".bo-studio-panel");
     expect(panel).not.toBeNull();
 
-    // Check Header and Milestone 4 Badge
+    // Check Header (Milestone 4 badge removed)
     expect(panel?.querySelector(".bo-title")?.textContent).toBe("Undercut & Blockout Studio");
-    expect(panel?.querySelector(".bo-badge")?.textContent).toBe("Milestone 4 CAD Engine");
+    expect(panel?.querySelector(".bo-badge")).toBeNull();
+
+    // Check Bottom Dock
+    const dock = container.querySelector(".bo-bottom-dock");
+    expect(dock).not.toBeNull();
+    expect(dock?.querySelector(".bo-metric-max")).not.toBeNull();
+    expect(dock?.querySelector(".bo-btn-propagate")).not.toBeNull();
 
     // Check Reference Stage Tag
     const stageTag = panel?.querySelector(".bo-stage-tag");
@@ -109,6 +115,7 @@ describe("Blockout Studio UI & Interaction", () => {
 
     studio.unmount();
     expect(container.querySelector(".bo-studio-panel")).toBeNull();
+    expect(container.querySelector(".bo-bottom-dock")).toBeNull();
   });
 
   it("switches tabs between Blockout, Wax Carver, and Print Prep", () => {
