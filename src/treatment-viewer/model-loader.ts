@@ -1026,8 +1026,15 @@ async function fetchStl(
         }
         buffer = merged.buffer;
       } else {
-        buffer = await response.arrayBuffer();
-        reportDownloadProgress(url, buffer.byteLength, total || buffer.byteLength, true);
+        try {
+          buffer = await response.arrayBuffer();
+          reportDownloadProgress(url, buffer.byteLength, total || buffer.byteLength, true);
+        } catch (fetchErr: any) {
+          if (fetchErr && (fetchErr.name === "AbortError" || String(fetchErr).includes("aborted"))) {
+            return { ok: false, reason: "Fetch aborted" };
+          }
+          throw fetchErr;
+        }
       }
 
       // Save raw compressed buffer in IndexedDB to save client disk storage

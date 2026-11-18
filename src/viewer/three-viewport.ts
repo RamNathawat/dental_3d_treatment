@@ -514,6 +514,26 @@ class ThreeViewport implements Viewport {
     return this.layers.get(id)?.geometry ?? null;
   }
 
+  getLayerMesh(id: string): Mesh | null {
+    return this.layers.get(id)?.mesh ?? null;
+  }
+
+  getThreeScene(): Scene {
+    return this.scene;
+  }
+
+  getThreeCamera(): PerspectiveCamera {
+    return this.camera;
+  }
+
+  getThreeRenderer(): WebGLRenderer {
+    return this.renderer;
+  }
+
+  getControls(): OrbitControls {
+    return this.controls;
+  }
+
   projectPoint(
     point: { x: number; y: number; z: number },
     layerId?: string,

@@ -1,0 +1,197 @@
+/**
+ * Automated Undercut Survey & Clinical Heatmap Analyzer.
+ *
+ * Evaluates dental mesh geometry along the path of insertion (draw direction)
+ * to detect mechanical undercuts and generate real-time clinical heatmaps.
+ */
+
+import { BufferGeometry, Vector3 } from "three";
+import type { InsertionAxis, SurveyAnalysis } from "./types";
+
+/**
+ * Computes the normalized insertion vector given arch type and manual tilt angles.
+ */
+export function getInsertionVector(
+  axis: InsertionAxis,
+  isUpper: boolean,
+): Vector3 {
+  // Primary draw direction:
+  // Upper arch: teeth point downward (-Y), so aligner is seated upward and removed downward.
+  // Lower arch: teeth point upward (+Y), so aligner is seated downward and removed upward.
+  const baseDir = new Vector3(0, isUpper ? -1 : 1, 0);
+
+  // Apply tilt angles (in radians)
+  const radX = (axis.tiltX * Math.PI) / 180;
+  const radY = (axis.tiltY * Math.PI) / 180;
+
+  const v = baseDir.clone();
+  v.applyAxisAngle(new Vector3(1, 0, 0), radX);
+  v.applyAxisAngle(new Vector3(0, 0, 1), radY);
+  return v.normalize();
+}
+
+/**
+ * Analyzes dental geometry for undercuts along the path of insertion.
+ */
+export function analyzeUndercuts(
+  geometry: BufferGeometry,
+  isUpper: boolean,
+  axis: InsertionAxis = { x: 0, y: isUpper ? -1 : 1, z: 0, tiltX: 0, tiltY: 0 },
+  draftAngleDeg = 2.0,
+): SurveyAnalysis {
+  const pos = geometry.getAttribute("position");
+  if (!pos || pos.count === 0) {
+    return {
+      depths: new Float32Array(0),
+      heatmapColors: new Float32Array(0),
+      maxDepthMm: 0,
+      avgDepthMm: 0,
+      undercutAreaMm2: 0,
+      undercutIndices: new Uint32Array(0),
+    };
+  }
+
+  if (!geometry.getAttribute("normal")) {
+    geometry.computeVertexNormals();
+  }
+  const norm = geometry.getAttribute("normal");
+  const count = pos.count;
+
+  const insertionVec = getInsertionVector(axis, isUpper);
+  const minDotDraft = Math.sin((draftAngleDeg * Math.PI) / 180);
+
+  // Step 1: Bounding extents and focal center
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+  let minZ = Infinity, maxZ = -Infinity;
+
+  for (let i = 0; i < count; i += 4) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+  }
+
+  const midX = (minX + maxX) / 2;
+  const focalZ = minZ - 12.0;
+  const maxSpanAngle = 0.95;
+
+  // Step 2: Track maximum convexity (height of contour) along 120 arch sectors
+  const numSectors = 120;
+  const maxContourRadius = new Float32Array(numSectors);
+  maxContourRadius.fill(0);
+
+  for (let i = 0; i < count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i);
+    const angle = Math.atan2(x - midX, z - focalZ);
+    const s = Math.max(
+      0,
+      Math.min(
+        numSectors - 1,
+        Math.floor(((angle + maxSpanAngle) / (2 * maxSpanAngle)) * numSectors),
+      ),
+    );
+    const r = Math.hypot(x - midX, z - focalZ);
+    if (r > maxContourRadius[s]!) {
+      maxContourRadius[s] = r;
+    }
+  }
+
+  // Smooth contour boundary
+  const smoothContour = new Float32Array(numSectors);
+  for (let s = 0; s < numSectors; s++) {
+    let sum = 0, w = 0;
+    for (let d = -2; d <= 2; d++) {
+      const idx = s + d;
+      if (idx >= 0 && idx < numSectors) {
+        sum += maxContourRadius[idx]!;
+        w++;
+      }
+    }
+    smoothContour[s] = w > 0 ? sum / w : maxContourRadius[s]!;
+  }
+
+  // Step 3: Compute undercut depth and heatmap colors for each vertex
+  const depths = new Float32Array(count);
+  const heatmapColors = new Float32Array(count * 3);
+  const undercutList: number[] = [];
+
+  let maxDepth = 0;
+  let totalDepthSum = 0;
+  let affectedCount = 0;
+
+  const vNorm = new Vector3();
+
+  for (let i = 0; i < count; i++) {
+    vNorm.set(norm.getX(i), norm.getY(i), norm.getZ(i));
+    const dot = vNorm.dot(insertionVec);
+
+    const x = pos.getX(i), z = pos.getZ(i);
+    const angle = Math.atan2(x - midX, z - focalZ);
+    const s = Math.max(
+      0,
+      Math.min(
+        numSectors - 1,
+        Math.floor(((angle + maxSpanAngle) / (2 * maxSpanAngle)) * numSectors),
+      ),
+    );
+
+    const r = Math.hypot(x - midX, z - focalZ);
+    const contourR = smoothContour[s]!;
+
+    // An undercut is any surface region facing away from the insertion vector,
+    // or recessed behind the height of contour along the tooth boundary.
+    let depth = 0;
+    if (dot < minDotDraft) {
+      // Calculate radial undercut depth in millimeters
+      const rawDepth = Math.max(0, contourR - r);
+      // Scale with negative dot projection to accurately represent clinical undercut severity
+      depth = Math.min(2.0, rawDepth * Math.abs(dot) * 0.45);
+    }
+
+    depths[i] = depth;
+
+    if (depth > 0.05) {
+      undercutList.push(i);
+      if (depth > maxDepth) maxDepth = depth;
+      totalDepthSum += depth;
+      affectedCount++;
+    }
+
+    // Heatmap Colors:
+    // Green (Safe / Draft compliant): [0.22, 0.78, 0.35]
+    // Yellow (Mild retention: 0.1mm - 0.4mm): [0.95, 0.75, 0.15]
+    // Red (Critical locking undercut: >= 0.5mm): [0.92, 0.18, 0.18]
+    const cIdx = i * 3;
+    if (depth <= 0.08) {
+      // Normal tooth ivory with slight green tint for clear path of draw
+      heatmapColors[cIdx] = 0.25;
+      heatmapColors[cIdx + 1] = 0.78;
+      heatmapColors[cIdx + 2] = 0.35;
+    } else if (depth < 0.45) {
+      // Mild undercut / moderate retention (Yellow -> Orange)
+      const t = (depth - 0.08) / (0.45 - 0.08);
+      heatmapColors[cIdx] = 0.95;
+      heatmapColors[cIdx + 1] = 0.75 - t * 0.35;
+      heatmapColors[cIdx + 2] = 0.12;
+    } else {
+      // Deep retention / severe undercut (Vibrant Red)
+      heatmapColors[cIdx] = 0.92;
+      heatmapColors[cIdx + 1] = 0.15;
+      heatmapColors[cIdx + 2] = 0.15;
+    }
+  }
+
+  const avgDepth = affectedCount > 0 ? totalDepthSum / affectedCount : 0;
+  // Approximate surface area (assume typical vertex spacing ~0.2mm - 0.3mm => ~0.06mm² per vertex)
+  const approxArea = affectedCount * 0.065;
+
+  return {
+    depths,
+    heatmapColors,
+    maxDepthMm: Number(maxDepth.toFixed(2)),
+    avgDepthMm: Number(avgDepth.toFixed(2)),
+    undercutAreaMm2: Number(approxArea.toFixed(1)),
+    undercutIndices: new Uint32Array(undercutList),
+  };
+}

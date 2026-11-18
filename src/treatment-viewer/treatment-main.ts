@@ -133,6 +133,7 @@ export async function initTreatmentViewer(): Promise<void> {
 
   const params = new URLSearchParams(window.location.search);
   const shareToken = params.get("case");
+  const initialMode = params.get("mode");
 
   if (!shareToken || shareToken === "demo") {
     showEmptyState(
@@ -403,7 +404,10 @@ export async function initTreatmentViewer(): Promise<void> {
                 storedManifest.patientSex = caseRecord.patient_sex;
               }
 
-              createTreatmentApp(root!, { caseManifest: storedManifest });
+              const app = createTreatmentApp(root!, { caseManifest: storedManifest, initialMode });
+              if (typeof window !== "undefined") {
+                window.__dentalTreatmentApp = app;
+              }
               return;
             }
           }
@@ -479,7 +483,7 @@ export async function initTreatmentViewer(): Promise<void> {
           }
         }
 
-        const app = createTreatmentApp(root!, { caseManifest: dynamicManifest });
+        const app = createTreatmentApp(root!, { caseManifest: dynamicManifest, initialMode });
         if (typeof window !== "undefined") {
           window.__dentalTreatmentApp = app;
         }

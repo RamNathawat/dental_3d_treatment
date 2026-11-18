@@ -55,6 +55,7 @@ import {
   getClinicalToothList,
   getContactPoint,
 } from "./tooth-data";
+import { BlockoutStudio } from "./blockout/blockout-studio";
 
 // ─── Layer IDs ───────────────────────────────────────────────────────────────
 
@@ -126,6 +127,8 @@ export interface TreatmentAppOptions {
   readonly transitionDurationMs?: number;
   /** Whether to load stage 0 automatically on creation (defaults to true). */
   readonly autoLoad?: boolean;
+  /** Optional initial view mode (e.g. 'blockout' launches the Undercut & Blockout Studio). */
+  readonly initialMode?: string | null;
 }
 
 export interface TreatmentAppHandle {
@@ -146,6 +149,8 @@ export interface TreatmentAppHandle {
   readonly setIprActive: (active: boolean) => void;
   readonly toggleNotes: () => void;
   readonly setNotesOpen: (open: boolean) => void;
+  readonly toggleBlockoutStudio: () => void;
+  readonly isBlockoutStudioOpen: () => boolean;
   readonly cyclePlaybackSpeed: () => number;
   readonly setPlaybackSpeed: (speed: number) => void;
   readonly getPlaybackSpeed: () => number;
@@ -412,6 +417,39 @@ export function createTreatmentApp(
   notesDrawerEl.hidden = true;
   notesDrawerEl.style.display = "none";
   notesDrawerEl.style.visibility = "hidden";
+
+  // ── Milestone 4: Automated Undercut & Blockout Studio ─────────────────────
+  let blockoutStudioInstance: BlockoutStudio | null = null;
+  const toggleBlockoutStudio = () => {
+    if (blockoutStudioInstance) {
+      blockoutStudioInstance.unmount();
+      blockoutStudioInstance = null;
+      blockoutHeaderBtn.classList.remove("tv-btn--active");
+    } else {
+      blockoutStudioInstance = new BlockoutStudio({
+        viewport,
+        manifest: state.manifest,
+        initialArch: state.upperVisible ? "upper" : "lower",
+        initialStageIndex: Math.max(0, state.currentIndex),
+        onExit: () => {
+          blockoutStudioInstance = null;
+          blockoutHeaderBtn.classList.remove("tv-btn--active");
+        },
+        onStageChange: (idx) => {
+          navigate(idx);
+        },
+      });
+      blockoutStudioInstance.mount(stageEl);
+      blockoutHeaderBtn.classList.add("tv-btn--active");
+    }
+  };
+
+  const blockoutHeaderBtn = makeBtn(
+    "Blockout Studio",
+    () => toggleBlockoutStudio(),
+    "tv-btn--tool tv-btn--blockout",
+  );
+  blockoutHeaderBtn.title = "Milestone 4: Undercut Survey, Digital Wax Blockout & Print Prep";
 
   // Treatment Plan button in header
   const notesHeaderBtn = makeBtn(
@@ -1097,6 +1135,7 @@ export function createTreatmentApp(
         ]),
       ]),
       div("tv-header__actions", [
+        blockoutHeaderBtn,
         notesHeaderBtn,
         gridBtn,
         recenterBtn,
@@ -1193,6 +1232,10 @@ export function createTreatmentApp(
     }
     if (state.iprActive) {
       renderIprOverlay();
+    }
+
+    if (blockoutStudioInstance) {
+      blockoutStudioInstance.setArch(mode === "lower" ? "lower" : "upper");
     }
 
     syncArchPillUI();
@@ -2994,6 +3037,10 @@ export function createTreatmentApp(
     } else {
       statusEl.hidden = true;
     }
+
+    if (blockoutStudioInstance && state.currentIndex >= 0) {
+      blockoutStudioInstance.setStageIndex(state.currentIndex);
+    }
   }
 
   // ── Stage & File Selection Modal ──────────────────────────────────────────
@@ -3233,6 +3280,14 @@ export function createTreatmentApp(
       isInitialBoot = false;
       state.loading = false;
       syncUI();
+
+      const isBlockoutMode =
+        options.initialMode === "blockout" ||
+        (typeof window !== "undefined" &&
+          new URLSearchParams(window.location.search).get("mode") === "blockout");
+      if (isBlockoutMode && !blockoutStudioInstance) {
+        toggleBlockoutStudio();
+      }
     }
   }
 
@@ -3267,6 +3322,10 @@ export function createTreatmentApp(
       }
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("storage", onStorageSync);
+      if (blockoutStudioInstance) {
+        blockoutStudioInstance.unmount();
+        blockoutStudioInstance = null;
+      }
       viewport.dispose();
       clearStageGeometryCache();
       root.replaceChildren();
@@ -3289,6 +3348,8 @@ export function createTreatmentApp(
     setIprActive,
     toggleNotes: toggleNotesDrawer,
     setNotesOpen,
+    toggleBlockoutStudio,
+    isBlockoutStudioOpen: () => Boolean(blockoutStudioInstance),
     cyclePlaybackSpeed,
     setPlaybackSpeed,
     getPlaybackSpeed,

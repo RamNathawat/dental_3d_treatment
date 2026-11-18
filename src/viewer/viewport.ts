@@ -86,6 +86,11 @@ export interface Viewport {
   removeLayer(id: string): void;
   getLayerGeometry?(id: string): import("three").BufferGeometry | null;
   setLayerGeometry?(id: string, geometry: import("three").BufferGeometry): void;
+  getLayerMesh?(id: string): import("three").Mesh | null;
+  getThreeScene?(): import("three").Scene;
+  getThreeCamera?(): import("three").PerspectiveCamera;
+  getThreeRenderer?(): import("three").WebGLRenderer;
+  getControls?(): any;
   /** Projects a 3D coordinate in scan space to 2D canvas pixel coordinates. */
   projectPoint?(
     point: { x: number; y: number; z: number },
