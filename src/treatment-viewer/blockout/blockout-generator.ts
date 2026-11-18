@@ -192,18 +192,24 @@ export function generateBlockout(
 
     // ────────────────────────────────────────────────────────────────────────
     // Clinical Boundary Exclusions:
-    // Base cut plane: flat mechanical mounting cut on clinical dental models (>16mm)
-    // where normals point vertically into the cut base (maxY for upper, minY for lower)
+    // 1. Base cut plane: flat mechanical mounting cut on clinical dental models (>16mm)
+    //    where normals point vertically into the cut base (maxY for upper, minY for lower)
+    // 2. Occlusal table & incisal edges: functional biting surfaces must never have
+    //    blockout wax so the aligner seats with solid vertical occlusal indexing
     // ────────────────────────────────────────────────────────────────────────
     const modelHeight = maxY - minY;
     const isBaseCut = modelHeight > 16.0 && (isUpper
       ? (vPos.y >= maxY - 1.8 && vNorm.y > 0.65)
       : (vPos.y <= minY + 1.8 && vNorm.y < -0.65));
 
+    const isOcclusalTable = modelHeight > 16.0 && (isUpper
+      ? (vPos.y <= minY + 2.0)
+      : (vPos.y >= maxY - 2.0));
+
     // ────────────────────────────────────────────────────────────────────────
     // Component 1: Interproximal Wax Blockout
     // ────────────────────────────────────────────────────────────────────────
-    if (protocol.interproximal.enabled && !isBaseCut) {
+    if (protocol.interproximal.enabled && !isBaseCut && !isOcclusalTable) {
       if (resolvedContacts.length > 0) {
         // Anatomical contact zone check: find nearest interdental contact
         let nearestContact: ResolvedContact | null = null;
@@ -289,7 +295,7 @@ export function generateBlockout(
     // ────────────────────────────────────────────────────────────────────────
     // Component 3: Dentition Undercut Blockout
     // ────────────────────────────────────────────────────────────────────────
-    if (protocol.undercut.enabled && !isBaseCut) {
+    if (protocol.undercut.enabled && !isBaseCut && !isOcclusalTable) {
       // Check per-tooth override (doctor can disable blockout on specific teeth)
       const toothAllowed = protocol.undercut.perTooth[fdi] !== false;
       const depth = survey.depths[i] ?? 0;

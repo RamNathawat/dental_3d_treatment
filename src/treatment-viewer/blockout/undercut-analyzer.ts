@@ -141,8 +141,10 @@ export function analyzeUndercuts(
 
     // ────────────────────────────────────────────────────────────────────────
     // Clinical Boundary Exclusions:
-    // Base cut plane: flat mechanical mounting cut on clinical dental models (>16mm)
-    // where normals point vertically into the cut base (maxY for upper, minY for lower)
+    // 1. Base cut plane: flat mechanical mounting cut on clinical dental models (>16mm)
+    //    where normals point vertically into the cut base (maxY for upper, minY for lower)
+    // 2. Occlusal table & incisal edges: functional biting surfaces must never have
+    //    blockout wax so the aligner seats with solid vertical occlusal indexing
     // ────────────────────────────────────────────────────────────────────────
     const yVal = pos.getY(i);
     const modelHeight = maxY - minY;
@@ -150,7 +152,11 @@ export function analyzeUndercuts(
       ? (yVal >= maxY - 1.8 && vNorm.y > 0.65)
       : (yVal <= minY + 1.8 && vNorm.y < -0.65));
 
-    if (isBaseCut) {
+    const isOcclusalTable = modelHeight > 16.0 && (isUpper
+      ? (yVal <= minY + 2.0)
+      : (yVal >= maxY - 2.0));
+
+    if (isBaseCut || isOcclusalTable) {
       depths[i] = 0;
       const cIdx = i * 3;
       heatmapColors[cIdx] = 0.25;
