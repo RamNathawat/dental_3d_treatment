@@ -100,18 +100,21 @@ describe("Blockout Studio UI & Interaction", () => {
     const expandPill = container.querySelector(".bo-expand-pill");
     expect(expandPill).not.toBeNull();
 
-    // Check Bottom Dock
+    // Check Metrics Strip inside Side Panel
+    expect(panel?.querySelector(".bo-metrics-strip")).not.toBeNull();
+    expect(panel?.querySelector(".bo-metric-max")).not.toBeNull();
+
+    // Check Action CTA pinned to Side Panel
+    expect(panel?.querySelector(".bo-btn-propagate")).not.toBeNull();
+
+    // Check Compact Floating Center Dock with Relevant Controls
     const dock = container.querySelector(".bo-bottom-dock");
     expect(dock).not.toBeNull();
     expect(dock?.querySelector(".bo-dock-overlays")).not.toBeNull();
     expect(dock?.querySelector(".bo-dock-timeline")).not.toBeNull();
     expect(dock?.querySelector(".bo-dock-slider")).not.toBeNull();
-    expect(dock?.querySelector(".bo-metric-max")).not.toBeNull();
-    expect(dock?.querySelector(".bo-btn-propagate")).not.toBeNull();
-
-    // Check Reference Stage Tag
-    const stageTag = panel?.querySelector(".bo-stage-tag");
-    expect(stageTag?.textContent).toContain("Stage 1 (Reference Model)");
+    expect(dock?.querySelector(".bo-dock-stage-badge")?.textContent).toContain("Ref");
+    expect(dock?.querySelector(".bo-dock-btn-reset")).not.toBeNull();
 
     // Check FDI Tooth Chart
     const toothBtns = panel?.querySelectorAll(".bo-tooth-btn");
@@ -236,13 +239,12 @@ describe("Blockout Studio UI & Interaction", () => {
 
     // Switch to lower arch
     studio.setArch("lower");
-    const lowerBtn = container.querySelector<HTMLButtonElement>('.bo-pill-btn[data-arch="lower"]');
-    expect(lowerBtn?.classList.contains("bo-pill-btn--active")).toBe(true);
+    expect(studio.getArch()).toBe("lower");
 
     // Change stage to Stage 2
     studio.setStageIndex(1);
-    const stageTag = container.querySelector(".bo-stage-tag");
-    expect(stageTag?.textContent).toContain("Transitional Model (Stage 2)");
+    const stageBadge = container.querySelector(".bo-dock-stage-badge");
+    expect(stageBadge?.textContent).toContain("Stage 2");
 
     studio.unmount();
   });

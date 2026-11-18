@@ -693,23 +693,25 @@
   transition: width 0.2s ease;
 }
 
-/* ── CAD Studio Bottom Dock (Utilising empty bottom row) ─────────────────── */
+/* ── CAD Studio Floating Center Dock ─────────────────────────────────────── */
 .bo-bottom-dock {
   position: absolute;
-  bottom: 20px;
+  bottom: 22px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 55;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 16px;
-  padding: 8px 18px;
+  gap: 10px;
+  padding: 6px 14px;
+  width: fit-content;
+  max-width: calc(100vw - 32px);
   background: var(--tv-surface-glass);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border: 1px solid var(--tv-border);
   border-radius: 9999px;
-  box-shadow: var(--tv-shadow-lg), 0 10px 32px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--tv-shadow-lg), 0 8px 28px rgba(0, 0, 0, 0.35);
   font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   color: var(--tv-text);
   animation: boDockSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1);
@@ -731,19 +733,45 @@
 @media (min-width: 1025px) {
   .bo-bottom-dock {
     left: calc((100% - 390px) / 2);
+    transform: translateX(-50%);
   }
+}
+
+@media (max-width: 900px) {
+  .bo-bottom-dock {
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: fit-content;
+    max-width: calc(100vw - 24px);
+    overflow-x: auto;
+    padding: 6px 10px;
+    gap: 8px;
+    border-radius: 9999px;
+  }
+
+  .bo-bottom-dock::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Groups within dock */
+.bo-dock-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* Stepper within dock */
 .bo-dock-stepper {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
 }
 
 .bo-dock-step-btn {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   border: 1px solid var(--tv-border-subtle);
   background: var(--tv-surface-0);
@@ -767,109 +795,65 @@
   cursor: not-allowed;
 }
 
-.bo-dock-stage-info {
-  display: flex;
-  align-items: baseline;
-  gap: 3px;
-  font-size: 12px;
+.bo-dock-stage-badge {
+  font-size: 11px;
   font-weight: 700;
-  color: var(--tv-text);
+  color: var(--tv-text-sub);
+  padding: 3px 9px;
+  border-radius: 9999px;
+  background: var(--tv-surface-0);
+  border: 1px solid var(--tv-border-subtle);
+  white-space: nowrap;
 }
 
-.bo-dock-stage-total {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--tv-text-muted);
+.bo-dock-stage-badge--ref {
+  color: var(--tv-gold);
+  border-color: var(--tv-border-gold-subtle);
+  background: var(--tv-gold-light);
 }
 
 /* Vertical divider inside dock */
 .bo-dock-divider {
   width: 1px;
-  height: 22px;
+  height: 20px;
   background: var(--tv-border-subtle);
   flex-shrink: 0;
 }
 
-/* Metrics row inside dock */
-.bo-dock-metrics {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.bo-dock-metric {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  cursor: default;
-}
-
-.bo-dock-dot {
-  width: 7px;
-  height: 7px;
+/* Camera Reset icon button */
+.bo-dock-icon-btn {
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.bo-dock-dot--amber {
-  background: #f59e0b;
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.45);
-}
-
-.bo-dock-dot--cyan {
-  background: #06b6d4;
-  box-shadow: 0 0 8px rgba(6, 182, 212, 0.45);
-}
-
-.bo-dock-dot--gold {
-  background: var(--tv-gold);
-  box-shadow: 0 0 8px var(--tv-gold-glow);
-}
-
-.bo-dock-metric-label {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--tv-text-muted);
-}
-
-.bo-dock-metric-val {
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--tv-text);
-  margin-left: 2px;
-}
-
-/* CTA & progress container inside dock */
-.bo-dock-cta-wrap {
-  display: flex;
-  align-items: center;
-  position: relative;
-}
-
-.bo-dock-cta-wrap .bo-btn-propagate {
-  width: auto;
-  min-height: 34px;
-  padding: 8px 18px;
-  border-radius: 9999px;
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-}
-
-.bo-dock-cta-wrap .bo-propagate-progress {
-  position: absolute;
-  bottom: calc(100% + 10px);
-  left: 50%;
-  transform: translateX(-50%);
+  border: 1px solid var(--tv-border-subtle);
   background: var(--tv-surface-0);
-  border: 1px solid var(--tv-border);
-  border-radius: 10px;
-  padding: 7px 14px;
-  box-shadow: var(--tv-shadow-md), 0 4px 16px rgba(0, 0, 0, 0.25);
-  min-width: 230px;
+  color: var(--tv-text-sub);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.bo-dock-icon-btn:hover {
+  border-color: var(--tv-gold);
+  color: var(--tv-gold);
+  background: var(--tv-surface-hover);
+}
+
+/* Action Footer pinned to bottom of side panel */
+.bo-action-footer {
+  padding: 12px 14px;
+  border-top: 1px solid var(--tv-border-subtle);
+  background: var(--tv-surface-0);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bo-action-footer .bo-btn-propagate {
+  width: 100%;
 }
 
 /* ── Dock Quick Overlays & Stage Slider ─────────────────────────────────── */

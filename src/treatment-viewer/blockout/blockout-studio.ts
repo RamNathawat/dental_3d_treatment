@@ -532,14 +532,19 @@ export class BlockoutStudio {
         </button>
       </div>
 
-      <!-- Arch & Reference Stage Bar -->
-      <div class="bo-arch-bar">
-        <div class="bo-pill-group">
-          <button type="button" class="bo-pill-btn ${this.isUpper ? "bo-pill-btn--active" : ""}" data-arch="upper">Upper Arch</button>
-          <button type="button" class="bo-pill-btn ${!this.isUpper ? "bo-pill-btn--active" : ""}" data-arch="lower">Lower Arch</button>
+      <!-- Quick Metrics Strip -->
+      <div class="bo-metrics-strip">
+        <div class="bo-metric" title="Maximum detected undercut depth">
+          <span class="bo-metric-label">Max Undercut</span>
+          <span class="bo-metric-val bo-metric-max">-</span>
         </div>
-        <div class="bo-stage-tag ${this.currentStageIndex === 0 ? "bo-stage-tag--ref" : ""}">
-          ${this.currentStageIndex === 0 ? "★ Stage 1 (Reference Model)" : `Transitional Model (Stage ${this.currentStageIndex + 1})`}
+        <div class="bo-metric" title="Average retention depth across blocked areas">
+          <span class="bo-metric-label">Avg Retention</span>
+          <span class="bo-metric-val bo-metric-avg">-</span>
+        </div>
+        <div class="bo-metric" title="Total digital wax blockout area">
+          <span class="bo-metric-label">Blockout Area</span>
+          <span class="bo-metric-val bo-metric-area">-</span>
         </div>
       </div>
 
@@ -701,87 +706,72 @@ export class BlockoutStudio {
           </div>
         </div>
       </div>
-    `;
 
-    // 2. CAD Studio Bottom Dock (Utilising empty bottom row)
-    const totalStages = this.manifest.treatmentStages.length || 1;
-    const dock = document.createElement("div");
-    dock.className = "bo-bottom-dock";
-    this.dockEl = dock;
-
-    dock.innerHTML = `
-      <!-- Left: Quick Visual Overlays -->
-      <div class="bo-dock-overlays">
-        <button type="button" class="bo-dock-pill bo-dock-pill--wax ${this.showWaxOverlay ? "bo-dock-pill--active" : ""}" title="Toggle Red Digital Wax 3D Layer">
-          <span class="bo-dock-pill-dot bo-dock-pill-dot--red"></span>
-          <span>Red Wax</span>
-        </button>
-        <button type="button" class="bo-dock-pill bo-dock-pill--heatmap ${this.showHeatmap ? "bo-dock-pill--active" : ""}" title="Toggle Clinical Undercut Heatmap">
-          <span class="bo-dock-pill-dot bo-dock-pill-dot--heat"></span>
-          <span>Survey Heatmap</span>
-        </button>
-      </div>
-
-      <div class="bo-dock-divider"></div>
-
-      <!-- Center: Stage Stepper & Reference Tag -->
-      <div class="bo-dock-timeline bo-dock-stepper">
-        <button type="button" class="bo-dock-step-btn bo-dock-step-prev" title="Previous stage" ${this.currentStageIndex === 0 ? "disabled" : ""}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="15 18 9 12 15 6"></polyline>
-          </svg>
-        </button>
-        <div class="bo-dock-stage-info">
-          <span class="bo-dock-stage-number">Stage ${this.currentStageIndex + 1}</span>
-          <span class="bo-dock-stage-total">/ ${totalStages}</span>
-        </div>
-        <input type="range" class="bo-dock-slider" min="0" max="${totalStages - 1}" step="1" value="${this.currentStageIndex}" title="Scrub through treatment stages">
-        <button type="button" class="bo-dock-step-btn bo-dock-step-next" title="Next stage" ${this.currentStageIndex >= totalStages - 1 ? "disabled" : ""}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="9 18 15 12 9 6"></polyline>
-          </svg>
-        </button>
-        <div class="bo-stage-tag ${this.currentStageIndex === 0 ? "bo-stage-tag--ref" : ""}">
-          ${this.currentStageIndex === 0 ? "★ Reference Model" : `Transitional (Stage ${this.currentStageIndex + 1})`}
-        </div>
-      </div>
-
-      <div class="bo-dock-divider"></div>
-
-      <!-- Live Undercut Retention Metrics -->
-      <div class="bo-dock-metrics">
-        <div class="bo-dock-metric" title="Maximum detected undercut depth">
-          <span class="bo-dock-dot bo-dock-dot--amber"></span>
-          <span class="bo-dock-metric-label">Max Undercut</span>
-          <span class="bo-dock-metric-val bo-metric-max">-</span>
-        </div>
-        <div class="bo-dock-metric" title="Average retention depth across blocked areas">
-          <span class="bo-dock-dot bo-dock-dot--cyan"></span>
-          <span class="bo-dock-metric-label">Avg Retention</span>
-          <span class="bo-dock-metric-val bo-metric-avg">-</span>
-        </div>
-        <div class="bo-dock-metric" title="Total surface area covered by digital wax">
-          <span class="bo-dock-dot bo-dock-dot--gold"></span>
-          <span class="bo-dock-metric-label">Blockout Area</span>
-          <span class="bo-dock-metric-val bo-metric-area">-</span>
-        </div>
-      </div>
-
-      <div class="bo-dock-divider"></div>
-
-      <!-- Master Action CTA & Batch Propagation -->
-      <div class="bo-dock-cta-wrap">
+      <!-- Master Action CTA Footer (Pinned to Side Panel) -->
+      <div class="bo-action-footer">
         <div class="bo-propagate-progress" hidden>
           <div class="bo-progress-label">Processing transitional models...</div>
           <div class="bo-progress-bar-bg">
             <div class="bo-progress-bar-fill" style="width: 0%"></div>
           </div>
         </div>
-        <button type="button" class="bo-btn-propagate" title="Approve current protocol and apply to all transitional stages">
+        <button type="button" class="bo-btn-propagate" title="Approve reference protocol and apply across all transitional stages">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
           </svg>
           <span>Approve Protocol &amp; Apply to All Stages</span>
+        </button>
+      </div>
+    `;
+
+    // 2. CAD Studio Floating Center Dock (Compact & purpose-built)
+    const totalStages = this.manifest.treatmentStages.length || 1;
+    const dock = document.createElement("div");
+    dock.className = "bo-bottom-dock";
+    this.dockEl = dock;
+
+    dock.innerHTML = `
+      <!-- Overlays (Red Wax & Heatmap) -->
+      <div class="bo-dock-group bo-dock-overlays">
+        <button type="button" class="bo-dock-pill bo-dock-pill--wax ${this.showWaxOverlay ? "bo-dock-pill--active" : ""}" title="Toggle Red Digital Wax 3D Layer">
+          <span class="bo-dock-pill-dot bo-dock-pill-dot--red"></span>
+          <span>Wax</span>
+        </button>
+        <button type="button" class="bo-dock-pill bo-dock-pill--heatmap ${this.showHeatmap ? "bo-dock-pill--active" : ""}" title="Toggle Clinical Undercut Heatmap">
+          <span class="bo-dock-pill-dot bo-dock-pill-dot--heat"></span>
+          <span>Heatmap</span>
+        </button>
+      </div>
+
+      <div class="bo-dock-divider"></div>
+
+      <!-- Stage Timeline Stepper & Scrubber -->
+      <div class="bo-dock-group bo-dock-timeline bo-dock-stepper">
+        <button type="button" class="bo-dock-step-btn bo-dock-step-prev" title="Previous stage" ${this.currentStageIndex === 0 ? "disabled" : ""}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+        </button>
+        <input type="range" class="bo-dock-slider" min="0" max="${totalStages - 1}" step="1" value="${this.currentStageIndex}" title="Scrub through treatment stages">
+        <button type="button" class="bo-dock-step-btn bo-dock-step-next" title="Next stage" ${this.currentStageIndex >= totalStages - 1 ? "disabled" : ""}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </button>
+        <span class="bo-dock-stage-badge ${this.currentStageIndex === 0 ? "bo-dock-stage-badge--ref" : ""}">
+          ${this.currentStageIndex === 0 ? "★ Ref" : `Stage ${this.currentStageIndex + 1}/${totalStages}`}
+        </span>
+      </div>
+
+      <div class="bo-dock-divider"></div>
+
+      <!-- Camera Reset -->
+      <div class="bo-dock-group">
+        <button type="button" class="bo-dock-icon-btn bo-dock-btn-reset" title="Reset frontal camera view">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+            <path d="M3 3v5h5"></path>
+          </svg>
         </button>
       </div>
     `;
@@ -1042,6 +1032,11 @@ export class BlockoutStudio {
       }
     });
 
+    this.dockEl.querySelector(".bo-dock-btn-reset")?.addEventListener("click", () => {
+      this.viewport.setView("top");
+      this.viewport.fitAll();
+    });
+
     this.dockEl.querySelector(".bo-btn-propagate")?.addEventListener("click", () => {
       this.propagateToAllStages();
     });
@@ -1150,9 +1145,15 @@ export class BlockoutStudio {
 
     // Update dock stepper indicator, slider and button disabled states
     if (this.dockEl) {
-      const stageNumEl = this.dockEl.querySelector(".bo-dock-stage-number");
-      if (stageNumEl) {
-        stageNumEl.textContent = `Stage ${this.currentStageIndex + 1}`;
+      const stageBadgeEl = this.dockEl.querySelector(".bo-dock-stage-badge");
+      if (stageBadgeEl) {
+        if (this.currentStageIndex === 0) {
+          stageBadgeEl.className = "bo-dock-stage-badge bo-dock-stage-badge--ref";
+          stageBadgeEl.textContent = "★ Ref";
+        } else {
+          stageBadgeEl.className = "bo-dock-stage-badge";
+          stageBadgeEl.textContent = `Stage ${this.currentStageIndex + 1}/${totalStages}`;
+        }
       }
       const prevBtn = this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-prev");
       const nextBtn = this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-next");
