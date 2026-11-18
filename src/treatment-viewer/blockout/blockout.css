@@ -29,6 +29,62 @@
   font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   color: var(--tv-text);
   animation: boFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease, visibility 0.28s ease;
+}
+
+.bo-studio-panel--minimized {
+  transform: translateX(calc(100% + 32px)) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden;
+}
+
+/* Floating Restore Pill (when panel is minimized) */
+.bo-expand-pill {
+  position: absolute;
+  top: 70px;
+  right: 18px;
+  z-index: 55;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--tv-surface-glass);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--tv-border-gold-subtle);
+  border-radius: 9999px;
+  color: var(--tv-gold);
+  font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: var(--tv-shadow-md), 0 0 16px var(--tv-gold-light);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: boPillSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.bo-expand-pill--visible {
+  display: inline-flex;
+}
+
+.bo-expand-pill:hover {
+  background: var(--tv-surface-hover);
+  border-color: var(--tv-gold);
+  color: var(--tv-gold);
+  transform: translateX(-3px);
+  box-shadow: var(--tv-shadow-lg), 0 0 20px var(--tv-gold-glow);
+}
+
+@keyframes boPillSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 @keyframes boFadeIn {
@@ -79,6 +135,15 @@
   color: var(--tv-text-muted);
 }
 
+.bo-panel-mode-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tv-gold);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .bo-badge {
   display: inline-flex;
   align-items: center;
@@ -102,6 +167,7 @@
   letter-spacing: -0.01em;
 }
 
+.bo-btn-minimize,
 .bo-btn-exit {
   background: none;
   border: none;
@@ -115,6 +181,7 @@
   transition: all 0.15s ease;
 }
 
+.bo-btn-minimize:hover,
 .bo-btn-exit:hover {
   background: var(--tv-surface-hover);
   color: var(--tv-text);
@@ -803,6 +870,130 @@
   padding: 7px 14px;
   box-shadow: var(--tv-shadow-md), 0 4px 16px rgba(0, 0, 0, 0.25);
   min-width: 230px;
+}
+
+/* ── Dock Quick Overlays & Stage Slider ─────────────────────────────────── */
+.bo-dock-overlays {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bo-dock-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 9999px;
+  border: 1px solid var(--tv-border-subtle);
+  background: var(--tv-surface-0);
+  color: var(--tv-text-sub);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.bo-dock-pill:hover {
+  border-color: var(--tv-border);
+  color: var(--tv-text);
+  background: var(--tv-surface-hover);
+}
+
+.bo-dock-pill--active {
+  background: var(--tv-gold-light);
+  border-color: var(--tv-border-gold-subtle);
+  color: var(--tv-gold);
+  font-weight: 700;
+}
+
+.bo-dock-pill-dot {
+  width: 6.5px;
+  height: 6.5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.bo-dock-pill-dot--red {
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
+}
+
+.bo-dock-pill-dot--heat {
+  background: linear-gradient(135deg, #06b6d4, #f59e0b, #ef4444);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+}
+
+.bo-dock-timeline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bo-dock-slider {
+  width: 84px;
+  height: 4px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--tv-surface-sunken);
+  border-radius: 9999px;
+  outline: none;
+  cursor: pointer;
+}
+
+.bo-dock-slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--tv-gold);
+  border: 2px solid var(--tv-surface-0);
+  box-shadow: 0 0 6px var(--tv-gold-glow);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.bo-dock-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+/* ── Top Bar Workspace Tabs ──────────────────────────────────────────────── */
+.tv-cad-tabs-pill {
+  display: inline-flex;
+  align-items: center;
+  background: var(--tv-surface-sunken);
+  border: 1px solid var(--tv-border-subtle);
+  border-radius: 9999px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.tv-cad-tab-btn {
+  background: transparent;
+  border: none;
+  border-radius: 9999px;
+  padding: 5px 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--tv-text-sub);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.tv-cad-tab-btn:hover {
+  color: var(--tv-text);
+}
+
+.tv-cad-tab-btn--active {
+  background: var(--tv-surface-0);
+  color: var(--tv-gold);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  font-weight: 700;
 }
 
 /* Responsive Dock for Mobile / Tablets */

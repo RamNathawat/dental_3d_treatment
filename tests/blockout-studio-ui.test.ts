@@ -95,19 +95,23 @@ describe("Blockout Studio UI & Interaction", () => {
     expect(panel?.querySelector(".bo-title")?.textContent).toBe("Undercut & Blockout Studio");
     expect(panel?.querySelector(".bo-badge")).toBeNull();
 
+    // Check Minimize button & Restore pill
+    expect(panel?.querySelector(".bo-btn-minimize")).not.toBeNull();
+    const expandPill = container.querySelector(".bo-expand-pill");
+    expect(expandPill).not.toBeNull();
+
     // Check Bottom Dock
     const dock = container.querySelector(".bo-bottom-dock");
     expect(dock).not.toBeNull();
+    expect(dock?.querySelector(".bo-dock-overlays")).not.toBeNull();
+    expect(dock?.querySelector(".bo-dock-timeline")).not.toBeNull();
+    expect(dock?.querySelector(".bo-dock-slider")).not.toBeNull();
     expect(dock?.querySelector(".bo-metric-max")).not.toBeNull();
     expect(dock?.querySelector(".bo-btn-propagate")).not.toBeNull();
 
     // Check Reference Stage Tag
     const stageTag = panel?.querySelector(".bo-stage-tag");
     expect(stageTag?.textContent).toContain("Stage 1 (Reference Model)");
-
-    // Check Navigation Tabs
-    const tabs = panel?.querySelectorAll(".bo-tab");
-    expect(tabs?.length).toBe(3);
 
     // Check FDI Tooth Chart
     const toothBtns = panel?.querySelectorAll(".bo-tooth-btn");
@@ -116,17 +120,21 @@ describe("Blockout Studio UI & Interaction", () => {
     studio.unmount();
     expect(container.querySelector(".bo-studio-panel")).toBeNull();
     expect(container.querySelector(".bo-bottom-dock")).toBeNull();
+    expect(container.querySelector(".bo-expand-pill")).toBeNull();
   });
 
   it("switches tabs between Blockout, Wax Carver, and Print Prep", () => {
+    let activeTabReported: string | null = null;
     const container = document.createElement("div");
     const studio = new BlockoutStudio({
       viewport: mockViewport,
       manifest,
+      onTabChange: (tab) => {
+        activeTabReported = tab;
+      },
     });
     studio.mount(container);
 
-    const tabs = container.querySelectorAll<HTMLButtonElement>(".bo-tab");
     const paneBlockout = container.querySelector(".bo-pane-blockout");
     const paneSculpt = container.querySelector(".bo-pane-sculpt");
     const panePrep = container.querySelector(".bo-pane-prep");
@@ -135,13 +143,84 @@ describe("Blockout Studio UI & Interaction", () => {
     expect(paneSculpt?.classList.contains("bo-pane--hidden")).toBe(true);
 
     // Switch to Wax Carver (Sculpt) Tab
-    tabs[1]?.click();
+    studio.setActiveTab("sculpt");
+    expect(activeTabReported).toBe("sculpt");
+    expect(studio.getActiveTab()).toBe("sculpt");
     expect(paneBlockout?.classList.contains("bo-pane--hidden")).toBe(true);
     expect(paneSculpt?.classList.contains("bo-pane--hidden")).toBe(false);
 
     // Switch to Print Prep Tab
-    tabs[2]?.click();
+    studio.setActiveTab("prep");
+    expect(activeTabReported).toBe("prep");
+    expect(studio.getActiveTab()).toBe("prep");
     expect(panePrep?.classList.contains("bo-pane--hidden")).toBe(false);
+
+    studio.unmount();
+  });
+
+  it("minimizes and restores panel with minimize button and restore pill", () => {
+    const container = document.createElement("div");
+    const studio = new BlockoutStudio({
+      viewport: mockViewport,
+      manifest,
+    });
+    studio.mount(container);
+
+    const panel = container.querySelector(".bo-studio-panel");
+    const expandPill = container.querySelector(".bo-expand-pill");
+    const btnMinimize = container.querySelector<HTMLButtonElement>(".bo-btn-minimize");
+
+    expect(studio.isPanelMinimized()).toBe(false);
+    expect(panel?.classList.contains("bo-studio-panel--minimized")).toBe(false);
+
+    // Click minimize button
+    btnMinimize?.click();
+    expect(studio.isPanelMinimized()).toBe(true);
+    expect(panel?.classList.contains("bo-studio-panel--minimized")).toBe(true);
+    expect(expandPill?.classList.contains("bo-expand-pill--visible")).toBe(true);
+
+    // Clicking restore pill expands the panel
+    (expandPill as HTMLButtonElement)?.click();
+    expect(studio.isPanelMinimized()).toBe(false);
+    expect(panel?.classList.contains("bo-studio-panel--minimized")).toBe(false);
+    expect(expandPill?.classList.contains("bo-expand-pill--visible")).toBe(false);
+
+    // Switching active tab also automatically unminimizes
+    studio.setMinimized(true);
+    expect(studio.isPanelMinimized()).toBe(true);
+    studio.setActiveTab("sculpt");
+    expect(studio.isPanelMinimized()).toBe(false);
+
+    studio.unmount();
+  });
+
+  it("handles bottom dock quick overlay toggles and stage slider", () => {
+    const container = document.createElement("div");
+    const studio = new BlockoutStudio({
+      viewport: mockViewport,
+      manifest,
+    });
+    studio.mount(container);
+
+    const dock = container.querySelector(".bo-bottom-dock");
+    const waxPill = dock?.querySelector<HTMLButtonElement>(".bo-dock-pill--wax");
+    const heatPill = dock?.querySelector<HTMLButtonElement>(".bo-dock-pill--heatmap");
+    const slider = dock?.querySelector<HTMLInputElement>(".bo-dock-slider");
+
+    expect(waxPill?.classList.contains("bo-dock-pill--active")).toBe(true);
+    expect(heatPill?.classList.contains("bo-dock-pill--active")).toBe(false);
+
+    // Toggle wax
+    waxPill?.click();
+    expect(waxPill?.classList.contains("bo-dock-pill--active")).toBe(false);
+
+    // Toggle heatmap
+    heatPill?.click();
+    expect(heatPill?.classList.contains("bo-dock-pill--active")).toBe(true);
+
+    // Scrub slider
+    studio.setStageIndex(1);
+    expect(slider?.value).toBe("1");
 
     studio.unmount();
   });

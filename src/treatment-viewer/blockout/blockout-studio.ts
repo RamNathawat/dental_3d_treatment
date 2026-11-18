@@ -47,6 +47,7 @@ export interface BlockoutStudioOptions {
   onExit?: () => void;
   onStageChange?: (stageIndex: number) => void;
   onArchChange?: (arch: "upper" | "lower") => void;
+  onTabChange?: (tab: "blockout" | "sculpt" | "prep") => void;
 }
 
 export class BlockoutStudio {
@@ -55,6 +56,8 @@ export class BlockoutStudio {
   private container: HTMLElement | null = null;
   private panelEl: HTMLElement | null = null;
   private dockEl: HTMLElement | null = null;
+  private expandPillEl: HTMLElement | null = null;
+  private isMinimized = false;
 
   private isUpper = true;
   private currentStageIndex = 0;
@@ -97,6 +100,7 @@ export class BlockoutStudio {
   private onExitCallback?: () => void;
   private onStageChangeCallback?: (stageIndex: number) => void;
   private onArchChangeCallback?: (arch: "upper" | "lower") => void;
+  private onTabChangeCallback?: (tab: "blockout" | "sculpt" | "prep") => void;
 
   constructor(options: BlockoutStudioOptions) {
     this.viewport = options.viewport;
@@ -106,6 +110,7 @@ export class BlockoutStudio {
     this.onExitCallback = options.onExit;
     this.onStageChangeCallback = options.onStageChange;
     this.onArchChangeCallback = options.onArchChange;
+    this.onTabChangeCallback = options.onTabChange;
 
     this.threeScene = this.viewport.getThreeScene ? this.viewport.getThreeScene() : null;
     this.threeCamera = this.viewport.getThreeCamera ? this.viewport.getThreeCamera() : null;
@@ -156,8 +161,67 @@ export class BlockoutStudio {
       this.dockEl.parentNode.removeChild(this.dockEl);
       this.dockEl = null;
     }
+    if (this.expandPillEl && this.expandPillEl.parentNode) {
+      this.expandPillEl.parentNode.removeChild(this.expandPillEl);
+      this.expandPillEl = null;
+    }
     // Restore base tooth vertex colors
     this.restoreBaseColors();
+  }
+
+  public exit(): void {
+    this.unmount();
+    if (this.onExitCallback) {
+      this.onExitCallback();
+    }
+  }
+
+  public setMinimized(minimized: boolean): void {
+    this.isMinimized = minimized;
+    this.panelEl?.classList.toggle("bo-studio-panel--minimized", minimized);
+    if (this.expandPillEl) {
+      this.expandPillEl.classList.toggle("bo-expand-pill--visible", minimized);
+    }
+  }
+
+  public toggleMinimized(): boolean {
+    this.setMinimized(!this.isMinimized);
+    return this.isMinimized;
+  }
+
+  public isPanelMinimized(): boolean {
+    return this.isMinimized;
+  }
+
+  public setActiveTab(tab: "blockout" | "sculpt" | "prep"): void {
+    this.activeTab = tab;
+    if (this.isMinimized) {
+      this.setMinimized(false);
+    }
+    this.updateActiveTabPanes();
+    if (this.onTabChangeCallback) {
+      this.onTabChangeCallback(tab);
+    }
+  }
+
+  public getActiveTab(): "blockout" | "sculpt" | "prep" {
+    return this.activeTab;
+  }
+
+  public toggleWaxOverlay(show?: boolean): boolean {
+    this.showWaxOverlay = typeof show === "boolean" ? show : !this.showWaxOverlay;
+    if (this.waxMesh) {
+      this.waxMesh.visible = this.showWaxOverlay;
+    }
+    this.syncOverlayCheckboxes();
+    return this.showWaxOverlay;
+  }
+
+  public toggleHeatmap(show?: boolean): boolean {
+    this.showHeatmap = typeof show === "boolean" ? show : !this.showHeatmap;
+    this.loadCurrentStageBlockout();
+    this.syncOverlayCheckboxes();
+    return this.showHeatmap;
   }
 
   public getArch(): "upper" | "lower" {
@@ -458,9 +522,9 @@ export class BlockoutStudio {
       <div class="bo-header">
         <div class="bo-title-group">
           <h2 class="bo-title">Undercut &amp; Blockout Studio</h2>
-          <span class="bo-subtitle">Clinical CAD Wax Blockout &amp; Survey</span>
+          <span class="bo-panel-mode-label">Step 1: Undercut Survey &amp; Blockout</span>
         </div>
-        <button type="button" class="bo-btn-exit" title="Exit Blockout Studio and return to Treatment Viewer">
+        <button type="button" class="bo-btn-minimize" title="Minimize Panel (inspect 3D model)">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -477,13 +541,6 @@ export class BlockoutStudio {
         <div class="bo-stage-tag ${this.currentStageIndex === 0 ? "bo-stage-tag--ref" : ""}">
           ${this.currentStageIndex === 0 ? "★ Stage 1 (Reference Model)" : `Transitional Model (Stage ${this.currentStageIndex + 1})`}
         </div>
-      </div>
-
-      <!-- Navigation Tabs -->
-      <div class="bo-tabs">
-        <button type="button" class="bo-tab ${this.activeTab === "blockout" ? "bo-tab--active" : ""}" data-tab="blockout">1. Blockout</button>
-        <button type="button" class="bo-tab ${this.activeTab === "sculpt" ? "bo-tab--active" : ""}" data-tab="sculpt">2. Wax Carver</button>
-        <button type="button" class="bo-tab ${this.activeTab === "prep" ? "bo-tab--active" : ""}" data-tab="prep">3. Print Prep</button>
       </div>
 
       <!-- Tab Content Area -->
@@ -653,8 +710,22 @@ export class BlockoutStudio {
     this.dockEl = dock;
 
     dock.innerHTML = `
-      <!-- Stage Stepper & Reference Tag -->
-      <div class="bo-dock-stepper">
+      <!-- Left: Quick Visual Overlays -->
+      <div class="bo-dock-overlays">
+        <button type="button" class="bo-dock-pill bo-dock-pill--wax ${this.showWaxOverlay ? "bo-dock-pill--active" : ""}" title="Toggle Red Digital Wax 3D Layer">
+          <span class="bo-dock-pill-dot bo-dock-pill-dot--red"></span>
+          <span>Red Wax</span>
+        </button>
+        <button type="button" class="bo-dock-pill bo-dock-pill--heatmap ${this.showHeatmap ? "bo-dock-pill--active" : ""}" title="Toggle Clinical Undercut Heatmap">
+          <span class="bo-dock-pill-dot bo-dock-pill-dot--heat"></span>
+          <span>Survey Heatmap</span>
+        </button>
+      </div>
+
+      <div class="bo-dock-divider"></div>
+
+      <!-- Center: Stage Stepper & Reference Tag -->
+      <div class="bo-dock-timeline bo-dock-stepper">
         <button type="button" class="bo-dock-step-btn bo-dock-step-prev" title="Previous stage" ${this.currentStageIndex === 0 ? "disabled" : ""}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="15 18 9 12 15 6"></polyline>
@@ -664,13 +735,14 @@ export class BlockoutStudio {
           <span class="bo-dock-stage-number">Stage ${this.currentStageIndex + 1}</span>
           <span class="bo-dock-stage-total">/ ${totalStages}</span>
         </div>
+        <input type="range" class="bo-dock-slider" min="0" max="${totalStages - 1}" step="1" value="${this.currentStageIndex}" title="Scrub through treatment stages">
         <button type="button" class="bo-dock-step-btn bo-dock-step-next" title="Next stage" ${this.currentStageIndex >= totalStages - 1 ? "disabled" : ""}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="9 18 15 12 9 6"></polyline>
           </svg>
         </button>
         <div class="bo-stage-tag ${this.currentStageIndex === 0 ? "bo-stage-tag--ref" : ""}">
-          ${this.currentStageIndex === 0 ? "★ Reference Model" : `Transitional Model (Stage ${this.currentStageIndex + 1})`}
+          ${this.currentStageIndex === 0 ? "★ Reference Model" : `Transitional (Stage ${this.currentStageIndex + 1})`}
         </div>
       </div>
 
@@ -714,8 +786,29 @@ export class BlockoutStudio {
       </div>
     `;
 
+    // 3. Floating Restore Pill (When panel is minimized)
+    const expandPill = document.createElement("button");
+    expandPill.type = "button";
+    expandPill.className = "bo-expand-pill";
+    expandPill.title = "Restore CAD Tools Panel";
+    expandPill.innerHTML = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+      <span>CAD Tools</span>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <polyline points="15 18 9 12 15 6"></polyline>
+      </svg>
+    `;
+    expandPill.addEventListener("click", () => {
+      this.setMinimized(false);
+    });
+    this.expandPillEl = expandPill;
+
     this.container.appendChild(panel);
     this.container.appendChild(dock);
+    this.container.appendChild(expandPill);
     this.bindPanelEvents();
     this.bindDockEvents();
     this.renderToothChart();
@@ -760,10 +853,9 @@ export class BlockoutStudio {
   private bindPanelEvents(): void {
     if (!this.panelEl) return;
 
-    // Exit Studio
-    this.panelEl.querySelector(".bo-btn-exit")?.addEventListener("click", () => {
-      this.unmount();
-      if (this.onExitCallback) this.onExitCallback();
+    // Minimize Panel (Does not exit studio to 3D progression viewer)
+    this.panelEl.querySelector(".bo-btn-minimize")?.addEventListener("click", () => {
+      this.setMinimized(true);
     });
 
     // Arch Selector
@@ -774,29 +866,23 @@ export class BlockoutStudio {
       });
     });
 
-    // Tabs
+    // Internal Tabs if present
     this.panelEl.querySelectorAll<HTMLButtonElement>(".bo-tab").forEach((tab) => {
       tab.addEventListener("click", () => {
-        this.activeTab = tab.dataset["tab"] as any;
-        this.panelEl?.querySelectorAll(".bo-tab").forEach((t) => t.classList.remove("bo-tab--active"));
-        tab.classList.add("bo-tab--active");
-
-        this.panelEl?.querySelectorAll(".bo-pane").forEach((p) => p.classList.add("bo-pane--hidden"));
-        this.panelEl?.querySelector(`.bo-pane-${this.activeTab}`)?.classList.remove("bo-pane--hidden");
+        const t = tab.dataset["tab"] as "blockout" | "sculpt" | "prep";
+        if (t) this.setActiveTab(t);
       });
     });
 
     // Overlays
     const chkWax = this.panelEl.querySelector<HTMLInputElement>(".bo-chk-wax");
     chkWax?.addEventListener("change", () => {
-      this.showWaxOverlay = chkWax.checked;
-      if (this.waxMesh) this.waxMesh.visible = this.showWaxOverlay;
+      this.toggleWaxOverlay(chkWax.checked);
     });
 
     const chkHeatmap = this.panelEl.querySelector<HTMLInputElement>(".bo-chk-heatmap");
     chkHeatmap?.addEventListener("change", () => {
-      this.showHeatmap = chkHeatmap.checked;
-      this.loadCurrentStageBlockout();
+      this.toggleHeatmap(chkHeatmap.checked);
     });
 
     // Component 1: Interproximal
@@ -923,8 +1009,18 @@ export class BlockoutStudio {
   private bindDockEvents(): void {
     if (!this.dockEl) return;
 
+    // Quick overlay toggles
+    this.dockEl.querySelector(".bo-dock-pill--wax")?.addEventListener("click", () => {
+      this.toggleWaxOverlay();
+    });
+
+    this.dockEl.querySelector(".bo-dock-pill--heatmap")?.addEventListener("click", () => {
+      this.toggleHeatmap();
+    });
+
     const prevBtn = this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-prev");
     const nextBtn = this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-next");
+    const slider = this.dockEl.querySelector<HTMLInputElement>(".bo-dock-slider");
 
     prevBtn?.addEventListener("click", () => {
       if (this.currentStageIndex > 0) {
@@ -939,9 +1035,55 @@ export class BlockoutStudio {
       }
     });
 
+    slider?.addEventListener("input", () => {
+      const target = parseInt(slider.value, 10);
+      if (!isNaN(target)) {
+        this.setStageIndex(target);
+      }
+    });
+
     this.dockEl.querySelector(".bo-btn-propagate")?.addEventListener("click", () => {
       this.propagateToAllStages();
     });
+  }
+
+  private updateActiveTabPanes(): void {
+    if (!this.panelEl) return;
+    const paneBlockout = this.panelEl.querySelector(".bo-pane-blockout");
+    const paneSculpt = this.panelEl.querySelector(".bo-pane-sculpt");
+    const panePrep = this.panelEl.querySelector(".bo-pane-prep");
+    const modeLabel = this.panelEl.querySelector(".bo-panel-mode-label");
+
+    paneBlockout?.classList.toggle("bo-pane--hidden", this.activeTab !== "blockout");
+    paneSculpt?.classList.toggle("bo-pane--hidden", this.activeTab !== "sculpt");
+    panePrep?.classList.toggle("bo-pane--hidden", this.activeTab !== "prep");
+
+    if (modeLabel) {
+      if (this.activeTab === "blockout") modeLabel.textContent = "Step 1: Undercut Survey & Wax Blockout";
+      else if (this.activeTab === "sculpt") modeLabel.textContent = "Step 2: Digital Wax Carver (Hot Spatula)";
+      else if (this.activeTab === "prep") modeLabel.textContent = "Step 3: Print Prep, Drainage & STL Export";
+    }
+
+    this.panelEl.querySelectorAll<HTMLButtonElement>(".bo-tab").forEach((btn) => {
+      btn.classList.toggle("bo-tab--active", btn.dataset["tab"] === this.activeTab);
+    });
+  }
+
+  private syncOverlayCheckboxes(): void {
+    const waxChks = this.container?.querySelectorAll<HTMLInputElement>(".bo-chk-wax");
+    waxChks?.forEach((chk) => {
+      chk.checked = this.showWaxOverlay;
+    });
+    const heatChks = this.container?.querySelectorAll<HTMLInputElement>(".bo-chk-heatmap");
+    heatChks?.forEach((chk) => {
+      chk.checked = this.showHeatmap;
+    });
+
+    const dockWax = this.dockEl?.querySelector<HTMLButtonElement>(".bo-dock-pill--wax");
+    dockWax?.classList.toggle("bo-dock-pill--active", this.showWaxOverlay);
+
+    const dockHeat = this.dockEl?.querySelector<HTMLButtonElement>(".bo-dock-pill--heatmap");
+    dockHeat?.classList.toggle("bo-dock-pill--active", this.showHeatmap);
   }
 
   private renderHolesList(): void {
@@ -1006,7 +1148,7 @@ export class BlockoutStudio {
       }
     });
 
-    // Update dock stepper indicator and button disabled states
+    // Update dock stepper indicator, slider and button disabled states
     if (this.dockEl) {
       const stageNumEl = this.dockEl.querySelector(".bo-dock-stage-number");
       if (stageNumEl) {
@@ -1016,6 +1158,11 @@ export class BlockoutStudio {
       const nextBtn = this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-next");
       if (prevBtn) prevBtn.disabled = this.currentStageIndex <= 0;
       if (nextBtn) nextBtn.disabled = this.currentStageIndex >= totalStages - 1;
+
+      const slider = this.dockEl.querySelector<HTMLInputElement>(".bo-dock-slider");
+      if (slider) {
+        slider.value = String(this.currentStageIndex);
+      }
     }
 
     // Update arch pill buttons
@@ -1024,6 +1171,8 @@ export class BlockoutStudio {
       btn.classList.toggle("bo-pill-btn--active", arch === this.isUpper);
     });
 
+    this.syncOverlayCheckboxes();
+    this.updateActiveTabPanes();
     this.renderToothChart();
   }
 }

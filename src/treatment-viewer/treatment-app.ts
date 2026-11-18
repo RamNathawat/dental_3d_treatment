@@ -541,6 +541,48 @@ export function createTreatmentApp(
     cadArchLowerBtn,
   ]);
 
+  const cadTabBlockoutBtn = document.createElement("button");
+  cadTabBlockoutBtn.type = "button";
+  cadTabBlockoutBtn.className = "tv-cad-tab-btn tv-cad-tab-btn--active";
+  cadTabBlockoutBtn.textContent = "1. Blockout";
+  cadTabBlockoutBtn.title = "Step 1: Undercut Survey & Blockout Parameters";
+  cadTabBlockoutBtn.addEventListener("click", () => {
+    blockoutStudioInstance?.setActiveTab("blockout");
+    syncCadWorkspaceTabs("blockout");
+  });
+
+  const cadTabSculptBtn = document.createElement("button");
+  cadTabSculptBtn.type = "button";
+  cadTabSculptBtn.className = "tv-cad-tab-btn";
+  cadTabSculptBtn.textContent = "2. Wax Carver";
+  cadTabSculptBtn.title = "Step 2: 3D Digital Wax Sculptor & Carver";
+  cadTabSculptBtn.addEventListener("click", () => {
+    blockoutStudioInstance?.setActiveTab("sculpt");
+    syncCadWorkspaceTabs("sculpt");
+  });
+
+  const cadTabPrepBtn = document.createElement("button");
+  cadTabPrepBtn.type = "button";
+  cadTabPrepBtn.className = "tv-cad-tab-btn";
+  cadTabPrepBtn.textContent = "3. Print Prep";
+  cadTabPrepBtn.title = "Step 3: Resin Shrinkage, Drainage Holes & STL Export";
+  cadTabPrepBtn.addEventListener("click", () => {
+    blockoutStudioInstance?.setActiveTab("prep");
+    syncCadWorkspaceTabs("prep");
+  });
+
+  const cadWorkspaceTabsEl = div("tv-cad-tabs-pill", [
+    cadTabBlockoutBtn,
+    cadTabSculptBtn,
+    cadTabPrepBtn,
+  ]);
+
+  function syncCadWorkspaceTabs(tab: "blockout" | "sculpt" | "prep"): void {
+    cadTabBlockoutBtn.classList.toggle("tv-cad-tab-btn--active", tab === "blockout");
+    cadTabSculptBtn.classList.toggle("tv-cad-tab-btn--active", tab === "sculpt");
+    cadTabPrepBtn.classList.toggle("tv-cad-tab-btn--active", tab === "prep");
+  }
+
   const cadCamFrontBtn = makeBtn("Front", () => viewport.setView("top"), "tv-cad-tool-btn");
   cadCamFrontBtn.title = "Frontal smile camera view";
   const cadCamOcclusalBtn = makeBtn("Occlusal", () => viewport.setView("front"), "tv-cad-tool-btn");
@@ -572,6 +614,7 @@ export function createTreatmentApp(
     ]),
     div("tv-cad-top-bar__center", [
       cadArchPillEl,
+      cadWorkspaceTabsEl,
     ]),
     div("tv-cad-top-bar__right", [
       cadCamFrontBtn,
@@ -641,6 +684,7 @@ export function createTreatmentApp(
       overlayPanelEl.hidden = true;
 
       syncCadTopBar(initialArch, Math.max(0, state.currentIndex));
+      syncCadWorkspaceTabs("blockout");
 
       blockoutStudioInstance = new BlockoutStudio({
         viewport,
@@ -649,6 +693,9 @@ export function createTreatmentApp(
         initialStageIndex: Math.max(0, state.currentIndex),
         onExit: () => {
           toggleBlockoutStudio();
+        },
+        onTabChange: (tab) => {
+          syncCadWorkspaceTabs(tab);
         },
         onStageChange: (idx) => {
           void navigate(idx);
