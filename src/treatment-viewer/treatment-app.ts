@@ -635,13 +635,14 @@ export function createTreatmentApp(
   // ── Milestone 4: Automated Undercut & Blockout Studio ─────────────────────
   let blockoutStudioInstance: BlockoutStudio | null = null;
   let savedArchState: { upper: boolean; lower: boolean } | null = null;
+  let applyBlockoutStudioLayout: (active: boolean) => void = () => {};
 
   const toggleBlockoutStudio = () => {
     if (blockoutStudioInstance) {
       blockoutStudioInstance.unmount();
       blockoutStudioInstance = null;
       isBlockoutStudioActive = false;
-      appEl.classList.remove("tv-app--blockout-mode");
+      applyBlockoutStudioLayout(false);
       blockoutHeaderBtn.classList.remove("tv-btn--active");
       toothTooltipEl.hidden = true;
 
@@ -673,7 +674,7 @@ export function createTreatmentApp(
       viewport.setView("top");
       viewport.fitAll();
 
-      appEl.classList.add("tv-app--blockout-mode");
+      applyBlockoutStudioLayout(true);
       blockoutHeaderBtn.classList.add("tv-btn--active");
       toothTooltipEl.hidden = true;
 
@@ -1280,15 +1281,17 @@ export function createTreatmentApp(
   toothTooltipEl.hidden = true;
 
   // Stage area (canvas + overlays)
+  const stageTopBarEl = div("tv-stage__top-bar", [
+    div("tv-stage__top-left", [toggleSidebarBtn]),
+    div("tv-stage__top-center", [archPillEl]),
+    div("tv-stage__top-right", [gridBtn, recenterBtn, themeToggleBtn]),
+  ]);
+
   const stageEl = div("tv-stage", [
     canvas,
     graphGridEl,
     iprSvgOverlay,
-    div("tv-stage__top-bar", [
-      div("tv-stage__top-left", [toggleSidebarBtn]),
-      div("tv-stage__top-center", [archPillEl]),
-      div("tv-stage__top-right", [gridBtn, recenterBtn, themeToggleBtn]),
-    ]),
+    stageTopBarEl,
     templateNoticeEl,
     contactsLegendEl,
     iprLegendEl,
@@ -1306,60 +1309,62 @@ export function createTreatmentApp(
     toothTooltipEl,
   ]);
 
+  const progressionHeaderEl = div("tv-header", [
+    div("tv-header__brand", [
+      div("tv-header__title-wrap", [
+        heading("3D Treatment Progression"),
+      ]),
+      div("tv-header__divider"),
+      div("tv-header__sub tv-header__patient-chip", [
+        span("tv-header__patient-dot", ""),
+        span("tv-header__patient-label", "Patient"),
+        span(
+          "tv-header__patient-name",
+          state.manifest.patientId
+            ? `${state.manifest.patientName ?? state.manifest.caseId} (#${state.manifest.patientId})`
+            : (state.manifest.patientName ?? state.manifest.caseId),
+        ),
+        ...((state.manifest.patientSex || state.manifest.patientAge != null)
+          ? [
+              span(
+                "tv-header__patient-demo",
+                [state.manifest.patientSex, state.manifest.patientAge != null ? `${state.manifest.patientAge}y` : null]
+                  .filter(Boolean)
+                  .join(" · "),
+              ),
+            ]
+          : []),
+        ...(state.manifest.isRefinement
+          ? [
+              span(
+                "tv-header__patient-demo tv-header__refinement-pill",
+                "✦ Refinement",
+              ),
+            ]
+          : []),
+        ...(state.manifest.clinicName
+          ? [
+              span(
+                "tv-header__patient-demo",
+                state.manifest.clinicName,
+              ),
+            ]
+          : []),
+      ]),
+    ]),
+    div("tv-header__actions", [
+      blockoutHeaderBtn,
+      notesHeaderBtn,
+      gridBtn,
+      recenterBtn,
+      themeToggleBtn,
+    ]),
+  ]);
+
   // App shell with clean unbranded header, sidebar, and stage
   const isMobileScreen = typeof window !== "undefined" && window.innerWidth <= 900;
   const appEl = div(isMobileScreen ? "tv-app" : "tv-app tv-app--sidebar-open", [
-    div("tv-header", [
-      div("tv-header__brand", [
-        div("tv-header__title-wrap", [
-          heading("3D Treatment Progression"),
-        ]),
-        div("tv-header__divider"),
-        div("tv-header__sub tv-header__patient-chip", [
-          span("tv-header__patient-dot", ""),
-          span("tv-header__patient-label", "Patient"),
-          span(
-            "tv-header__patient-name",
-            state.manifest.patientId
-              ? `${state.manifest.patientName ?? state.manifest.caseId} (#${state.manifest.patientId})`
-              : (state.manifest.patientName ?? state.manifest.caseId),
-          ),
-          ...((state.manifest.patientSex || state.manifest.patientAge != null)
-            ? [
-                span(
-                  "tv-header__patient-demo",
-                  [state.manifest.patientSex, state.manifest.patientAge != null ? `${state.manifest.patientAge}y` : null]
-                    .filter(Boolean)
-                    .join(" · "),
-                ),
-              ]
-            : []),
-          ...(state.manifest.isRefinement
-            ? [
-                span(
-                  "tv-header__patient-demo tv-header__refinement-pill",
-                  "✦ Refinement",
-                ),
-              ]
-            : []),
-          ...(state.manifest.clinicName
-            ? [
-                span(
-                  "tv-header__patient-demo",
-                  state.manifest.clinicName,
-                ),
-              ]
-            : []),
-        ]),
-      ]),
-      div("tv-header__actions", [
-        blockoutHeaderBtn,
-        notesHeaderBtn,
-        gridBtn,
-        recenterBtn,
-        themeToggleBtn,
-      ]),
-    ]),
+    progressionHeaderEl,
     cadTopBarEl,
     div("tv-main-container", [
       sidebarBackdrop,
@@ -1368,9 +1373,29 @@ export function createTreatmentApp(
     ]),
   ]);
 
-  if (isBlockoutStudioActive) {
-    appEl.classList.add("tv-app--blockout-mode");
+  applyBlockoutStudioLayout = (active: boolean): void => {
+    appEl.classList.toggle("tv-app--blockout-mode", active);
+    cadTopBarEl.hidden = !active;
+    cadTopBarEl.style.display = active ? "flex" : "none";
+    progressionHeaderEl.hidden = active;
+    progressionHeaderEl.style.display = active ? "none" : "";
+    sidebarEl.hidden = active;
+    sidebarEl.style.display = active ? "none" : "";
+    sidebarBackdrop.hidden = active;
+    sidebarBackdrop.style.display = active ? "none" : "";
+    bottomDockEl.hidden = active || isDockMinimized;
+    bottomDockEl.style.display = active ? "none" : (isDockMinimized ? "none" : "");
+    expandPillEl.hidden = active || !isDockMinimized;
+    expandPillEl.style.display = active ? "none" : (isDockMinimized ? "" : "none");
+    stageTopBarEl.hidden = active;
+    stageTopBarEl.style.display = active ? "none" : "";
+    cameraDockEl.hidden = active;
+    cameraDockEl.style.display = active ? "none" : "";
+    toothTooltipEl.hidden = true;
+    toothTooltipEl.style.display = active ? "none" : "";
   }
+
+  applyBlockoutStudioLayout(isBlockoutStudioActive);
 
   if (isDarkMode) {
     appEl.classList.add("tv-app--dark");

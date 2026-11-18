@@ -39,6 +39,11 @@ export default defineConfig({
         main: new URL("index.html", import.meta.url).pathname,
         treatment: new URL("treatment.html", import.meta.url).pathname,
       },
+      output: {
+        entryFileNames: "assets/[name].js",
+        chunkFileNames: "assets/[name].js",
+        assetFileNames: "assets/[name].[ext]",
+      },
     },
   },
 });
