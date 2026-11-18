@@ -191,9 +191,19 @@ export function generateBlockout(
     const dispVector = new Vector3();
 
     // ────────────────────────────────────────────────────────────────────────
+    // Clinical Boundary Exclusions:
+    // Base cut plane: flat mechanical mounting cut on clinical dental models (>16mm)
+    // where normals point vertically into the cut base (maxY for upper, minY for lower)
+    // ────────────────────────────────────────────────────────────────────────
+    const modelHeight = maxY - minY;
+    const isBaseCut = modelHeight > 16.0 && (isUpper
+      ? (vPos.y >= maxY - 1.8 && vNorm.y > 0.65)
+      : (vPos.y <= minY + 1.8 && vNorm.y < -0.65));
+
+    // ────────────────────────────────────────────────────────────────────────
     // Component 1: Interproximal Wax Blockout
     // ────────────────────────────────────────────────────────────────────────
-    if (protocol.interproximal.enabled) {
+    if (protocol.interproximal.enabled && !isBaseCut) {
       if (resolvedContacts.length > 0) {
         // Anatomical contact zone check: find nearest interdental contact
         let nearestContact: ResolvedContact | null = null;
@@ -259,7 +269,7 @@ export function generateBlockout(
     // ────────────────────────────────────────────────────────────────────────
     // Component 2: Gingival Line Blockout (Cervical Margin Relief)
     // ────────────────────────────────────────────────────────────────────────
-    if (protocol.gingival.enabled) {
+    if (protocol.gingival.enabled && !isBaseCut) {
       // Cervical line is around 4.8mm - 6.5mm from crown tip
       const isCervicalZone = distFromTip >= 4.5 && distFromTip <= 6.8;
       if (isCervicalZone) {
@@ -279,7 +289,7 @@ export function generateBlockout(
     // ────────────────────────────────────────────────────────────────────────
     // Component 3: Dentition Undercut Blockout
     // ────────────────────────────────────────────────────────────────────────
-    if (protocol.undercut.enabled) {
+    if (protocol.undercut.enabled && !isBaseCut) {
       // Check per-tooth override (doctor can disable blockout on specific teeth)
       const toothAllowed = protocol.undercut.perTooth[fdi] !== false;
       const depth = survey.depths[i] ?? 0;
@@ -384,7 +394,7 @@ function createWaxOverlayGeometry(
   const v2 = new Vector3();
 
   const addTriangle = (i0: number, i1: number, i2: number) => {
-    // Only include triangle if at least one vertex has actual wax displacement applied
+    // Include triangle if at least one vertex has actual wax displacement applied
     const modifiedCount = isModified[i0]! + isModified[i1]! + isModified[i2]!;
     if (modifiedCount === 0) return;
 

@@ -41,6 +41,7 @@ export class WaxSculptor {
   private camera: PerspectiveCamera;
   private domElement: HTMLElement;
   private targetMesh: Mesh | null = null;
+  private secondaryMesh: Mesh | null = null;
   private baseGeometry: BufferGeometry | null = null;
 
   // Active stage deltas and undo/redo stacks
@@ -92,6 +93,10 @@ export class WaxSculptor {
     if (mesh && !this.baseGeometry) {
       this.baseGeometry = mesh.geometry.clone();
     }
+  }
+
+  public setSecondaryMesh(mesh: Mesh | null): void {
+    this.secondaryMesh = mesh;
   }
 
   public setStageDeltas(stageId: string, deltas?: Map<number, [number, number, number]>): void {
@@ -171,17 +176,18 @@ export class WaxSculptor {
     this.onPointerDown = this.onPointerDown.bind(this);
     this.onPointerUp = this.onPointerUp.bind(this);
 
-    this.domElement.addEventListener("pointermove", this.onPointerMove, { passive: false });
-    this.domElement.addEventListener("pointerdown", this.onPointerDown, { passive: false });
-    window.addEventListener("pointerup", this.onPointerUp);
-    window.addEventListener("pointercancel", this.onPointerUp);
+    // Use capture phase so we can intercept events when in sculpt mode before orbit drag claims them
+    this.domElement.addEventListener("pointermove", this.onPointerMove, { capture: true, passive: false });
+    this.domElement.addEventListener("pointerdown", this.onPointerDown, { capture: true, passive: false });
+    window.addEventListener("pointerup", this.onPointerUp, { capture: true });
+    window.addEventListener("pointercancel", this.onPointerUp, { capture: true });
   }
 
   private unbindEvents(): void {
-    this.domElement.removeEventListener("pointermove", this.onPointerMove);
-    this.domElement.removeEventListener("pointerdown", this.onPointerDown);
-    window.removeEventListener("pointerup", this.onPointerUp);
-    window.removeEventListener("pointercancel", this.onPointerUp);
+    this.domElement.removeEventListener("pointermove", this.onPointerMove, { capture: true });
+    this.domElement.removeEventListener("pointerdown", this.onPointerDown, { capture: true });
+    window.removeEventListener("pointerup", this.onPointerUp, { capture: true });
+    window.removeEventListener("pointercancel", this.onPointerUp, { capture: true });
   }
 
   private updatePointerCoord(e: PointerEvent): void {
@@ -190,12 +196,26 @@ export class WaxSculptor {
     this.pointerPos.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
   }
 
+  private getRaycastTargets(): Mesh[] {
+    const targets: Mesh[] = [];
+    if (this.targetMesh && this.targetMesh.visible) targets.push(this.targetMesh);
+    if (this.secondaryMesh && this.secondaryMesh.visible) targets.push(this.secondaryMesh);
+    return targets;
+  }
+
   private onPointerMove(e: PointerEvent): void {
     if (this.config.mode === "off" || !this.targetMesh) return;
-    this.updatePointerCoord(e);
 
+    if (this.isPointerDown) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+    }
+
+    this.updatePointerCoord(e);
     this.raycaster.setFromCamera(this.pointerPos, this.camera);
-    const hits = this.raycaster.intersectObject(this.targetMesh, false);
+    const targets = this.getRaycastTargets();
+    const hits = this.raycaster.intersectObjects(targets, false);
 
     if (hits.length > 0 && hits[0]) {
       const hit = hits[0];
@@ -203,15 +223,15 @@ export class WaxSculptor {
         this.cursorRing.visible = true;
         this.cursorRing.position.copy(hit.point);
         if (hit.face) {
+          const hitObj = hit.object as Mesh;
           this.cursorRing.quaternion.setFromUnitVectors(
             new Vector3(0, 0, 1),
-            hit.face.normal.clone().transformDirection(this.targetMesh.matrixWorld),
+            hit.face.normal.clone().transformDirection(hitObj.matrixWorld),
           );
         }
       }
 
       if (this.isPointerDown) {
-        e.preventDefault();
         this.applyBrushStroke(hit.point);
       }
     } else if (this.cursorRing && !this.isPointerDown) {
@@ -225,10 +245,19 @@ export class WaxSculptor {
 
     this.updatePointerCoord(e);
     this.raycaster.setFromCamera(this.pointerPos, this.camera);
-    const hits = this.raycaster.intersectObject(this.targetMesh, false);
+    const targets = this.getRaycastTargets();
+    const hits = this.raycaster.intersectObjects(targets, false);
 
     if (hits.length > 0 && hits[0]) {
+      // Prevent orbit camera from turning while actively sculpting on the mesh
       e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+
+      try {
+        this.domElement.setPointerCapture(e.pointerId);
+      } catch (_) {}
+
       // Record undo state at start of stroke
       this.undoStack.push(new Map(this.activeDeltas));
       if (this.undoStack.length > 30) this.undoStack.shift();
@@ -240,9 +269,14 @@ export class WaxSculptor {
     }
   }
 
-  private onPointerUp(): void {
+  private onPointerUp(e?: PointerEvent): void {
     if (this.isPointerDown) {
       this.isPointerDown = false;
+      if (e) {
+        try {
+          this.domElement.releasePointerCapture(e.pointerId);
+        } catch (_) {}
+      }
       if (this.hasStrokeModified) {
         this.notifyStroke();
       }
@@ -292,17 +326,14 @@ export class WaxSculptor {
           pos.setXYZ(i, vP.x + vN.x * amount, vP.y + vN.y * amount, vP.z + vN.z * amount);
           modified++;
         } else if (mode === "remove") {
-          // Carve / shave wax inward toward original base surface
-          const carveX = existingDelta[0] * 0.25;
-          const carveY = existingDelta[1] * 0.25;
-          const carveZ = existingDelta[2] * 0.25;
-
-          existingDelta[0] -= carveX;
-          existingDelta[1] -= carveY;
-          existingDelta[2] -= carveZ;
+          // Carve / shave wax inward (reduces thickness or carves down)
+          const carveAmount = amount;
+          existingDelta[0] -= vN.x * carveAmount;
+          existingDelta[1] -= vN.y * carveAmount;
+          existingDelta[2] -= vN.z * carveAmount;
           this.activeDeltas.set(i, existingDelta);
 
-          pos.setXYZ(i, vP.x - carveX, vP.y - carveY, vP.z - carveZ);
+          pos.setXYZ(i, vP.x - vN.x * carveAmount, vP.y - vN.y * carveAmount, vP.z - vN.z * carveAmount);
           modified++;
         } else if (mode === "smooth") {
           // Smooth wax: blend position toward average center

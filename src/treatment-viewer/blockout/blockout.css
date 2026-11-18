@@ -42,7 +42,7 @@
 /* Floating Restore Pill (when panel is minimized) */
 .bo-expand-pill {
   position: absolute;
-  top: 70px;
+  top: 66px;
   right: 18px;
   z-index: 55;
   display: none;
@@ -640,26 +640,28 @@
 
 .bo-btn-propagate {
   width: 100%;
-  background: var(--tv-gold-gradient);
-  color: #1b1f24;
-  border: none;
+  background: var(--tv-gold);
+  color: #0b0f17;
+  border: 1px solid var(--tv-border-gold);
   border-radius: 12px;
   padding: 11px 14px;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: var(--tv-gold-glow);
-  transition: all 0.15s ease;
+  box-shadow: 0 4px 16px var(--tv-gold-glow);
+  transition: all 0.18s ease;
   text-align: center;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .bo-btn-propagate:hover {
-  filter: brightness(1.05);
+  background: var(--tv-gold-hover, #d4a74e);
+  color: #0b0f17;
   transform: translateY(-1px);
+  box-shadow: 0 6px 22px var(--tv-gold-glow);
 }
 
 .bo-btn-propagate:active {
@@ -716,6 +718,7 @@
   color: var(--tv-text);
   animation: boDockSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1);
   white-space: nowrap;
+  transition: left 0.28s cubic-bezier(0.16, 1, 0.3, 1), transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes boDockSlideUp {
@@ -729,19 +732,24 @@
   }
 }
 
-/* Center dock in available stage viewport on desktop */
+/* Center dock in available stage viewport on desktop, adjusting for side panel */
 @media (min-width: 1025px) {
   .bo-bottom-dock {
     left: calc((100% - 390px) / 2);
     transform: translateX(-50%);
   }
+
+  .bo-bottom-dock.bo-bottom-dock--centered {
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+  }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .bo-bottom-dock {
     bottom: 12px;
-    left: 50%;
-    transform: translateX(-50%);
+    left: 50% !important;
+    transform: translateX(-50%) !important;
     width: fit-content;
     max-width: calc(100vw - 24px);
     overflow-x: auto;
@@ -978,25 +986,6 @@
   color: var(--tv-gold);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
   font-weight: 700;
-}
-
-/* Responsive Dock for Mobile / Tablets */
-@media (max-width: 900px) {
-  .bo-bottom-dock {
-    left: 8px;
-    right: 8px;
-    transform: none;
-    bottom: 8px;
-    border-radius: 14px;
-    padding: 8px 12px;
-    gap: 10px;
-    overflow-x: auto;
-    justify-content: space-between;
-  }
-
-  .bo-bottom-dock::-webkit-scrollbar {
-    display: none;
-  }
 }
 
 /* ── Dedicated CAD Top Bar (Undercut & Blockout Studio) ─────────────────── */

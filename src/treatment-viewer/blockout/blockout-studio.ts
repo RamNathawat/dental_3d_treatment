@@ -182,6 +182,7 @@ export class BlockoutStudio {
     if (this.expandPillEl) {
       this.expandPillEl.classList.toggle("bo-expand-pill--visible", minimized);
     }
+    this.dockEl?.classList.toggle("bo-bottom-dock--centered", minimized);
   }
 
   public toggleMinimized(): boolean {
@@ -262,6 +263,7 @@ export class BlockoutStudio {
     this.waxMesh.name = "digital-wax-overlay";
     this.waxMesh.renderOrder = 20;
     this.threeScene.add(this.waxMesh);
+    this.sculptor?.setSecondaryMesh(this.waxMesh);
   }
 
   private initSculptor(): void {
@@ -365,6 +367,7 @@ export class BlockoutStudio {
     if (this.sculptor && this.viewport.getLayerMesh) {
       const layerMesh = this.viewport.getLayerMesh(this.getLayerId());
       this.sculptor.setTargetMesh(layerMesh, result.stageId);
+      this.sculptor.setSecondaryMesh(this.waxMesh);
       this.sculptor.setStageDeltas(result.stageId, result.sculptDeltas);
     }
 
@@ -524,7 +527,7 @@ export class BlockoutStudio {
           <h2 class="bo-title">Undercut &amp; Blockout Studio</h2>
           <span class="bo-panel-mode-label">Step 1: Undercut Survey &amp; Blockout</span>
         </div>
-        <button type="button" class="bo-btn-minimize" title="Minimize Panel (inspect 3D model)">
+        <button type="button" class="bo-btn-minimize" title="Minimize Tools panel">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -715,11 +718,11 @@ export class BlockoutStudio {
             <div class="bo-progress-bar-fill" style="width: 0%"></div>
           </div>
         </div>
-        <button type="button" class="bo-btn-propagate" title="Approve reference protocol and apply across all transitional stages">
+        <button type="button" class="bo-btn-propagate" title="Apply reference protocol across all transitional stages">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
           </svg>
-          <span>Approve Protocol &amp; Apply to All Stages</span>
+          <span>Apply to All Stages</span>
         </button>
       </div>
     `;
@@ -780,13 +783,13 @@ export class BlockoutStudio {
     const expandPill = document.createElement("button");
     expandPill.type = "button";
     expandPill.className = "bo-expand-pill";
-    expandPill.title = "Restore CAD Tools Panel";
+    expandPill.title = "Restore Tools Panel";
     expandPill.innerHTML = `
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="12" cy="12" r="3"></circle>
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
       </svg>
-      <span>CAD Tools</span>
+      <span>Tools</span>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
         <polyline points="15 18 9 12 15 6"></polyline>
       </svg>

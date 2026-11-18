@@ -170,23 +170,32 @@ describe("Blockout Studio UI & Interaction", () => {
     studio.mount(container);
 
     const panel = container.querySelector(".bo-studio-panel");
+    const dock = container.querySelector(".bo-bottom-dock");
     const expandPill = container.querySelector(".bo-expand-pill");
     const btnMinimize = container.querySelector<HTMLButtonElement>(".bo-btn-minimize");
+    const btnPropagate = container.querySelector<HTMLButtonElement>(".bo-btn-propagate");
 
     expect(studio.isPanelMinimized()).toBe(false);
     expect(panel?.classList.contains("bo-studio-panel--minimized")).toBe(false);
+    expect(dock?.classList.contains("bo-bottom-dock--centered")).toBe(false);
+    expect(btnPropagate?.textContent?.trim()).toContain("Apply to All Stages");
+    expect(btnPropagate?.textContent?.trim()).not.toContain("Approve Protocol");
+    expect(expandPill?.textContent).toContain("Tools");
+    expect(expandPill?.getAttribute("title")).toBe("Restore Tools Panel");
 
     // Click minimize button
     btnMinimize?.click();
     expect(studio.isPanelMinimized()).toBe(true);
     expect(panel?.classList.contains("bo-studio-panel--minimized")).toBe(true);
     expect(expandPill?.classList.contains("bo-expand-pill--visible")).toBe(true);
+    expect(dock?.classList.contains("bo-bottom-dock--centered")).toBe(true);
 
     // Clicking restore pill expands the panel
     (expandPill as HTMLButtonElement)?.click();
     expect(studio.isPanelMinimized()).toBe(false);
     expect(panel?.classList.contains("bo-studio-panel--minimized")).toBe(false);
     expect(expandPill?.classList.contains("bo-expand-pill--visible")).toBe(false);
+    expect(dock?.classList.contains("bo-bottom-dock--centered")).toBe(false);
 
     // Switching active tab also automatically unminimizes
     studio.setMinimized(true);

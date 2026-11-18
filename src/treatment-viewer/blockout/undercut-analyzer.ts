@@ -139,6 +139,26 @@ export function analyzeUndercuts(
     const r = Math.hypot(x - midX, z - focalZ);
     const contourR = smoothContour[s]!;
 
+    // ────────────────────────────────────────────────────────────────────────
+    // Clinical Boundary Exclusions:
+    // Base cut plane: flat mechanical mounting cut on clinical dental models (>16mm)
+    // where normals point vertically into the cut base (maxY for upper, minY for lower)
+    // ────────────────────────────────────────────────────────────────────────
+    const yVal = pos.getY(i);
+    const modelHeight = maxY - minY;
+    const isBaseCut = modelHeight > 16.0 && (isUpper
+      ? (yVal >= maxY - 1.8 && vNorm.y > 0.65)
+      : (yVal <= minY + 1.8 && vNorm.y < -0.65));
+
+    if (isBaseCut) {
+      depths[i] = 0;
+      const cIdx = i * 3;
+      heatmapColors[cIdx] = 0.25;
+      heatmapColors[cIdx + 1] = 0.78;
+      heatmapColors[cIdx + 2] = 0.35;
+      continue;
+    }
+
     // An undercut is any surface region facing away from the insertion vector,
     // or recessed behind the height of contour along the tooth boundary.
     let depth = 0;
