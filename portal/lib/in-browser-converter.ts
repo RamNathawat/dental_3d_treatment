@@ -194,8 +194,9 @@ export function capPlanarOpenings(
     if (y > maxY) maxY = y;
   }
 
+  const modelHeight = maxY - minY;
   const cutY = isUpper ? maxY : minY;
-  const cutThreshold = 2.0;
+  const cutThreshold = Math.min(4.0, Math.max(2.2, modelHeight * 0.35));
 
   const pts = new Map<string, Point3D>();
   for (let i = 0; i < numTriangles; i++) {
@@ -278,9 +279,18 @@ export function capPlanarOpenings(
     const yVals = loop.map((k) => pts.get(k)!.y);
     const minLoopY = Math.min(...yVals);
     const maxLoopY = Math.max(...yVals);
+    const yDiff = maxLoopY - minLoopY;
 
-    // Only cap loops that lie on a flat cutting plane (tolerance <= 0.6mm)
-    if (maxLoopY - minLoopY > 0.6) continue;
+    const xVals = loop.map((k) => pts.get(k)!.x);
+    const zVals = loop.map((k) => pts.get(k)!.z);
+    const spanX = Math.max(...xVals) - Math.min(...xVals);
+    const spanZ = Math.max(...zVals) - Math.min(...zVals);
+
+    // Capping tolerance: allow clinical cuts with height variation up to 3.2mm,
+    // or up to 4.5mm for wide arch-spanning loops.
+    if (yDiff > 3.2 && !(spanX > 20.0 && spanZ > 20.0 && yDiff <= 4.5)) continue;
+    // Skip tiny micro-loops under 2mm
+    if (spanX < 2.0 && spanZ < 2.0) continue;
 
     const points2D = loop.map((k) => {
       const p = pts.get(k)!;
@@ -341,6 +351,38 @@ export function capPlanarOpenings(
   }
 
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(newPositions, 3));
+
+  // Expand vertex colors if geometry has a color attribute so buffer sizes match
+  const colorAttr = geometry.getAttribute("color");
+  if (colorAttr) {
+    const itemSize = colorAttr.itemSize;
+    const isUint8 = colorAttr.array instanceof Uint8Array;
+    const oldColors = colorAttr.array;
+    const newColors = isUint8
+      ? new Uint8Array(oldColors.length + capTriangles.length * itemSize)
+      : new Float32Array(oldColors.length + capTriangles.length * itemSize);
+    newColors.set(oldColors, 0);
+
+    // Gingival coral-rose pink for base cap triangles
+    let cOffset = oldColors.length;
+    for (let i = 0; i < capTriangles.length; i++) {
+      if (isUint8) {
+        newColors[cOffset++] = 117;
+        newColors[cOffset++] = 22;
+        newColors[cOffset++] = 27;
+        if (itemSize === 4) newColors[cOffset++] = 255;
+      } else {
+        newColors[cOffset++] = 0.46;
+        newColors[cOffset++] = 0.085;
+        newColors[cOffset++] = 0.105;
+        if (itemSize === 4) newColors[cOffset++] = 1.0;
+      }
+    }
+    geometry.setAttribute(
+      "color",
+      new THREE.BufferAttribute(newColors as any, itemSize, isUint8),
+    );
+  }
 
   if (index) {
     const oldIndices = index.array;

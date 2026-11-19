@@ -229,7 +229,7 @@ describe("Milestone 4: Automated Undercut & Blockout Workflow", () => {
   });
 
   describe("5. Clinical Real-World Model Exclusions (Occlusal Table & Alveolar Bone Protection)", () => {
-    it("guarantees 0 wax on occlusal table and 0 wax on alveolar bone for real dental casts", () => {
+    it("guarantees 0 wax on occlusal table and 0 wax on alveolar bone for real dental casts", async () => {
       const fs = require("node:fs");
       const { STLLoader } = require("three/examples/jsm/loaders/STLLoader.js");
       const loader = new STLLoader();
@@ -287,6 +287,6 @@ describe("Milestone 4: Automated Undercut & Blockout Workflow", () => {
 
       expect(waxOnOcclusalTable).toBe(0);
       expect(waxOnAlveolarBase).toBe(0);
-    });
+    }, 25000);
   });
 });

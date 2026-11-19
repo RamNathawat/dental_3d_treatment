@@ -1237,6 +1237,10 @@ export async function loadStageGeometries(
           }
         }
         if (upperGeom) {
+          upperGeom = capPlanarOpenings(upperGeom, true);
+          if (upperNoAttGeom && upperNoAttGeom !== upperGeom) {
+            upperNoAttGeom = capPlanarOpenings(upperNoAttGeom, true);
+          }
           if (upperGeom.getAttribute("color") && !upperGeom.userData.baseColors) {
             upperGeom.userData.baseColors = upperGeom.getAttribute("color")!.clone();
           }
@@ -1296,6 +1300,10 @@ export async function loadStageGeometries(
           }
         }
         if (lowerGeom) {
+          lowerGeom = capPlanarOpenings(lowerGeom, false);
+          if (lowerNoAttGeom && lowerNoAttGeom !== lowerGeom) {
+            lowerNoAttGeom = capPlanarOpenings(lowerNoAttGeom, false);
+          }
           if (lowerGeom.getAttribute("color") && !lowerGeom.userData.baseColors) {
             lowerGeom.userData.baseColors = lowerGeom.getAttribute("color")!.clone();
           }
