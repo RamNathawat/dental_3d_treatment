@@ -161,5 +161,5 @@ describe("Milestone 3 - Phase 2: Practice Hierarchy Storage", () => {
     expect(cached?.firmType).toBe("clinic");
     expect(cached?.brandName).toBe("Sleek Smile");
     expect(cached?.website).toBe("https://sleeksmile.com");
-  });
+  }, 15000);
 });

@@ -736,6 +736,19 @@ export interface EditModelOptions {
   removeExistingLower?: boolean;
 }
 
+async function compressGlbBuffer(buffer: ArrayBuffer): Promise<Uint8Array> {
+  if (typeof CompressionStream !== "undefined") {
+    try {
+      const stream = new Response(buffer).body!.pipeThrough(new CompressionStream("gzip"));
+      const compressedRes = await new Response(stream).arrayBuffer();
+      return new Uint8Array(compressedRes);
+    } catch {
+      // Fallback to fflate if browser stream fails
+    }
+  }
+  return fflate.gzipSync(new Uint8Array(buffer), { level: 1 });
+}
+
 export async function processDentalZipInBrowser(
   input: DentalUploadFiles | File,
   patientName: string,
@@ -750,12 +763,16 @@ export async function processDentalZipInBrowser(
   clinicEmail?: string,
   existingCaseId?: string,
   editOptions?: EditModelOptions,
+  signal?: AbortSignal,
 ): Promise<IngestResult> {
   const supabase = createClient();
   const gltfExporter = new GLTFExporter();
   const isEdit = Boolean(existingCaseId);
 
   try {
+    if (signal?.aborted) {
+      return { ok: false, error: "Upload cancelled by user." };
+    }
     let upperFile: File | null = null;
     let lowerFile: File | null = null;
     let singleFile: File | null = null;
@@ -1377,7 +1394,7 @@ export async function processDentalZipInBrowser(
 
     const uploadWorker = async () => {
       while (true) {
-        if (uploadError) break;
+        if (signal?.aborted || uploadError) break;
 
         let task: StageUploadTask | undefined;
         if (uploadQueue.length > 0) {
@@ -1388,14 +1405,16 @@ export async function processDentalZipInBrowser(
           await new Promise<void>((resolve) => {
             waitingResolvers.push(resolve);
           });
+          if (signal?.aborted) break;
           continue;
         }
 
-        if (!task) continue;
+        if (!task || signal?.aborted) continue;
 
         let uploadSucceeded = false;
         let lastUploadError: { message?: string } | null = null;
         for (let attempt = 0; attempt < 3; attempt++) {
+          if (signal?.aborted) break;
           const { error: uploadErr } = await supabase.storage
             .from("treatment-models")
             .upload(task.storagePath, task.blob, {
@@ -1410,6 +1429,8 @@ export async function processDentalZipInBrowser(
           lastUploadError = uploadErr;
           await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
         }
+
+        if (signal?.aborted) break;
 
         if (!uploadSucceeded) {
           uploadError = new Error(
@@ -1429,15 +1450,24 @@ export async function processDentalZipInBrowser(
       }
     };
 
+    if (signal) {
+      signal.addEventListener("abort", () => {
+        conversionDone = true;
+        notifyUploadWorkers();
+      });
+    }
+
     const uploadWorkersPromise = Promise.all(
       Array.from({ length: MAX_CONCURRENT_UPLOADS }, () => uploadWorker()),
     );
 
     for (const stageNum of availableStages) {
+      if (signal?.aborted) throw new DOMException("Upload cancelled by user", "AbortError");
       if (uploadError) throw uploadError;
       const pad = String(stageNum).padStart(2, "0");
 
       for (const arch of archesToProcess) {
+        if (signal?.aborted) throw new DOMException("Upload cancelled by user", "AbortError");
         if (uploadError) throw uploadError;
         const stageData = arch === "Upper" ? upperStages.get(stageNum) : lowerStages.get(stageNum);
 
@@ -1611,9 +1641,13 @@ export async function processDentalZipInBrowser(
         }
 
         const glbBuffer = (await gltfExporter.parseAsync(group, { binary: true })) as ArrayBuffer;
-        // Gzip compression with fflate: reduces raw download weight by 60%+ with 0% data/quality loss
-        const compressedGlb = fflate.gzipSync(new Uint8Array(glbBuffer), { level: 6 });
-        const glbBlob = new Blob([compressedGlb], { type: "application/gzip" });
+        if (signal?.aborted) {
+          throw new DOMException("Upload cancelled by user", "AbortError");
+        }
+
+        // Fast native stream compression or optimized gzip: reduces raw download weight by 60%+ with 0% data/quality loss
+        const compressedGlb = await compressGlbBuffer(glbBuffer);
+        const glbBlob = new Blob([compressedGlb as unknown as BlobPart], { type: "application/gzip" });
 
         // Clean up individual buffers from heap
         for (const g of toDispose) g.dispose();
@@ -1635,8 +1669,8 @@ export async function processDentalZipInBrowser(
         notifyUploadWorkers();
 
         completedSteps++;
-        // Micro-yield to keep the browser UI responsive and allow network I/O
-        await new Promise((r) => setTimeout(r, 0));
+        // Cooperative yield to keep browser UI at 60 FPS, allow DOM repaints and cancel clicks
+        await new Promise((r) => setTimeout(r, 16));
       }
     }
 
@@ -1775,7 +1809,10 @@ export async function processDentalZipInBrowser(
       clinicName: clinicName?.trim() || undefined,
       clinicEmail: effectiveClinicEmail,
     };
-  } catch (err) {
+  } catch (err: any) {
+    if (signal?.aborted || err?.name === "AbortError" || String(err?.message || "").includes("cancelled")) {
+      return { ok: false, error: "Upload cancelled by user." };
+    }
     console.error("In-browser ingestion error:", err);
     return {
       ok: false,

@@ -206,6 +206,32 @@ export default function UploadCaseModal({
 
   const upperInputRef = useRef<HTMLInputElement>(null);
   const lowerInputRef = useRef<HTMLInputElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  function handleCancelOrClose() {
+    if (isProcessing) {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      setIsProcessing(false);
+      setProgressMsg("");
+      setProgressPct(0);
+      setErrorMsg("Upload cancelled by user.");
+    }
+    onClose();
+  }
+
+  useEffect(() => {
+    if (!isOpen) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        handleCancelOrClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, isProcessing]);
 
   if (!isOpen) return null;
 
@@ -457,126 +483,152 @@ export default function UploadCaseModal({
     setProgressMsg("Initializing in-browser CAD engine...");
     setProgressPct(5);
 
-    const resolvedPatientId =
-      patientId.trim() || `PT-${Math.floor(1000 + Math.random() * 9000)}`;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const signal = controller.signal;
 
-    const parsedAge = parseInt(patientAge.trim(), 10);
-    const resolvedAge = !isNaN(parsedAge) && parsedAge > 0 && parsedAge <= 120 ? parsedAge : undefined;
-    const resolvedSex = patientSex.trim() || undefined;
-    const resolvedClinicEmail = clinicEmail.trim() || undefined;
+    try {
+      const resolvedPatientId =
+        patientId.trim() || `PT-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    const result: IngestResult = await processDentalZipInBrowser(
-      {
-        upperZip: upperFile,
-        lowerZip: lowerFile,
-      },
-      patientName.trim(),
-      userId,
-      (msg, pct) => {
-        setProgressMsg(msg);
-        setProgressPct(pct);
-      },
-      iprList,
-      undefined,
-      resolvedPatientId,
-      clinicName.trim() || undefined,
-      resolvedAge,
-      resolvedSex,
-      resolvedClinicEmail,
-    );
+      const parsedAge = parseInt(patientAge.trim(), 10);
+      const resolvedAge = !isNaN(parsedAge) && parsedAge > 0 && parsedAge <= 120 ? parsedAge : undefined;
+      const resolvedSex = patientSex.trim() || undefined;
+      const resolvedClinicEmail = clinicEmail.trim() || undefined;
 
-    if (result.ok && result.caseId) {
-      if (resolvedClinicEmail) {
-        saveClinicEmail(resolvedClinicEmail, clinicName.trim() || undefined);
-      }
-
-      // Auto-provision new clinic to directory if it doesn't exist
-      if (trimmedClinicName && !matchedExistingClinic) {
-        const autoClinicId = `CLN-${String(clinics.length + 1).padStart(2, "0")}`;
-        void saveClinic(userId, {
-          name: trimmedClinicName,
-          clinicId: autoClinicId,
-          email: resolvedClinicEmail || undefined,
-          phone: newClinicPhone.trim() || undefined,
-          address: newClinicAddress.trim() || undefined,
-        })
-          .then((createdClinic) => {
-            if (onClinicCreated) {
-              onClinicCreated(createdClinic);
-            }
-          })
-          .catch((err) => {
-            console.warn("Could not auto-save new clinic:", err);
-          });
-      }
-
-      // Auto-provision new doctor to directory if it doesn't exist
-      if (isNewDoctor && trimmedDoctorName) {
-        const autoDoctorId = `DOC-${String(doctors.length + 1).padStart(2, "0")}`;
-        void saveDoctor(userId, {
-          name: trimmedDoctorName,
-          doctorId: autoDoctorId,
-          specialization: newDoctorSpecialization.trim() || undefined,
-          phone: newDoctorPhone.trim() || undefined,
-          email: newDoctorEmail.trim() || undefined,
-        })
-          .then((createdDoctor) => {
-            if (onDoctorCreated) {
-              onDoctorCreated(createdDoctor);
-            }
-          })
-          .catch((err) => {
-            console.warn("Could not auto-save new doctor:", err);
-          });
-      }
-      const archType = result.archType || (upperFile && lowerFile ? "both" : upperFile ? "upper" : "lower");
-      const cleanName = patientName.replace(/\s*\[(Upper|Lower|Dual)\]/i, "").trim();
-      const dbName =
-        archType === "upper"
-          ? `${cleanName} [Upper]`
-          : archType === "lower"
-          ? `${cleanName} [Lower]`
-          : cleanName;
-
-      const createdCase: DentalCase = {
-        id: result.caseId,
-        dentist_id: userId,
-        patient_name: dbName,
-        clinic_name: clinicName.trim() || null,
-        clinic_email: resolvedClinicEmail || null,
-        doctor_name: doctorName.trim() || null,
-        is_refinement: isRefinement,
-        patient_id: result.patientId || resolvedPatientId,
-        patient_age: resolvedAge ?? null,
-        patient_sex: resolvedSex ?? null,
-        total_stages: result.totalStages || Math.max(upperMeta?.totalStages || 1, lowerMeta?.totalStages || 1),
-        upper_stages: result.upperStages ?? (archType === "lower" ? 0 : upperMeta?.totalStages || null),
-        lower_stages: result.lowerStages ?? (archType === "upper" ? 0 : lowerMeta?.totalStages || null),
-        expires_at: null,
-        is_revoked: false,
-        doctor_notes: {
-          aligner_counts: {
-            upper: result.upperStages,
-            lower: result.lowerStages,
-            total: result.totalAligners,
-            is_unequal: result.isUnequal,
-          },
-          is_refinement: isRefinement,
-          assigned_doctor: doctorName.trim() || undefined,
+      const result: IngestResult = await processDentalZipInBrowser(
+        {
+          upperZip: upperFile,
+          lowerZip: lowerFile,
         },
-        share_token: result.shareToken || "",
-        status: "ready",
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
+        patientName.trim(),
+        userId,
+        (msg, pct) => {
+          if (signal.aborted) return;
+          setProgressMsg(msg);
+          setProgressPct(pct);
+        },
+        iprList,
+        undefined,
+        resolvedPatientId,
+        clinicName.trim() || undefined,
+        resolvedAge,
+        resolvedSex,
+        resolvedClinicEmail,
+        undefined,
+        undefined,
+        signal,
+      );
 
-      saveCaseToLocalCache(userId, createdCase);
-      onCaseCreated(createdCase);
+      if (signal.aborted) {
+        setIsProcessing(false);
+        abortControllerRef.current = null;
+        return;
+      }
+
+      if (result.ok && result.caseId) {
+        if (resolvedClinicEmail) {
+          saveClinicEmail(resolvedClinicEmail, clinicName.trim() || undefined);
+        }
+
+        // Auto-provision new clinic to directory if it doesn't exist
+        if (trimmedClinicName && !matchedExistingClinic) {
+          const autoClinicId = `CLN-${String(clinics.length + 1).padStart(2, "0")}`;
+          void saveClinic(userId, {
+            name: trimmedClinicName,
+            clinicId: autoClinicId,
+            email: resolvedClinicEmail || undefined,
+            phone: newClinicPhone.trim() || undefined,
+            address: newClinicAddress.trim() || undefined,
+          })
+            .then((createdClinic) => {
+              if (onClinicCreated) {
+                onClinicCreated(createdClinic);
+              }
+            })
+            .catch((err) => {
+              console.warn("Could not auto-save new clinic:", err);
+            });
+        }
+
+        // Auto-provision new doctor to directory if it doesn't exist
+        if (isNewDoctor && trimmedDoctorName) {
+          const autoDoctorId = `DOC-${String(doctors.length + 1).padStart(2, "0")}`;
+          void saveDoctor(userId, {
+            name: trimmedDoctorName,
+            doctorId: autoDoctorId,
+            specialization: newDoctorSpecialization.trim() || undefined,
+            phone: newDoctorPhone.trim() || undefined,
+            email: newDoctorEmail.trim() || undefined,
+          })
+            .then((createdDoctor) => {
+              if (onDoctorCreated) {
+                onDoctorCreated(createdDoctor);
+              }
+            })
+            .catch((err) => {
+              console.warn("Could not auto-save new doctor:", err);
+            });
+        }
+        const archType = result.archType || (upperFile && lowerFile ? "both" : upperFile ? "upper" : "lower");
+        const cleanName = patientName.replace(/\s*\[(Upper|Lower|Dual)\]/i, "").trim();
+        const dbName =
+          archType === "upper"
+            ? `${cleanName} [Upper]`
+            : archType === "lower"
+            ? `${cleanName} [Lower]`
+            : cleanName;
+
+        const createdCase: DentalCase = {
+          id: result.caseId,
+          dentist_id: userId,
+          patient_name: dbName,
+          clinic_name: clinicName.trim() || null,
+          clinic_email: resolvedClinicEmail || null,
+          doctor_name: doctorName.trim() || null,
+          is_refinement: isRefinement,
+          patient_id: result.patientId || resolvedPatientId,
+          patient_age: resolvedAge ?? null,
+          patient_sex: resolvedSex ?? null,
+          total_stages: result.totalStages || Math.max(upperMeta?.totalStages || 1, lowerMeta?.totalStages || 1),
+          upper_stages: result.upperStages ?? (archType === "lower" ? 0 : upperMeta?.totalStages || null),
+          lower_stages: result.lowerStages ?? (archType === "upper" ? 0 : lowerMeta?.totalStages || null),
+          expires_at: null,
+          is_revoked: false,
+          doctor_notes: {
+            aligner_counts: {
+              upper: result.upperStages,
+              lower: result.lowerStages,
+              total: result.totalAligners,
+              is_unequal: result.isUnequal,
+            },
+            is_refinement: isRefinement,
+            assigned_doctor: doctorName.trim() || undefined,
+          },
+          share_token: result.shareToken || "",
+          status: "ready",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        saveCaseToLocalCache(userId, createdCase);
+        onCaseCreated(createdCase);
+        setIsProcessing(false);
+        abortControllerRef.current = null;
+        onClose();
+      } else {
+        setIsProcessing(false);
+        abortControllerRef.current = null;
+        setErrorMsg(result.error || "Failed to process the orthodontic models. Please verify your ZIP archives.");
+      }
+    } catch (err: any) {
       setIsProcessing(false);
-      onClose();
-    } else {
-      setIsProcessing(false);
-      setErrorMsg(result.error || "Failed to process the orthodontic models. Please verify your ZIP archives.");
+      abortControllerRef.current = null;
+      if (err?.name === "AbortError" || signal.aborted) {
+        setErrorMsg("Upload cancelled by user.");
+      } else {
+        setErrorMsg(err?.message || "An unexpected error occurred during processing.");
+      }
     }
   }
 
@@ -628,14 +680,13 @@ export default function UploadCaseModal({
               </p>
             </div>
           </div>
-          {!isProcessing && (
-            <button
-              onClick={onClose}
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+          <button
+            onClick={handleCancelOrClose}
+            title={isProcessing ? "Cancel upload and close" : "Close"}
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
         {/* Content */}
@@ -1514,11 +1565,15 @@ export default function UploadCaseModal({
         {/* Footer */}
         <div className="px-6 py-3.5 bg-slate-50 dark:bg-[#0D121D] border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-end gap-2.5">
           <button
-            disabled={isProcessing}
-            onClick={onClose}
-            className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors disabled:opacity-50"
+            type="button"
+            onClick={handleCancelOrClose}
+            className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+              isProcessing
+                ? "text-rose-600 dark:text-rose-400 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 font-bold"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+            }`}
           >
-            Cancel
+            {isProcessing ? "Cancel Upload" : "Cancel"}
           </button>
           <button
             disabled={

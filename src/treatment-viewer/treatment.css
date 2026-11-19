@@ -2391,29 +2391,29 @@ body {
     bottom: 5.6rem !important;
     width: auto !important;
     max-width: calc(100vw - 1rem) !important;
-    z-index: 85 !important;
+    z-index: 95 !important;
   }
 
   .tv-notes-backdrop {
-    z-index: 84 !important;
+    z-index: 94 !important;
   }
 
   .tv-app--dark .tv-movement-drawer,
   .tv-app--dark .tv-notes-drawer {
-    background: rgba(15, 20, 31, 0.98);
-    backdrop-filter: blur(28px);
-    -webkit-backdrop-filter: blur(28px);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75);
+    background: #0f141f !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75) !important;
   }
 
   .tv-app:not(.tv-app--dark) .tv-movement-drawer,
   .tv-app:not(.tv-app--dark) .tv-notes-drawer {
-    background: rgba(255, 255, 255, 0.98);
-    backdrop-filter: blur(28px);
-    -webkit-backdrop-filter: blur(28px);
-    border: 1px solid rgba(206, 198, 182, 0.85);
-    box-shadow: 0 16px 48px rgba(45, 38, 28, 0.22);
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: 1px solid rgba(206, 198, 182, 0.85) !important;
+    box-shadow: 0 16px 48px rgba(45, 38, 28, 0.22) !important;
   }
 
   /* Bottom Dock on Mobile: Row 1 Tools, Row 2 Scrubber, Row 3 Stage pill + Speed/Play actions */
@@ -3349,11 +3349,14 @@ body {
 }
 
 .tv-notes-backdrop[hidden],
+.tv-notes-backdrop:not(.tv-backdrop--open),
 .tv-notes-backdrop:not([style*="display: block"]) {
   display: none !important;
   visibility: hidden !important;
   opacity: 0 !important;
   pointer-events: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 /* Explicit hide rule with top priority to prevent GPU compositor tile leaks on mobile */
@@ -3812,7 +3815,11 @@ body {
     bottom: 5.6rem !important;
     width: auto !important;
     max-width: calc(100vw - 1rem) !important;
-    z-index: 85 !important;
+    z-index: 95 !important;
+  }
+
+  .tv-notes-backdrop {
+    z-index: 94 !important;
   }
 }
 

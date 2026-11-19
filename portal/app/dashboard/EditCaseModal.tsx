@@ -169,6 +169,33 @@ export default function EditCaseModal({
     setShowNewDoctorDetails(false);
   }, [isOpen, caseItem, allCases, isSoloDoctor, defaultDoctorName]);
 
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  function handleCancelOrClose() {
+    if (isProcessing) {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      setIsProcessing(false);
+      setProgressMsg("");
+      setProgressPct(0);
+      setErrorMsg("Update cancelled by user.");
+    }
+    onClose();
+  }
+
+  useEffect(() => {
+    if (!isOpen) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        handleCancelOrClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, isProcessing]);
+
   if (!isOpen) return null;
 
   const currentStages = caseItem.total_stages || 1;
@@ -453,6 +480,10 @@ export default function EditCaseModal({
       );
       setProgressPct(15);
 
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      const signal = controller.signal;
+
       const result: IngestResult = await processDentalZipInBrowser(
         {
           upperZip: upperFile,
@@ -461,6 +492,7 @@ export default function EditCaseModal({
         patientName.trim(),
         userId,
         (msg, pct) => {
+          if (signal.aborted) return;
           setProgressMsg(msg);
           setProgressPct(pct);
         },
@@ -475,8 +507,15 @@ export default function EditCaseModal({
         {
           removeExistingUpper,
           removeExistingLower,
-        }
+        },
+        signal,
       );
+
+      if (signal.aborted) {
+        setIsProcessing(false);
+        abortControllerRef.current = null;
+        return;
+      }
 
       if (result.ok && result.caseId) {
         const willBeBoth = Boolean((result.hasUpper && result.hasLower) || (willHaveUpper && willHaveLower));
@@ -697,8 +736,8 @@ export default function EditCaseModal({
             </div>
           </div>
           <button
-            onClick={onClose}
-            disabled={isProcessing}
+            onClick={handleCancelOrClose}
+            title={isProcessing ? "Cancel update and close" : "Close"}
             className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -1304,11 +1343,14 @@ export default function EditCaseModal({
         <div className="px-5 sm:px-6 py-4 bg-slate-50/80 dark:bg-[#0D121D] border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-3">
           <button
             type="button"
-            onClick={onClose}
-            disabled={isProcessing}
-            className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800/60 transition-colors cursor-pointer disabled:opacity-50"
+            onClick={handleCancelOrClose}
+            className={`px-4 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+              isProcessing
+                ? "text-rose-600 dark:text-rose-400 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 font-bold"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800/60"
+            }`}
           >
-            Cancel
+            {isProcessing ? "Cancel Upload" : "Cancel"}
           </button>
 
           <button

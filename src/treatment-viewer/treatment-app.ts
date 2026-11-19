@@ -360,13 +360,29 @@ export function createTreatmentApp(
   const movementUpperListEl = div("tv-movement-list");
   const movementLowerListEl = div("tv-movement-list");
 
+  const closeMovementsBtn = makeBtn(
+    "✕",
+    (e?: Event) => {
+      e?.preventDefault();
+      e?.stopPropagation();
+      setMovementsOpen(false);
+    },
+    "tv-movement-drawer__close",
+  );
+  closeMovementsBtn.title = "Close tooth movements panel";
+  closeMovementsBtn.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMovementsOpen(false);
+  });
+
   const movementDrawerEl = div("tv-movement-drawer", [
     div("tv-movement-drawer__header", [
       div("tv-movement-drawer__title-wrap", [
         (() => { const h3 = document.createElement("h3"); h3.textContent = "Tooth Movements"; return h3; })(),
         movementDrawerStageBadgeEl,
       ]),
-      makeBtn("✕", () => toggleMovementsDrawer(), "tv-movement-drawer__close"),
+      closeMovementsBtn,
     ]),
     div("tv-movement-content", [
       div("tv-movement-section", [
@@ -397,7 +413,27 @@ export function createTreatmentApp(
   const notesBackdropEl = div("tv-notes-backdrop");
   notesBackdropEl.hidden = true;
   notesBackdropEl.style.display = "none";
-  notesBackdropEl.addEventListener("click", () => {
+  const dismissNotes = (e?: Event) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+    setNotesOpen(false);
+  };
+  notesBackdropEl.addEventListener("click", dismissNotes);
+  notesBackdropEl.addEventListener("pointerdown", dismissNotes);
+
+  const closeNotesBtn = makeBtn(
+    "✕",
+    (e?: Event) => {
+      e?.preventDefault();
+      e?.stopPropagation();
+      setNotesOpen(false);
+    },
+    "tv-notes-drawer__close",
+  );
+  closeNotesBtn.title = "Close treatment plan and remarks";
+  closeNotesBtn.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     setNotesOpen(false);
   });
 
@@ -411,7 +447,7 @@ export function createTreatmentApp(
         })(),
         span("tv-notes-drawer__sub", "Treating Doctor Guidance"),
       ]),
-      makeBtn("✕", () => toggleNotesDrawer(), "tv-notes-drawer__close"),
+      closeNotesBtn,
     ]),
     div("tv-notes-content", [
       notesDrawerDoctorMetaEl,
@@ -2208,17 +2244,18 @@ export function createTreatmentApp(
 
   // ── Clinical Tooth Movements Drawer ─────────────────────────────────────────
 
-  function toggleMovementsDrawer(): void {
-    const nextOpen = !state.metricsPanelOpen;
-    state.metricsPanelOpen = nextOpen;
-    movementDrawerEl.hidden = !nextOpen;
-    movementDrawerEl.classList.toggle("tv-drawer--open", nextOpen);
-    movementDrawerEl.style.display = nextOpen ? "flex" : "none";
-    movementDrawerEl.style.visibility = nextOpen ? "visible" : "hidden";
-    movementDrawerEl.style.backdropFilter = nextOpen ? "" : "none";
-    (movementDrawerEl.style as any).webkitBackdropFilter = nextOpen ? "" : "none";
+  function setMovementsOpen(open: boolean): void {
+    state.metricsPanelOpen = open;
+    movementDrawerEl.hidden = !open;
+    movementDrawerEl.classList.toggle("tv-drawer--open", open);
+    movementDrawerEl.style.display = open ? "flex" : "none";
+    movementDrawerEl.style.visibility = open ? "visible" : "hidden";
+    movementDrawerEl.style.opacity = open ? "1" : "0";
+    movementDrawerEl.style.pointerEvents = open ? "auto" : "none";
+    movementDrawerEl.style.backdropFilter = "none";
+    (movementDrawerEl.style as any).webkitBackdropFilter = "none";
 
-    if (nextOpen) {
+    if (open) {
       if (state.notesOpen) {
         setNotesOpen(false);
       }
@@ -2273,28 +2310,26 @@ export function createTreatmentApp(
     notesDrawerEl.classList.toggle("tv-drawer--open", open);
     notesDrawerEl.style.display = open ? "flex" : "none";
     notesDrawerEl.style.visibility = open ? "visible" : "hidden";
-    notesDrawerEl.style.backdropFilter = open ? "" : "none";
-    (notesDrawerEl.style as any).webkitBackdropFilter = open ? "" : "none";
+    notesDrawerEl.style.opacity = open ? "1" : "0";
+    notesDrawerEl.style.pointerEvents = open ? "auto" : "none";
+    notesDrawerEl.style.backdropFilter = "none";
+    (notesDrawerEl.style as any).webkitBackdropFilter = "none";
 
     notesBackdropEl.hidden = !open;
     notesBackdropEl.classList.toggle("tv-backdrop--open", open);
     notesBackdropEl.style.display = open ? "block" : "none";
     notesBackdropEl.style.visibility = open ? "visible" : "hidden";
-    notesBackdropEl.style.backdropFilter = open ? "" : "none";
-    (notesBackdropEl.style as any).webkitBackdropFilter = open ? "" : "none";
+    notesBackdropEl.style.opacity = open ? "1" : "0";
+    notesBackdropEl.style.pointerEvents = open ? "auto" : "none";
+    notesBackdropEl.style.backdropFilter = "none";
+    (notesBackdropEl.style as any).webkitBackdropFilter = "none";
 
     notesHeaderBtn.classList.toggle("tv-btn--active", open);
     notesHeaderBtn.setAttribute("aria-expanded", String(open));
 
     if (open) {
       if (state.metricsPanelOpen) {
-        state.metricsPanelOpen = false;
-        movementDrawerEl.hidden = true;
-        movementDrawerEl.classList.remove("tv-drawer--open");
-        movementDrawerEl.style.display = "none";
-        movementDrawerEl.style.visibility = "hidden";
-        movementDrawerEl.style.backdropFilter = "none";
-        (movementDrawerEl.style as any).webkitBackdropFilter = "none";
+        setMovementsOpen(false);
       }
       refreshNotesDrawer();
       const dn = state.manifest.doctorNotes;
