@@ -75,14 +75,17 @@ export function analyzeUndercuts(
   const midX = (minX + maxX) / 2;
   const focalZ = minZ - 12.0;
   const maxSpanAngle = 0.95;
+  const spanX = maxX - minX;
+  const isFullArch = spanX > 30.0;
+  const modelHeight = maxY - minY;
 
-  // Step 2: Track maximum convexity (height of contour) along 120 arch sectors
+  // Step 2a: Track crown peak heights along 120 arch sectors to follow Curve of Spee
   const numSectors = 120;
-  const maxContourRadius = new Float32Array(numSectors);
-  maxContourRadius.fill(0);
+  const peakY = new Float32Array(numSectors);
+  peakY.fill(isUpper ? Infinity : -Infinity);
 
   for (let i = 0; i < count; i++) {
-    const x = pos.getX(i), z = pos.getZ(i);
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
     const angle = Math.atan2(x - midX, z - focalZ);
     const s = Math.max(
       0,
@@ -91,9 +94,49 @@ export function analyzeUndercuts(
         Math.floor(((angle + maxSpanAngle) / (2 * maxSpanAngle)) * numSectors),
       ),
     );
-    const r = Math.hypot(x - midX, z - focalZ);
-    if (r > maxContourRadius[s]!) {
-      maxContourRadius[s] = r;
+    if (isUpper) {
+      if (y < peakY[s]!) peakY[s] = y;
+    } else {
+      if (y > peakY[s]!) peakY[s] = y;
+    }
+  }
+
+  const smoothPeak = new Float32Array(numSectors);
+  for (let s = 0; s < numSectors; s++) {
+    let sumY = 0, w = 0;
+    for (let d = -3; d <= 3; d++) {
+      const idx = s + d;
+      if (idx >= 0 && idx < numSectors) {
+        sumY += peakY[idx]!;
+        w++;
+      }
+    }
+    smoothPeak[s] = w > 0 ? sumY / w : isUpper ? minY : maxY;
+  }
+
+  // Step 2b: Track maximum convexity (height of contour) within the clinical crown zone
+  const maxContourRadius = new Float32Array(numSectors);
+  maxContourRadius.fill(0);
+
+  for (let i = 0; i < count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const angle = Math.atan2(x - midX, z - focalZ);
+    const s = Math.max(
+      0,
+      Math.min(
+        numSectors - 1,
+        Math.floor(((angle + maxSpanAngle) / (2 * maxSpanAngle)) * numSectors),
+      ),
+    );
+    const tip = smoothPeak[s]!;
+    const distFromTip = isUpper ? y - tip : tip - y;
+
+    // Only clinical crown vertices define tooth contour boundary, preventing base flaring
+    if (!isFullArch || (distFromTip >= 0 && distFromTip <= 7.2)) {
+      const r = Math.hypot(x - midX, z - focalZ);
+      if (r > maxContourRadius[s]!) {
+        maxContourRadius[s] = r;
+      }
     }
   }
 
@@ -126,7 +169,7 @@ export function analyzeUndercuts(
     vNorm.set(norm.getX(i), norm.getY(i), norm.getZ(i));
     const dot = vNorm.dot(insertionVec);
 
-    const x = pos.getX(i), z = pos.getZ(i);
+    const x = pos.getX(i), yVal = pos.getY(i), z = pos.getZ(i);
     const angle = Math.atan2(x - midX, z - focalZ);
     const s = Math.max(
       0,
@@ -138,25 +181,29 @@ export function analyzeUndercuts(
 
     const r = Math.hypot(x - midX, z - focalZ);
     const contourR = smoothContour[s]!;
+    const tip = smoothPeak[s]!;
+    const distFromTip = isUpper ? yVal - tip : tip - yVal;
 
     // ────────────────────────────────────────────────────────────────────────
     // Clinical Boundary Exclusions:
     // 1. Base cut plane: flat mechanical mounting cut on clinical dental models (>16mm)
-    //    where normals point vertically into the cut base (maxY for upper, minY for lower)
-    // 2. Occlusal table & incisal edges: functional biting surfaces must never have
-    //    blockout wax so the aligner seats with solid vertical occlusal indexing
+    // 2. Occlusal table & incisal edges: functional biting surfaces must NEVER have
+    //    undercut depths or wax so the aligner seats with solid vertical occlusal stops
+    // 3. Alveolar bone & deep gums: aligners terminate 1-2mm from CEJ; jawbone is NOT
+    //    a dental undercut and must never receive automated dentition blockout
     // ────────────────────────────────────────────────────────────────────────
-    const yVal = pos.getY(i);
-    const modelHeight = maxY - minY;
     const isBaseCut = modelHeight > 16.0 && (isUpper
       ? (yVal >= maxY - 1.8 && vNorm.y > 0.65)
       : (yVal <= minY + 1.8 && vNorm.y < -0.65));
 
-    const isOcclusalTable = modelHeight > 16.0 && (isUpper
-      ? (yVal <= minY + 2.0)
-      : (yVal >= maxY - 2.0));
+    const isOcclusalTable = isFullArch && (
+      distFromTip <= 1.2 ||
+      (distFromTip <= 3.2 && (isUpper ? vNorm.y < -0.20 : vNorm.y > 0.20))
+    );
 
-    if (isBaseCut || isOcclusalTable) {
+    const isAlveolarBone = isFullArch && (distFromTip > 6.8);
+
+    if (isBaseCut || isOcclusalTable || isAlveolarBone) {
       depths[i] = 0;
       const cIdx = i * 3;
       heatmapColors[cIdx] = 0.25;

@@ -153,6 +153,47 @@ export function generateBlockout(
     smoothPeak[s] = w > 0 ? sum / w : isUpper ? minY : maxY;
   }
 
+  const spanX = maxX - minX;
+  const isFullArch = spanX > 30.0;
+
+  // Track maximum height of contour within clinical crown zone
+  const maxContourRadius = new Float32Array(numSectors);
+  maxContourRadius.fill(0);
+
+  for (let i = 0; i < count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const angle = Math.atan2(x - midX, z - focalZ);
+    const s = Math.max(
+      0,
+      Math.min(
+        numSectors - 1,
+        Math.floor(((angle + maxSpanAngle) / (2 * maxSpanAngle)) * numSectors),
+      ),
+    );
+    const tip = smoothPeak[s]!;
+    const distFromTip = isUpper ? y - tip : tip - y;
+
+    if (!isFullArch || (distFromTip >= 0 && distFromTip <= 7.2)) {
+      const r = Math.hypot(x - midX, z - focalZ);
+      if (r > maxContourRadius[s]!) {
+        maxContourRadius[s] = r;
+      }
+    }
+  }
+
+  const smoothContour = new Float32Array(numSectors);
+  for (let s = 0; s < numSectors; s++) {
+    let sum = 0, w = 0;
+    for (let d = -2; d <= 2; d++) {
+      const idx = s + d;
+      if (idx >= 0 && idx < numSectors) {
+        sum += maxContourRadius[idx]!;
+        w++;
+      }
+    }
+    smoothContour[s] = w > 0 ? sum / w : maxContourRadius[s]!;
+  }
+
   // Clone positions for the merged final geometry
   const mergedPositions = new Float32Array(pos.array);
   // Arrays for the standalone "Red Digital Wax" overlay
@@ -194,22 +235,27 @@ export function generateBlockout(
     // Clinical Boundary Exclusions:
     // 1. Base cut plane: flat mechanical mounting cut on clinical dental models (>16mm)
     //    where normals point vertically into the cut base (maxY for upper, minY for lower)
-    // 2. Occlusal table & incisal edges: functional biting surfaces must never have
+    // 2. Occlusal table & incisal edges: functional biting surfaces must NEVER have
     //    blockout wax so the aligner seats with solid vertical occlusal indexing
+    // 3. Clinical crown boundary: dentition undercuts are confined to the anatomical crown
+    //    (<= 6.8mm) to strictly prevent wax blankets over the alveolar bone & chin
     // ────────────────────────────────────────────────────────────────────────
     const modelHeight = maxY - minY;
     const isBaseCut = modelHeight > 16.0 && (isUpper
       ? (vPos.y >= maxY - 1.8 && vNorm.y > 0.65)
       : (vPos.y <= minY + 1.8 && vNorm.y < -0.65));
 
-    const isOcclusalTable = modelHeight > 16.0 && (isUpper
-      ? (vPos.y <= minY + 2.0)
-      : (vPos.y >= maxY - 2.0));
+    const isOcclusalTable = isFullArch && (
+      distFromTip <= 1.2 ||
+      (distFromTip <= 3.2 && (isUpper ? vNorm.y < -0.20 : vNorm.y > 0.20))
+    );
+
+    const isClinicalCrown = !isFullArch || (distFromTip >= 1.0 && distFromTip <= 6.8);
 
     // ────────────────────────────────────────────────────────────────────────
     // Component 1: Interproximal Wax Blockout
     // ────────────────────────────────────────────────────────────────────────
-    if (protocol.interproximal.enabled && !isBaseCut && !isOcclusalTable) {
+    if (protocol.interproximal.enabled && !isBaseCut && !isOcclusalTable && isClinicalCrown) {
       if (resolvedContacts.length > 0) {
         // Anatomical contact zone check: find nearest interdental contact
         let nearestContact: ResolvedContact | null = null;
@@ -235,8 +281,16 @@ export function generateBlockout(
             // Normal alignment with interdental tangent: in an embrasure groove, surface faces adjacent tooth
             const dotTangent = Math.abs(vNorm.x * nearestContact.tangent.x + vNorm.z * nearestContact.tangent.z);
 
-            // True embrasures have normal pointing toward adjacent tooth and sit within narrow interdental corridor
-            const isEmbrasure = dTangent < 1.7 && dotTangent > 0.28;
+            // Compute outward radial direction from arch center to suppress false facial enamel wax
+            const rx = vPos.x - midX;
+            const rz = vPos.z - focalZ;
+            const rHypot = Math.hypot(rx, rz);
+            const normRadialDot = rHypot > 0.001 ? (vNorm.x * rx + vNorm.z * rz) / rHypot : 0;
+            const contourR = smoothContour[s]!;
+            const isOuterFacial = isFullArch && normRadialDot > 0.58 && (rHypot >= contourR - 0.45);
+
+            // True embrasures have normal pointing toward adjacent tooth, sit within narrow interdental corridor, and are not outer facial enamel
+            const isEmbrasure = !isOuterFacial && dTangent < 1.4 && dotTangent > 0.36;
             // Missing tooth edentulous span bridging
             const isEdentulousSpan =
               protocol.interproximal.bridgeSpaces &&
@@ -246,7 +300,7 @@ export function generateBlockout(
             if (isEmbrasure || isEdentulousSpan) {
               const embrasureFactor = isEdentulousSpan
                 ? 1.0
-                : Math.max(0, 1.0 - dTangent / 1.7) * Math.min(1.0, (dotTangent - 0.28) / 0.4);
+                : Math.max(0, 1.0 - dTangent / 1.4) * Math.min(1.0, (dotTangent - 0.36) / 0.4);
               const proxDisp = protocol.interproximal.thicknessMm * embrasureFactor;
 
               if (proxDisp > displacementMagnitude) {
@@ -275,7 +329,7 @@ export function generateBlockout(
     // ────────────────────────────────────────────────────────────────────────
     // Component 2: Gingival Line Blockout (Cervical Margin Relief)
     // ────────────────────────────────────────────────────────────────────────
-    if (protocol.gingival.enabled && !isBaseCut) {
+    if (protocol.gingival.enabled && !isBaseCut && !isOcclusalTable) {
       // Cervical line is around 4.8mm - 6.5mm from crown tip
       const isCervicalZone = distFromTip >= 4.5 && distFromTip <= 6.8;
       if (isCervicalZone) {
@@ -295,7 +349,7 @@ export function generateBlockout(
     // ────────────────────────────────────────────────────────────────────────
     // Component 3: Dentition Undercut Blockout
     // ────────────────────────────────────────────────────────────────────────
-    if (protocol.undercut.enabled && !isBaseCut && !isOcclusalTable) {
+    if (protocol.undercut.enabled && !isBaseCut && !isOcclusalTable && isClinicalCrown) {
       // Check per-tooth override (doctor can disable blockout on specific teeth)
       const toothAllowed = protocol.undercut.perTooth[fdi] !== false;
       const depth = survey.depths[i] ?? 0;

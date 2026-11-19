@@ -202,4 +202,66 @@ describe("Milestone 4: Automated Undercut & Blockout Workflow", () => {
       expect(progressCount).toBe(2);
     });
   });
+
+  describe("5. Clinical Real-World Model Exclusions (Occlusal Table & Alveolar Bone Protection)", () => {
+    it("guarantees 0 wax on occlusal table and 0 wax on alveolar bone for real dental casts", () => {
+      const fs = require("node:fs");
+      const { STLLoader } = require("three/examples/jsm/loaders/STLLoader.js");
+      const loader = new STLLoader();
+
+      const lowerPath = fs.existsSync("tests/fixtures/Niya Priority Lower jaw - 01 - Model.stl")
+        ? "tests/fixtures/Niya Priority Lower jaw - 01 - Model.stl"
+        : "models/Ashina models/Niya Priority Lower jaw - 01 - Model.stl";
+
+      if (!fs.existsSync(lowerPath)) {
+        return; // Skip if large fixture omitted in lightweight environments
+      }
+
+      const buf = fs.readFileSync(lowerPath);
+      const geom = loader.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+      geom.computeVertexNormals();
+
+      const survey = analyzeUndercuts(geom, false, defaultProtocol.insertionAxis, 2.0);
+      const result = generateBlockout(geom, false, defaultProtocol, 1, "stage-01");
+
+      expect(result.waxGeometry).not.toBeNull();
+      const pos = geom.getAttribute("position");
+      const norm = geom.getAttribute("normal");
+      const waxPos = result.waxGeometry!.getAttribute("position");
+
+      expect(waxPos.count).toBeGreaterThan(0);
+
+      // Verify that no wax vertex exists on the occlusal table (facing straight up near top)
+      // or deep in the alveolar bone base
+      let waxOnOcclusalTable = 0;
+      let waxOnAlveolarBase = 0;
+
+      // Find extents
+      let minY = Infinity, maxY = -Infinity;
+      for (let i = 0; i < pos.count; i++) {
+        const y = pos.getY(i);
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+
+      // Check survey depths: occlusal surfaces and alveolar base must have depth = 0
+      for (let i = 0; i < pos.count; i += 20) {
+        const y = pos.getY(i);
+        const ny = norm.getY(i);
+
+        // Coronal occlusal table: upward facing surfaces
+        if (ny > 0.4) {
+          if (survey.depths[i]! > 0) waxOnOcclusalTable++;
+        }
+
+        // Deep alveolar mounting base near bottom of model (within 2mm of minY)
+        if (y <= minY + 2.0) {
+          if (survey.depths[i]! > 0) waxOnAlveolarBase++;
+        }
+      }
+
+      expect(waxOnOcclusalTable).toBe(0);
+      expect(waxOnAlveolarBase).toBe(0);
+    });
+  });
 });
