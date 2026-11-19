@@ -23,6 +23,7 @@ import {
   Scene,
 } from "three";
 import type { Viewport } from "../../viewer/viewport";
+import { computeAnatomicalColors } from "../../viewer/three-viewport";
 import type { CaseManifest } from "../stage-manifest";
 import type {
   BlockoutProtocol,
@@ -292,15 +293,25 @@ export class BlockoutStudio {
     const geom = this.viewport.getLayerGeometry(this.getLayerId());
     if (geom) {
       const pos = geom.getAttribute("position");
-      if (pos && !geom.userData.pristinePositions) {
-        geom.userData.pristinePositions = new Float32Array(pos.array);
-      }
-      if (geom.userData.pristinePositions) {
-        (pos as any).array.set(geom.userData.pristinePositions);
-        pos.needsUpdate = true;
+      if (pos) {
+        if (
+          !geom.userData.pristinePositions ||
+          geom.userData.pristinePositions.length !== pos.array.length
+        ) {
+          geom.userData.pristinePositions = new Float32Array(pos.array);
+        } else {
+          (pos as any).array.set(geom.userData.pristinePositions);
+          pos.needsUpdate = true;
+        }
       }
     }
     return geom;
+  }
+
+  public reloadCurrentStage(): void {
+    this.stageResults.delete(this.currentStageIndex);
+    this.loadCurrentStageBlockout();
+    this.updateUI();
   }
 
   private loadCurrentStageBlockout(): void {
@@ -348,6 +359,11 @@ export class BlockoutStudio {
   }
 
   private applyResultTo3D(result: StageBlockoutResult): void {
+    const layerMesh = this.viewport.getLayerMesh ? this.viewport.getLayerMesh(this.getLayerId()) : null;
+    if (layerMesh) {
+      layerMesh.visible = true;
+    }
+
     // 1. Digital Wax Overlay Mesh
     if (this.waxMesh) {
       if (this.showWaxOverlay && result.waxGeometry) {
@@ -364,7 +380,9 @@ export class BlockoutStudio {
     if (baseGeom) {
       if (this.showHeatmap && result.survey) {
         baseGeom.setAttribute("color", new BufferAttribute(result.survey.heatmapColors, 3));
-        const layerMesh = this.viewport.getLayerMesh ? this.viewport.getLayerMesh(this.getLayerId()) : null;
+        if (baseGeom.attributes["color"]) {
+          baseGeom.attributes["color"].needsUpdate = true;
+        }
         if (layerMesh && layerMesh.material instanceof MeshStandardMaterial) {
           layerMesh.material.vertexColors = true;
           layerMesh.material.needsUpdate = true;
@@ -375,8 +393,7 @@ export class BlockoutStudio {
     }
 
     // 3. Connect target mesh to sculptor
-    if (this.sculptor && this.viewport.getLayerMesh) {
-      const layerMesh = this.viewport.getLayerMesh(this.getLayerId());
+    if (this.sculptor && layerMesh) {
       this.sculptor.setTargetMesh(layerMesh, result.stageId);
       this.sculptor.setSecondaryMesh(this.waxMesh);
       this.sculptor.setStageDeltas(result.stageId, result.sculptDeltas);
@@ -388,13 +405,35 @@ export class BlockoutStudio {
   private restoreBaseColors(): void {
     const baseGeom = this.getBaseGeometry();
     if (!baseGeom) return;
-    if (baseGeom.userData.baseColors instanceof BufferAttribute) {
+    const pos = baseGeom.getAttribute("position");
+    const posCount = pos ? pos.count : 0;
+
+    if (
+      baseGeom.userData.baseColors instanceof BufferAttribute &&
+      baseGeom.userData.baseColors.count === posCount
+    ) {
       baseGeom.setAttribute("color", baseGeom.userData.baseColors.clone());
+    } else {
+      const currentColor = baseGeom.getAttribute("color");
+      if (currentColor && currentColor.count === posCount && !this.showHeatmap) {
+        baseGeom.userData.baseColors = currentColor.clone();
+      } else {
+        computeAnatomicalColors(baseGeom, this.isUpper ? "Upper Jaw" : "Lower Jaw");
+        if (baseGeom.getAttribute("color")) {
+          baseGeom.userData.baseColors = baseGeom.getAttribute("color")!.clone();
+        }
+      }
+    }
+    if (baseGeom.attributes["color"]) {
+      baseGeom.attributes["color"].needsUpdate = true;
     }
     const layerMesh = this.viewport.getLayerMesh ? this.viewport.getLayerMesh(this.getLayerId()) : null;
-    if (layerMesh && layerMesh.material instanceof MeshStandardMaterial) {
-      layerMesh.material.vertexColors = true;
-      layerMesh.material.needsUpdate = true;
+    if (layerMesh) {
+      layerMesh.visible = true;
+      if (layerMesh.material instanceof MeshStandardMaterial) {
+        layerMesh.material.vertexColors = Boolean(baseGeom.getAttribute("color"));
+        layerMesh.material.needsUpdate = true;
+      }
     }
   }
 

@@ -698,8 +698,10 @@ export function createTreatmentApp(
           syncCadWorkspaceTabs(tab);
         },
         onStageChange: (idx) => {
-          void navigate(idx);
-          syncCadTopBar(blockoutStudioInstance?.getArch() ?? "upper", idx);
+          void navigate(idx).then(() => {
+            syncCadTopBar(blockoutStudioInstance?.getArch() ?? "upper", idx);
+            blockoutStudioInstance?.reloadCurrentStage();
+          });
         },
         onArchChange: (arch) => {
           const isUp = arch === "upper";

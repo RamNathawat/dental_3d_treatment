@@ -1241,14 +1241,14 @@ export async function loadStageGeometries(
           if (upperNoAttGeom && upperNoAttGeom !== upperGeom) {
             upperNoAttGeom = capPlanarOpenings(upperNoAttGeom, true);
           }
-          if (upperGeom.getAttribute("color") && !upperGeom.userData.baseColors) {
+          if (upperGeom.getAttribute("color")) {
             upperGeom.userData.baseColors = upperGeom.getAttribute("color")!.clone();
           }
           upperGeom.computeBoundingBox();
           upperGeom.computeBoundingSphere();
         }
         if (upperNoAttGeom) {
-          if (upperNoAttGeom.getAttribute("color") && !upperNoAttGeom.userData.baseColors) {
+          if (upperNoAttGeom.getAttribute("color")) {
             upperNoAttGeom.userData.baseColors = upperNoAttGeom.getAttribute("color")!.clone();
           }
           upperNoAttGeom.computeBoundingBox();
@@ -1304,14 +1304,14 @@ export async function loadStageGeometries(
           if (lowerNoAttGeom && lowerNoAttGeom !== lowerGeom) {
             lowerNoAttGeom = capPlanarOpenings(lowerNoAttGeom, false);
           }
-          if (lowerGeom.getAttribute("color") && !lowerGeom.userData.baseColors) {
+          if (lowerGeom.getAttribute("color")) {
             lowerGeom.userData.baseColors = lowerGeom.getAttribute("color")!.clone();
           }
           lowerGeom.computeBoundingBox();
           lowerGeom.computeBoundingSphere();
         }
         if (lowerNoAttGeom) {
-          if (lowerNoAttGeom.getAttribute("color") && !lowerNoAttGeom.userData.baseColors) {
+          if (lowerNoAttGeom.getAttribute("color")) {
             lowerNoAttGeom.userData.baseColors = lowerNoAttGeom.getAttribute("color")!.clone();
           }
           lowerNoAttGeom.computeBoundingBox();

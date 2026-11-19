@@ -382,6 +382,13 @@ export function capPlanarOpenings(
       "color",
       new THREE.BufferAttribute(newColors as any, itemSize, isUint8),
     );
+    if (geometry.userData) {
+      geometry.userData.baseColors = geometry.getAttribute("color")!.clone();
+    }
+  }
+
+  if (geometry.userData && geometry.userData.pristinePositions) {
+    geometry.userData.pristinePositions = new Float32Array(newPositions);
   }
 
   if (index) {

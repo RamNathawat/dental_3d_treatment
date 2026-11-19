@@ -351,6 +351,9 @@ class ThreeViewport implements Viewport {
           const raw = this.loader.parse(spec.stl);
           const isUpper = !spec.label.toLowerCase().includes("lower");
           geometry = capPlanarOpenings(raw, isUpper);
+          if (geometry.getAttribute("color")) {
+            geometry.userData.baseColors = geometry.getAttribute("color")!.clone();
+          }
           // Scanner exports often carry unusable facet normals, so shading is derived from
           // the triangles themselves.
           geometry.computeVertexNormals();
@@ -511,11 +514,27 @@ class ThreeViewport implements Viewport {
   }
 
   getLayerGeometry(id: string): BufferGeometry | null {
-    return this.layers.get(id)?.geometry ?? null;
+    if (this.layers.has(id)) return this.layers.get(id)!.geometry;
+    let match: RenderedLayer | null = null;
+    for (const [key, layer] of this.layers.entries()) {
+      if (key === id || key.startsWith(`${id}-`)) {
+        match = layer;
+        if (layer.visible && layer.opacity > 0) return layer.geometry;
+      }
+    }
+    return match?.geometry ?? null;
   }
 
   getLayerMesh(id: string): Mesh | null {
-    return this.layers.get(id)?.mesh ?? null;
+    if (this.layers.has(id)) return this.layers.get(id)!.mesh;
+    let match: RenderedLayer | null = null;
+    for (const [key, layer] of this.layers.entries()) {
+      if (key === id || key.startsWith(`${id}-`)) {
+        match = layer;
+        if (layer.visible && layer.opacity > 0) return layer.mesh;
+      }
+    }
+    return match?.mesh ?? null;
   }
 
   getThreeScene(): Scene {
@@ -600,12 +619,22 @@ class ThreeViewport implements Viewport {
     layer.colour = colour;
     if (colour === "anatomical") {
       // Restore clean base colors if present (e.g. after contacts mode is disabled)
-      if (layer.geometry.userData.baseColors instanceof BufferAttribute) {
+      const posCount = layer.geometry.getAttribute("position")?.count;
+      if (
+        layer.geometry.userData.baseColors instanceof BufferAttribute &&
+        layer.geometry.userData.baseColors.count === posCount
+      ) {
         layer.geometry.setAttribute("color", layer.geometry.userData.baseColors.clone());
         layer.geometry.attributes["color"]!.needsUpdate = true;
-      } else if (!layer.geometry.getAttribute("color")) {
+      } else if (
+        !layer.geometry.getAttribute("color") ||
+        layer.geometry.getAttribute("color")?.count !== posCount
+      ) {
         // ONLY compute if no vertex colors exist at all; NEVER overwrite existing vertex colors!
         computeAnatomicalColors(layer.geometry, layer.label);
+        if (layer.geometry.getAttribute("color")) {
+          layer.geometry.userData.baseColors = layer.geometry.getAttribute("color")!.clone();
+        }
       }
       layer.material.vertexColors = Boolean(layer.geometry.getAttribute("color"));
       layer.material.color.set("#ffffff");
@@ -915,8 +944,14 @@ class ThreeViewport implements Viewport {
 
   private layerFor(id: string): RenderedLayer {
     const layer = this.layers.get(id);
-    if (layer === undefined)
+    if (layer === undefined) {
+      for (const [key, l] of this.layers.entries()) {
+        if (key === id || key.startsWith(`${id}-`)) {
+          return l;
+        }
+      }
       throw new Error(`No layer with id "${id}" has been added.`);
+    }
     return layer;
   }
 

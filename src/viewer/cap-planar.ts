@@ -260,6 +260,11 @@ export function capPlanarOpenings(
       "color",
       new BufferAttribute(newColors as any, itemSize, isUint8),
     );
+    geometry.userData.baseColors = geometry.getAttribute("color")!.clone();
+  }
+
+  if (geometry.userData.pristinePositions) {
+    geometry.userData.pristinePositions = new Float32Array(newPositions);
   }
 
   if (index) {
