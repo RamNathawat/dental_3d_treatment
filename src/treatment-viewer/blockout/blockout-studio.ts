@@ -769,9 +769,6 @@ export class BlockoutStudio {
           </div>
         </div>
         <button type="button" class="bo-btn-propagate" title="Apply reference protocol across all transitional stages">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-          </svg>
           <span>Apply to All Stages</span>
         </button>
       </div>
@@ -811,9 +808,6 @@ export class BlockoutStudio {
             <polyline points="9 18 15 12 9 6"></polyline>
           </svg>
         </button>
-        <span class="bo-dock-stage-badge ${this.currentStageIndex === 0 ? "bo-dock-stage-badge--ref" : ""}">
-          ${this.currentStageIndex === 0 ? "★ Ref" : `Stage ${this.currentStageIndex + 1}/${totalStages}`}
-        </span>
       </div>
 
       <div class="bo-dock-divider"></div>
@@ -1198,16 +1192,6 @@ export class BlockoutStudio {
 
     // Update dock stepper indicator, slider and button disabled states
     if (this.dockEl) {
-      const stageBadgeEl = this.dockEl.querySelector(".bo-dock-stage-badge");
-      if (stageBadgeEl) {
-        if (this.currentStageIndex === 0) {
-          stageBadgeEl.className = "bo-dock-stage-badge bo-dock-stage-badge--ref";
-          stageBadgeEl.textContent = "★ Ref";
-        } else {
-          stageBadgeEl.className = "bo-dock-stage-badge";
-          stageBadgeEl.textContent = `Stage ${this.currentStageIndex + 1}/${totalStages}`;
-        }
-      }
       const prevBtn = this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-prev");
       const nextBtn = this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-next");
       if (prevBtn) prevBtn.disabled = this.currentStageIndex <= 0;

@@ -194,6 +194,34 @@ export function generateBlockout(
     smoothContour[s] = w > 0 ? sum / w : maxContourRadius[s]!;
   }
 
+  // Pre-calculate cervical margin boundary vertices separating crown enamel from gingiva
+  const colorAttr = baseGeometry.getAttribute("color");
+  const isCervicalBorder = new Uint8Array(count);
+  if (colorAttr) {
+    const isGumVertex = new Uint8Array(count);
+    for (let i = 0; i < count; i++) {
+      const r = colorAttr.getX(i);
+      const g = colorAttr.getY(i);
+      const b = colorAttr.getZ(i);
+      if (r > 0.35 && (r - g) > 0.10 && !(r > 0.75 && g > 0.20 && g < 0.55 && b < 0.18)) {
+        isGumVertex[i] = 1;
+      }
+    }
+    const index = baseGeometry.getIndex();
+    const numTris = index ? index.count / 3 : Math.floor(count / 3);
+    for (let t = 0; t < numTris; t++) {
+      const i0 = index ? index.getX(t * 3) : t * 3;
+      const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+      const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+      const sum = isGumVertex[i0]! + isGumVertex[i1]! + isGumVertex[i2]!;
+      if (sum === 1 || sum === 2) {
+        isCervicalBorder[i0] = 1;
+        isCervicalBorder[i1] = 1;
+        isCervicalBorder[i2] = 1;
+      }
+    }
+  }
+
   // Clone positions for the merged final geometry
   const mergedPositions = new Float32Array(pos.array);
   // Arrays for the standalone "Red Digital Wax" overlay
@@ -333,11 +361,15 @@ export function generateBlockout(
     // Component 2: Gingival Line Blockout (Cervical Margin Relief)
     // ────────────────────────────────────────────────────────────────────────
     if (protocol.gingival.enabled && !isBaseCut && !isOcclusalTable) {
-      // Cervical line is around 4.8mm - 6.5mm from crown tip
-      const isCervicalZone = distFromTip >= 4.5 && distFromTip <= 6.8;
+      // True cervical margin zone: either on the color boundary between tooth and gum,
+      // or at the scalloped anatomical CEJ transition (never in the middle of crown enamel)
+      const isCervicalZone = colorAttr
+        ? isCervicalBorder[i] === 1
+        : (distFromTip >= 5.0 && distFromTip <= 5.8);
+
       if (isCervicalZone) {
         // Exclude missing tooth spans if requested (teeth 18, 28, 38, 48 or marked edentulous)
-        const isEdentulous = protocol.gingival.excludeEdentulous && (fdi % 10 === 8 || distFromTip > 6.2);
+        const isEdentulous = protocol.gingival.excludeEdentulous && (fdi % 10 === 8 || distFromTip > 7.5);
         if (!isEdentulous) {
           const gingivalDisp = protocol.gingival.reliefMm;
           if (gingivalDisp > displacementMagnitude) {
@@ -360,8 +392,12 @@ export function generateBlockout(
       // Facial enamel on anterior teeth or outer facial surfaces must NEVER receive digital wax
       const isAnteriorFacial = isFullArch && normRadialDot > 0.20 && (Math.abs(angle) < 0.85 || fdi === 0 || (fdi % 10 <= 3));
       const isOuterFacialCrown = isFullArch && normRadialDot > 0.38;
+      // Anterior incisal & lingual crown protection: anterior teeth (#11, #12, #21, #22)
+      // must keep their lingual fossa clean for torque and retraction control
+      const isAnteriorTooth = Math.abs(angle) < 0.65 || (fdi !== 0 && fdi % 10 <= 2);
+      const isAnteriorLingualEnamel = isFullArch && isAnteriorTooth && normRadialDot < -0.10 && distFromTip < 6.5;
 
-      if (toothAllowed && !isAnteriorFacial && !isOuterFacialCrown && depth > protocol.undercut.maxDepthMm) {
+      if (toothAllowed && !isAnteriorFacial && !isOuterFacialCrown && !isAnteriorLingualEnamel && depth > protocol.undercut.maxDepthMm) {
         const excessDepth = depth - protocol.undercut.maxDepthMm;
         const undercutDisp = Math.min(1.5, excessDepth * 0.85);
 
