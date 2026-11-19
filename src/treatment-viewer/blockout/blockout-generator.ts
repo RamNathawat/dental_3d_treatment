@@ -146,11 +146,14 @@ export function generateBlockout(
     for (let d = -3; d <= 3; d++) {
       const idx = s + d;
       if (idx >= 0 && idx < numSectors) {
-        sum += peakY[idx]!;
-        w++;
+        const v = peakY[idx]!;
+        if (isUpper ? v < Infinity : v > -Infinity) {
+          sum += v;
+          w++;
+        }
       }
     }
-    smoothPeak[s] = w > 0 ? sum / w : isUpper ? minY : maxY;
+    smoothPeak[s] = w > 0 ? sum / w : (isUpper ? minY : maxY);
   }
 
   const spanX = maxX - minX;
@@ -195,29 +198,75 @@ export function generateBlockout(
   }
 
   // Pre-calculate cervical margin boundary vertices separating crown enamel from gingiva
-  const colorAttr = baseGeometry.getAttribute("color");
+  const colorAttr =
+    (baseGeometry.userData.baseColors instanceof BufferAttribute
+      ? baseGeometry.userData.baseColors
+      : null) || (baseGeometry.getAttribute("color") as BufferAttribute | undefined);
+
   const isCervicalBorder = new Uint8Array(count);
+  let hasCervicalBorder = false;
+
   if (colorAttr) {
     const isGumVertex = new Uint8Array(count);
+    let gumCount = 0;
+    let toothCount = 0;
+
     for (let i = 0; i < count; i++) {
-      const r = colorAttr.getX(i);
-      const g = colorAttr.getY(i);
-      const b = colorAttr.getZ(i);
-      if (r > 0.35 && (r - g) > 0.10 && !(r > 0.75 && g > 0.20 && g < 0.55 && b < 0.18)) {
+      let r = colorAttr.getX(i);
+      let g = colorAttr.getY(i);
+      let b = colorAttr.getZ(i);
+      // Normalize if in 0..255 range (e.g. Uint8Array attributes from GLB accessors)
+      if (r > 1.0 || g > 1.0 || b > 1.0) {
+        r /= 255.0;
+        g /= 255.0;
+        b /= 255.0;
+      }
+      const isAttachment =
+        (r > 0.75 && g > 0.16 && g < 0.55 && b < 0.18) ||
+        (r > 0.85 && g > 0.35 && g < 0.72 && b < 0.28);
+      // Gum tissue has distinct coral-rose color: high red, low green (< 0.28), and r significantly higher than g
+      if (!isAttachment && (g < 0.28 && r > 0.30 && (r - g) > 0.10)) {
         isGumVertex[i] = 1;
+        gumCount++;
+      } else {
+        toothCount++;
       }
     }
-    const index = baseGeometry.getIndex();
-    const numTris = index ? index.count / 3 : Math.floor(count / 3);
-    for (let t = 0; t < numTris; t++) {
-      const i0 = index ? index.getX(t * 3) : t * 3;
-      const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
-      const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
-      const sum = isGumVertex[i0]! + isGumVertex[i1]! + isGumVertex[i2]!;
-      if (sum === 1 || sum === 2) {
-        isCervicalBorder[i0] = 1;
-        isCervicalBorder[i1] = 1;
-        isCervicalBorder[i2] = 1;
+
+    // Only compute boundary if mesh contains both tooth enamel and gingiva
+    if (gumCount > 0 && toothCount > 0) {
+      const index = baseGeometry.getIndex();
+      const numTris = index ? index.count / 3 : Math.floor(count / 3);
+      // Pass 1: Mark direct boundary vertices (level 2) on triangles bridging tooth and gum
+      for (let t = 0; t < numTris; t++) {
+        const i0 = index ? index.getX(t * 3) : t * 3;
+        const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+        const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+        const sum = isGumVertex[i0]! + isGumVertex[i1]! + isGumVertex[i2]!;
+        if (sum === 1 || sum === 2) {
+          isCervicalBorder[i0] = 2;
+          isCervicalBorder[i1] = 2;
+          isCervicalBorder[i2] = 2;
+          hasCervicalBorder = true;
+        }
+      }
+
+      // Pass 2: Dilate 1-ring neighbors to level 1 for a smooth, rounded clinical relief bead
+      if (hasCervicalBorder) {
+        for (let t = 0; t < numTris; t++) {
+          const i0 = index ? index.getX(t * 3) : t * 3;
+          const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+          const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+          const hasLevel2 =
+            isCervicalBorder[i0] === 2 ||
+            isCervicalBorder[i1] === 2 ||
+            isCervicalBorder[i2] === 2;
+          if (hasLevel2) {
+            if (isCervicalBorder[i0] === 0) isCervicalBorder[i0] = 1;
+            if (isCervicalBorder[i1] === 0) isCervicalBorder[i1] = 1;
+            if (isCervicalBorder[i2] === 0) isCervicalBorder[i2] = 1;
+          }
+        }
       }
     }
   }
@@ -361,21 +410,48 @@ export function generateBlockout(
     // Component 2: Gingival Line Blockout (Cervical Margin Relief)
     // ────────────────────────────────────────────────────────────────────────
     if (protocol.gingival.enabled && !isBaseCut && !isOcclusalTable) {
+      // Base crown height for anatomical CEJ fallback (when color segmentation is absent)
+      let baseCrownHeight = isUpper ? 5.4 : 4.8;
+      const absAngle = Math.abs(angle);
+      if (absAngle > 0.22 && absAngle < 0.46) {
+        baseCrownHeight += 0.55;
+      } else if (absAngle >= 0.46) {
+        baseCrownHeight -= 0.55;
+      }
+      const scallop = Math.max(-0.8, Math.min(0.5, 0.4 * Math.max(0, normRadialDot)));
+      const cejHeight = baseCrownHeight + scallop;
+
       // True cervical margin zone: either on the color boundary between tooth and gum,
       // or at the scalloped anatomical CEJ transition (never in the middle of crown enamel)
-      const isCervicalZone = colorAttr
-        ? isCervicalBorder[i] === 1
-        : (distFromTip >= 5.0 && distFromTip <= 5.8);
+      const borderLevel = hasCervicalBorder
+        ? isCervicalBorder[i]!
+        : (distFromTip >= cejHeight - 0.45 && distFromTip <= cejHeight + 0.45 ? 2 : 0);
 
-      if (isCervicalZone) {
-        // Exclude missing tooth spans if requested (teeth 18, 28, 38, 48 or marked edentulous)
-        const isEdentulous = protocol.gingival.excludeEdentulous && (fdi % 10 === 8 || distFromTip > 7.5);
+      if (borderLevel > 0 && distFromTip >= 2.5) {
+        // Exclude missing tooth spans if requested (teeth 18, 28, 38, 48)
+        const isEdentulous = protocol.gingival.excludeEdentulous && (fdi % 10 === 8);
         if (!isEdentulous) {
-          const gingivalDisp = protocol.gingival.reliefMm;
+          const reliefFactor = borderLevel === 2 ? 1.0 : 0.65;
+          const gingivalDisp = protocol.gingival.reliefMm * reliefFactor;
           if (gingivalDisp > displacementMagnitude) {
             displacementMagnitude = gingivalDisp;
-            // Displace outward along cervical normal
-            dispVector.set(vNorm.x, 0, vNorm.z).normalize().multiplyScalar(gingivalDisp);
+            // Displace outward along cervical horizontal normal (with radial fallback)
+            const hNormX = vNorm.x;
+            const hNormZ = vNorm.z;
+            const hLen = Math.hypot(hNormX, hNormZ);
+            let dx = hNormX;
+            let dz = hNormZ;
+            if (hLen < 0.15) {
+              const rx = vPos.x - midX;
+              const rz = vPos.z - focalZ;
+              const rLen = Math.hypot(rx, rz) || 1;
+              dx = rx / rLen;
+              dz = rz / rLen;
+            } else {
+              dx /= hLen;
+              dz /= hLen;
+            }
+            dispVector.set(dx, 0, dz).multiplyScalar(gingivalDisp);
           }
         }
       }

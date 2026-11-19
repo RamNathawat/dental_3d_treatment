@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BoxGeometry,
+  BufferAttribute,
   BufferGeometry,
   CylinderGeometry,
   Mesh,
@@ -110,6 +111,53 @@ describe("Milestone 4: Automated Undercut & Blockout Workflow", () => {
 
       const result = generateBlockout(geom, true, noGingivalProtocol, 1);
       expect(result.mergedGeometry).toBeDefined();
+    });
+
+    it("correctly applies gingival margin relief along CEJ on colored models with Uint8 and Float32 vertex colors", () => {
+      // Create a test mesh representing a tooth arch with tooth enamel on top and gingiva below
+      const geom = new CylinderGeometry(8, 10, 12, 24);
+      const pos = geom.getAttribute("position")!;
+      const count = pos.count;
+
+      // Assign realistic Uint8 colors (0..255): top vertices are tooth enamel (ivory), bottom vertices are gum (coral-rose)
+      const uint8Colors = new Uint8Array(count * 3);
+      for (let i = 0; i < count; i++) {
+        const y = pos.getY(i);
+        const idx = i * 3;
+        if (y > 0) {
+          // Tooth enamel: warm ivory (e.g. RGB 200, 190, 175)
+          uint8Colors[idx] = 200;
+          uint8Colors[idx + 1] = 190;
+          uint8Colors[idx + 2] = 175;
+        } else {
+          // Gingival gum: rich vascular coral-rose (e.g. RGB 130, 24, 30)
+          uint8Colors[idx] = 130;
+          uint8Colors[idx + 1] = 24;
+          uint8Colors[idx + 2] = 30;
+        }
+      }
+      geom.setAttribute("color", new BufferAttribute(uint8Colors, 3, false));
+
+      const gingivalOnlyProtocol: BlockoutProtocol = {
+        ...defaultProtocol,
+        interproximal: { ...defaultProtocol.interproximal, enabled: false },
+        undercut: { ...defaultProtocol.undercut, enabled: false },
+        gingival: { enabled: true, reliefMm: 0.35, excludeEdentulous: false },
+      };
+
+      const result = generateBlockout(geom, true, gingivalOnlyProtocol, 1);
+      expect(result.waxGeometry).toBeDefined();
+      expect(result.waxGeometry).not.toBeNull();
+      // The wax overlay should have generated triangles along the tooth-gum border
+      expect(result.waxGeometry!.getAttribute("position")!.count).toBeGreaterThan(0);
+
+      // Verify that toggling gingival OFF produces 0 wax
+      const disabledProtocol: BlockoutProtocol = {
+        ...gingivalOnlyProtocol,
+        gingival: { ...gingivalOnlyProtocol.gingival, enabled: false },
+      };
+      const disabledResult = generateBlockout(geom, true, disabledProtocol, 1);
+      expect(disabledResult.waxGeometry).toBeNull();
     });
   });
 

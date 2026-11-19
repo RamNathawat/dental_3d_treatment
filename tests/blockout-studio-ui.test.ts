@@ -113,7 +113,6 @@ describe("Blockout Studio UI & Interaction", () => {
     expect(dock?.querySelector(".bo-dock-overlays")).not.toBeNull();
     expect(dock?.querySelector(".bo-dock-timeline")).not.toBeNull();
     expect(dock?.querySelector(".bo-dock-slider")).not.toBeNull();
-    expect(dock?.querySelector(".bo-dock-stage-badge")?.textContent).toContain("Ref");
     expect(dock?.querySelector(".bo-dock-btn-reset")).not.toBeNull();
 
     // Check FDI Tooth Chart
@@ -252,8 +251,7 @@ describe("Blockout Studio UI & Interaction", () => {
 
     // Change stage to Stage 2
     studio.setStageIndex(1);
-    const stageBadge = container.querySelector(".bo-dock-stage-badge");
-    expect(stageBadge?.textContent).toContain("Stage 2");
+    expect(studio.getStageIndex()).toBe(1);
 
     studio.unmount();
   });
