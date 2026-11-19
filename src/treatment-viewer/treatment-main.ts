@@ -54,6 +54,7 @@ function showSecurityGateState(opts: {
   clinicName?: string | null;
   clinicEmail?: string | null;
   expiredDate?: Date | null;
+  shareToken?: string | null;
 }) {
   const root = getRoot();
   if (!root) return;
@@ -110,6 +111,16 @@ function showSecurityGateState(opts: {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
                 Email Clinic: ${contactEmail}
               </a>`
+            : ""
+        }
+        ${
+          !isRevoked && opts.shareToken
+            ? `<div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.08); display: flex; flex-direction: column; align-items: center; gap: 6px;">
+                <span style="font-size: 11px; color: #94a3b8;">Doctor / Dental Lab Staff?</span>
+                <a href="/treatment?case=${encodeURIComponent(opts.shareToken)}&mode=blockout" style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #ffd166; background: rgba(224, 180, 87, 0.15); border: 1px solid rgba(224, 180, 87, 0.3); padding: 8px 16px; border-radius: 8px; text-decoration: none;">
+                  Open Undercut &amp; Blockout Studio →
+                </a>
+              </div>`
             : ""
         }
       </div>
@@ -210,12 +221,18 @@ export async function initTreatmentViewer(): Promise<void> {
           return;
         }
 
+        const isBlockoutMode =
+          initialMode === "blockout" ||
+          params.get("mode") === "blockout" ||
+          window.location.hash.includes("blockout");
+
         const expiresAtStr =
           caseRecord.expires_at ??
           notesObj?.link_access?.expires_at ??
           localCache?.expiresAt ??
           null;
-        if (expiresAtStr) {
+        // Expiry applies strictly to patient progression links; never blocks Undercut & Blockout Studio
+        if (expiresAtStr && !isBlockoutMode) {
           const expiresAtTime = new Date(expiresAtStr).getTime();
           if (!isNaN(expiresAtTime) && expiresAtTime < Date.now()) {
             showSecurityGateState({
@@ -224,6 +241,7 @@ export async function initTreatmentViewer(): Promise<void> {
               clinicName: caseRecord.clinic_name,
               clinicEmail: caseRecord.clinic_email,
               expiredDate: new Date(expiresAtStr),
+              shareToken,
             });
             return;
           }

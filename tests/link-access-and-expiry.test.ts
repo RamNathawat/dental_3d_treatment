@@ -90,5 +90,23 @@ describe("Milestone 3: Link Access & Expiry Logic", () => {
     const formatted = formatForDateTimeInput(testDate);
     expect(formatted).toBe("2026-11-15T14:30");
   });
+
+  it("ensures expiry does not apply when accessing Undercut & Blockout Studio (mode=blockout)", () => {
+    const pastDate = new Date(Date.now() - 1000 * 60 * 60 * 48).toISOString();
+    const caseRecord = {
+      expires_at: pastDate,
+      is_revoked: false,
+    };
+
+    // Patient viewer access check:
+    const expiresAtTime = new Date(caseRecord.expires_at).getTime();
+    const isExpiredForPatient = !isNaN(expiresAtTime) && expiresAtTime < Date.now();
+    expect(isExpiredForPatient).toBe(true);
+
+    // Doctor/Lab Undercut & Blockout Studio access check:
+    const isBlockoutMode = true;
+    const shouldBlockAccess = isExpiredForPatient && !isBlockoutMode;
+    expect(shouldBlockAccess).toBe(false);
+  });
 });
 

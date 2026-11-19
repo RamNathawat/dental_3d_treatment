@@ -8,6 +8,7 @@ interface SecurityGateData {
   patientName: string;
   clinicName: string | null;
   clinicEmail: string | null;
+  shareToken?: string | null;
   expiredDateFormatted?: string | null;
 }
 
@@ -112,14 +113,18 @@ export default function TreatmentViewerClient() {
               return;
             }
 
-            // 2. Check Expiration date
+            // 2. Check Expiration date (Only applies to patient progression viewing; NEVER to Undercut & Blockout Studio)
+            const isBlockoutMode =
+              params.get("mode") === "blockout" ||
+              window.location.hash.includes("blockout");
+
             const expiresAtStr =
               caseRecord.expires_at ??
               notesObj?.link_access?.expires_at ??
               localCache?.expiresAt ??
               null;
 
-            if (expiresAtStr) {
+            if (expiresAtStr && !isBlockoutMode) {
               const expiresAtTime = new Date(expiresAtStr).getTime();
               if (!isNaN(expiresAtTime) && expiresAtTime < Date.now()) {
                 const expDate = new Date(expiresAtStr);
@@ -128,6 +133,7 @@ export default function TreatmentViewerClient() {
                   patientName,
                   clinicName,
                   clinicEmail,
+                  shareToken,
                   expiredDateFormatted: expDate.toLocaleDateString(undefined, {
                     month: "long",
                     day: "numeric",
@@ -265,6 +271,19 @@ export default function TreatmentViewerClient() {
                 >
                   <Mail className="w-3.5 h-3.5" />
                   <span>Email Clinic: {gateState.clinicEmail}</span>
+                </a>
+              </div>
+            )}
+
+            {/* Direct CTA to Undercut & Blockout Studio for doctors/technicians */}
+            {!isRevoked && gateState.shareToken && (
+              <div className="mt-3 pt-3 border-t border-white/[0.08] flex flex-col items-center gap-2">
+                <span className="text-[11px] text-slate-400">Doctor / Dental Lab Staff?</span>
+                <a
+                  href={`/treatment?case=${encodeURIComponent(gateState.shareToken)}&mode=blockout`}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 transition-all shadow-sm"
+                >
+                  Open Undercut &amp; Blockout Studio →
                 </a>
               </div>
             )}

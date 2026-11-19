@@ -237,7 +237,7 @@ export function generateBlockout(
     if (gumCount > 0 && toothCount > 0) {
       const index = baseGeometry.getIndex();
       const numTris = index ? index.count / 3 : Math.floor(count / 3);
-      // Pass 1: Mark direct boundary vertices (level 2) on triangles bridging tooth and gum
+      // Pass 1: Mark direct boundary vertices (level 2) on triangles bridging tooth and gum (welded single-mesh scans)
       for (let t = 0; t < numTris; t++) {
         const i0 = index ? index.getX(t * 3) : t * 3;
         const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
@@ -248,6 +248,100 @@ export function generateBlockout(
           isCervicalBorder[i1] = 2;
           isCervicalBorder[i2] = 2;
           hasCervicalBorder = true;
+        }
+      }
+
+      // Pass 1b: If mesh contains separate un-welded submeshes (e.g. Maestro 3D multi-mesh GLBs
+      // where tooth and gum meshes are merged without welded boundary edges), detect open boundary
+      // collar edges between the teeth and gingival sockets
+      if (!hasCervicalBorder) {
+        const edgeMap = new Map<number, number>();
+        for (let t = 0; t < numTris; t++) {
+          const i0 = index ? index.getX(t * 3) : t * 3;
+          const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+          const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+          const k0 = i0 < i1 ? i0 * 1000000 + i1 : i1 * 1000000 + i0;
+          const k1 = i1 < i2 ? i1 * 1000000 + i2 : i2 * 1000000 + i1;
+          const k2 = i2 < i0 ? i2 * 1000000 + i0 : i0 * 1000000 + i2;
+          edgeMap.set(k0, (edgeMap.get(k0) || 0) + 1);
+          edgeMap.set(k1, (edgeMap.get(k1) || 0) + 1);
+          edgeMap.set(k2, (edgeMap.get(k2) || 0) + 1);
+        }
+
+        const gumB: number[] = [];
+        const toothB: number[] = [];
+        const baseCutGumY = isUpper ? maxY - 1.5 : minY + 1.5;
+
+        edgeMap.forEach((cnt, k) => {
+          if (cnt === 1) {
+            const v1 = Math.floor(k / 1000000);
+            const v2 = k % 1000000;
+            for (const v of [v1, v2]) {
+              if (isGumVertex[v] === 1) {
+                // Filter out mechanical flat base cuts of the dental model
+                const y = pos.getY(v);
+                if (isUpper ? y < baseCutGumY : y > baseCutGumY) {
+                  gumB.push(v);
+                }
+              } else {
+                toothB.push(v);
+              }
+            }
+          }
+        });
+
+        if (gumB.length > 0 && toothB.length > 0) {
+          const uniqueGumB = Array.from(new Set(gumB));
+          const uniqueToothB = Array.from(new Set(toothB));
+
+          const cs = 0.8;
+          const grid = new Map<string, number[]>();
+          for (const gv of uniqueGumB) {
+            const gx = Math.floor(pos.getX(gv) / cs);
+            const gy = Math.floor(pos.getY(gv) / cs);
+            const gz = Math.floor(pos.getZ(gv) / cs);
+            const gk = `${gx},${gy},${gz}`;
+            let l = grid.get(gk);
+            if (!l) {
+              l = [];
+              grid.set(gk, l);
+            }
+            l.push(gv);
+          }
+
+          const maxDistSq = 0.45 * 0.45;
+          for (const tv of uniqueToothB) {
+            const px = pos.getX(tv);
+            const py = pos.getY(tv);
+            const pz = pos.getZ(tv);
+            const gx = Math.floor(px / cs);
+            const gy = Math.floor(py / cs);
+            const gz = Math.floor(pz / cs);
+            let matched = false;
+            for (let dx = -1; dx <= 1 && !matched; dx++) {
+              for (let dy = -1; dy <= 1 && !matched; dy++) {
+                for (let dz = -1; dz <= 1 && !matched; dz++) {
+                  const l = grid.get(`${gx + dx},${gy + dy},${gz + dz}`);
+                  if (l) {
+                    for (let m = 0; m < l.length; m++) {
+                      const gv = l[m]!;
+                      const d2 =
+                        (px - pos.getX(gv)) ** 2 +
+                        (py - pos.getY(gv)) ** 2 +
+                        (pz - pos.getZ(gv)) ** 2;
+                      if (d2 <= maxDistSq) {
+                        isCervicalBorder[tv] = 2;
+                        isCervicalBorder[gv] = 2;
+                        hasCervicalBorder = true;
+                        matched = true;
+                        break;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
 
@@ -410,24 +504,23 @@ export function generateBlockout(
     // Component 2: Gingival Line Blockout (Cervical Margin Relief)
     // ────────────────────────────────────────────────────────────────────────
     if (protocol.gingival.enabled && !isBaseCut && !isOcclusalTable) {
-      // Base crown height for anatomical CEJ fallback (when color segmentation is absent)
-      let baseCrownHeight = isUpper ? 5.4 : 4.8;
+      // Anatomical crown height fallback (ONLY for unsegmented monochromatic casts with no color or mesh separation)
+      let baseCrownHeight = isUpper ? 9.2 : 8.2;
       const absAngle = Math.abs(angle);
       if (absAngle > 0.22 && absAngle < 0.46) {
-        baseCrownHeight += 0.55;
+        baseCrownHeight -= 0.6; // lateral/canine
       } else if (absAngle >= 0.46) {
-        baseCrownHeight -= 0.55;
+        baseCrownHeight -= 1.8; // premolars & molars have shorter crowns
       }
       const scallop = Math.max(-0.8, Math.min(0.5, 0.4 * Math.max(0, normRadialDot)));
       const cejHeight = baseCrownHeight + scallop;
 
-      // True cervical margin zone: either on the color boundary between tooth and gum,
-      // or at the scalloped anatomical CEJ transition (never in the middle of crown enamel)
+      // True cervical margin zone: strictly along the CEJ boundary (never in the middle of crown enamel)
       const borderLevel = hasCervicalBorder
         ? isCervicalBorder[i]!
         : (distFromTip >= cejHeight - 0.45 && distFromTip <= cejHeight + 0.45 ? 2 : 0);
 
-      if (borderLevel > 0 && distFromTip >= 2.5) {
+      if (borderLevel > 0 && distFromTip >= 1.5) {
         // Exclude missing tooth spans if requested (teeth 18, 28, 38, 48)
         const isEdentulous = protocol.gingival.excludeEdentulous && (fdi % 10 === 8);
         if (!isEdentulous) {

@@ -10,6 +10,7 @@ import {
   Scene,
   SphereGeometry,
 } from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { analyzeUndercuts } from "../src/treatment-viewer/blockout/undercut-analyzer";
 import { generateBlockout } from "../src/treatment-viewer/blockout/blockout-generator";
 import { WaxSculptor } from "../src/treatment-viewer/blockout/wax-sculptor";
@@ -158,6 +159,49 @@ describe("Milestone 4: Automated Undercut & Blockout Workflow", () => {
       };
       const disabledResult = generateBlockout(geom, true, disabledProtocol, 1);
       expect(disabledResult.waxGeometry).toBeNull();
+    });
+
+    it("correctly identifies cervical margin on multi-mesh un-welded GLB models (Maestro 3D)", () => {
+      // Build separate tooth and gum cylinders merged without welding
+      const toothGeom = new CylinderGeometry(4, 4, 8, 16, 2, true);
+      toothGeom.translate(0, 4, 0); // y: 0 to 8
+      const toothPos = toothGeom.getAttribute("position");
+      const toothColors = new Float32Array(toothPos.count * 3);
+      for (let i = 0; i < toothPos.count; i++) {
+        toothColors[i * 3] = 0.8;
+        toothColors[i * 3 + 1] = 0.75;
+        toothColors[i * 3 + 2] = 0.65;
+      }
+      toothGeom.setAttribute("color", new BufferAttribute(toothColors, 3));
+
+      const gumGeom = new CylinderGeometry(4, 4, 8, 16, 2, true);
+      gumGeom.translate(0, -4, 0); // y: -8 to 0
+      const gumPos = gumGeom.getAttribute("position");
+      const gumColors = new Float32Array(gumPos.count * 3);
+      for (let i = 0; i < gumPos.count; i++) {
+        gumColors[i * 3] = 0.65; // high red
+        gumColors[i * 3 + 1] = 0.15; // low green (< 0.28)
+        gumColors[i * 3 + 2] = 0.15;
+      }
+      gumGeom.setAttribute("color", new BufferAttribute(gumColors, 3));
+
+      // Merge without welding (zero triangles span across tooth and gum)
+      const mergedGeom = mergeGeometries([toothGeom, gumGeom], false);
+      expect(mergedGeom).not.toBeNull();
+
+      const gingivalProtocol: BlockoutProtocol = {
+        ...defaultProtocol,
+        interproximal: { ...defaultProtocol.interproximal, enabled: false },
+        undercut: { ...defaultProtocol.undercut, enabled: false },
+        gingival: { enabled: true, reliefMm: 0.40, excludeEdentulous: false },
+      };
+
+      const result = generateBlockout(mergedGeom!, true, gingivalProtocol, 1);
+      expect(result.waxGeometry).toBeDefined();
+      expect(result.waxGeometry).not.toBeNull();
+      // Verifies that Pass 1b successfully detected the multi-mesh CEJ boundary
+      const waxCount = result.waxGeometry!.getAttribute("position")!.count;
+      expect(waxCount).toBeGreaterThan(0);
     });
   });
 
