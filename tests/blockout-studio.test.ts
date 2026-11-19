@@ -133,6 +133,31 @@ describe("Milestone 4: Automated Undercut & Blockout Workflow", () => {
       expect(sculptor.canUndo()).toBe(false);
       expect(sculptor.canRedo()).toBe(false);
 
+      // Verify that carving wax clamps net wax to 0 and cannot dig into tooth or produce spiky geometry
+      const deltasCarve = new Map<number, [number, number, number]>();
+      deltasCarve.set(0, [-1.5, 0, 0]); // Aggressive carve attempt on vertex 0
+      const carveResult = generateBlockout(geom, true, defaultProtocol, 1, "stage-01", deltasCarve);
+      expect(carveResult.mergedGeometry).toBeDefined();
+
+      const mergedPos = carveResult.mergedGeometry!.getAttribute("position")!;
+      const origPos = geom.getAttribute("position")!;
+      // Vertex 0 was carved: its merged position must not be displaced into negative space
+      expect(mergedPos.getX(0)).toBeCloseTo(origPos.getX(0), 3);
+      expect(mergedPos.getY(0)).toBeCloseTo(origPos.getY(0), 3);
+      expect(mergedPos.getZ(0)).toBeCloseTo(origPos.getZ(0), 3);
+
+      // Verify that adding wax increases wax thickness along surface normal
+      const deltasAdd = new Map<number, [number, number, number]>();
+      deltasAdd.set(0, [0.8, 0, 0]); // Add 0.8mm of wax to vertex 0
+      const addResult = generateBlockout(geom, true, defaultProtocol, 1, "stage-01", deltasAdd);
+      const addMergedPos = addResult.mergedGeometry!.getAttribute("position")!;
+      const dist = Math.hypot(
+        addMergedPos.getX(0) - origPos.getX(0),
+        addMergedPos.getY(0) - origPos.getY(0),
+        addMergedPos.getZ(0) - origPos.getZ(0),
+      );
+      expect(dist).toBeGreaterThan(0.5);
+
       sculptor.dispose();
     });
   });

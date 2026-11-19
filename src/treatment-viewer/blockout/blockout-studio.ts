@@ -289,7 +289,18 @@ export class BlockoutStudio {
 
   private getBaseGeometry(): BufferGeometry | null {
     if (!this.viewport.getLayerGeometry) return null;
-    return this.viewport.getLayerGeometry(this.getLayerId());
+    const geom = this.viewport.getLayerGeometry(this.getLayerId());
+    if (geom) {
+      const pos = geom.getAttribute("position");
+      if (pos && !geom.userData.pristinePositions) {
+        geom.userData.pristinePositions = new Float32Array(pos.array);
+      }
+      if (geom.userData.pristinePositions) {
+        (pos as any).array.set(geom.userData.pristinePositions);
+        pos.needsUpdate = true;
+      }
+    }
+    return geom;
   }
 
   private loadCurrentStageBlockout(): void {

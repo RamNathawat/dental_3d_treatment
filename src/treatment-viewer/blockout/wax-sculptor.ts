@@ -123,7 +123,6 @@ export class WaxSculptor {
     const prev = this.undoStack.pop()!;
     this.redoStack.push(new Map(this.activeDeltas));
     this.activeDeltas = prev;
-    this.applyCurrentDeltasToMesh();
     this.notifyStroke();
     return true;
   }
@@ -133,7 +132,6 @@ export class WaxSculptor {
     const next = this.redoStack.pop()!;
     this.undoStack.push(new Map(this.activeDeltas));
     this.activeDeltas = next;
-    this.applyCurrentDeltasToMesh();
     this.notifyStroke();
     return true;
   }
@@ -283,12 +281,13 @@ export class WaxSculptor {
     }
   }
 
+  private lastStrokeUpdateTime = 0;
+
   private applyBrushStroke(center: Vector3): void {
     if (!this.targetMesh) return;
     const geom = this.targetMesh.geometry;
     const pos = geom.getAttribute("position");
-    const norm = geom.getAttribute("normal");
-    if (!pos || !norm) return;
+    if (!pos) return;
 
     // Convert world hit point into mesh local space
     const localCenter = center.clone();
@@ -300,86 +299,66 @@ export class WaxSculptor {
     const mode = this.config.mode;
 
     const count = pos.count;
-    let modified = 0;
-
     const vP = new Vector3();
-    const vN = new Vector3();
+
+    // Pass 1: Find all vertices within brush sphere and their falloffs
+    const affectedIndices: number[] = [];
+    const falloffs: number[] = [];
+    let sumDelta = 0;
 
     for (let i = 0; i < count; i++) {
       vP.set(pos.getX(i), pos.getY(i), pos.getZ(i));
       const distSq = vP.distanceToSquared(localCenter);
 
       if (distSq <= radiusSq) {
-        const falloff = Math.exp(-distSq / (radiusSq * 0.5));
-        const amount = strength * falloff * 0.25; // Millimeter step per frame
+        const dist = Math.sqrt(distSq);
+        const f = Math.max(0, 1.0 - dist / radius);
+        const falloff = f * f; // Smooth quadratic falloff
 
-        vN.set(norm.getX(i), norm.getY(i), norm.getZ(i)).normalize();
-        const existingDelta = this.activeDeltas.get(i) || [0, 0, 0];
+        affectedIndices.push(i);
+        falloffs.push(falloff);
 
-        if (mode === "add") {
-          // Deposit digital wax outward along surface normal
-          existingDelta[0] += vN.x * amount;
-          existingDelta[1] += vN.y * amount;
-          existingDelta[2] += vN.z * amount;
-          this.activeDeltas.set(i, existingDelta);
-
-          pos.setXYZ(i, vP.x + vN.x * amount, vP.y + vN.y * amount, vP.z + vN.z * amount);
-          modified++;
-        } else if (mode === "remove") {
-          // Carve / shave wax inward (reduces thickness or carves down)
-          const carveAmount = amount;
-          existingDelta[0] -= vN.x * carveAmount;
-          existingDelta[1] -= vN.y * carveAmount;
-          existingDelta[2] -= vN.z * carveAmount;
-          this.activeDeltas.set(i, existingDelta);
-
-          pos.setXYZ(i, vP.x - vN.x * carveAmount, vP.y - vN.y * carveAmount, vP.z - vN.z * carveAmount);
-          modified++;
-        } else if (mode === "smooth") {
-          // Smooth wax: blend position toward average center
-          const blendX = (localCenter.x - vP.x) * amount * 0.35;
-          const blendY = (localCenter.y - vP.y) * amount * 0.35;
-          const blendZ = (localCenter.z - vP.z) * amount * 0.35;
-
-          existingDelta[0] += blendX;
-          existingDelta[1] += blendY;
-          existingDelta[2] += blendZ;
-          this.activeDeltas.set(i, existingDelta);
-
-          pos.setXYZ(i, vP.x + blendX, vP.y + blendY, vP.z + blendZ);
-          modified++;
-        }
+        const d = this.activeDeltas.get(i);
+        sumDelta += d ? d[0] : 0;
       }
     }
 
-    if (modified > 0) {
-      pos.needsUpdate = true;
-      geom.computeVertexNormals();
-      this.hasStrokeModified = true;
-    }
-  }
+    if (affectedIndices.length === 0) return;
 
-  private applyCurrentDeltasToMesh(): void {
-    if (!this.targetMesh || !this.baseGeometry) return;
-    const basePos = this.baseGeometry.getAttribute("position");
-    const geom = this.targetMesh.geometry;
-    const pos = geom.getAttribute("position");
-    if (!basePos || !pos) return;
+    const avgDelta = sumDelta / affectedIndices.length;
 
-    for (let i = 0; i < pos.count; i++) {
-      const bx = basePos.getX(i);
-      const by = basePos.getY(i);
-      const bz = basePos.getZ(i);
+    // Pass 2: Apply wax adjustment based on selected tool mode
+    // (Never mutates the base tooth scan geometry; only modulates digital wax thickness)
+    for (let k = 0; k < affectedIndices.length; k++) {
+      const i = affectedIndices[k]!;
+      const falloff = falloffs[k]!;
+      const step = strength * falloff * 0.05; // Controlled 0.02 - 0.05 mm step per event
 
-      const delta = this.activeDeltas.get(i);
-      if (delta) {
-        pos.setXYZ(i, bx + delta[0], by + delta[1], bz + delta[2]);
-      } else {
-        pos.setXYZ(i, bx, by, bz);
+      const d = this.activeDeltas.get(i) || [0, 0, 0];
+
+      if (mode === "add") {
+        // Deposit digital wax outward (up to +2.5mm)
+        d[0] = Math.min(2.5, d[0] + step);
+      } else if (mode === "remove") {
+        // Carve / shave wax down (clamped at -2.5mm; blockout generator clamps net wax at 0mm)
+        d[0] = Math.max(-2.5, d[0] - step);
+      } else if (mode === "smooth") {
+        // Smooth wax: blend delta toward local average of neighboring wax
+        const blendFactor = strength * falloff * 0.35;
+        d[0] = d[0] * (1.0 - blendFactor) + avgDelta * blendFactor;
       }
+
+      this.activeDeltas.set(i, d);
     }
-    pos.needsUpdate = true;
-    geom.computeVertexNormals();
+
+    this.hasStrokeModified = true;
+
+    // Throttle real-time visual update during continuous drag (every 40ms)
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (now - this.lastStrokeUpdateTime > 40) {
+      this.lastStrokeUpdateTime = now;
+      this.notifyStroke();
+    }
   }
 
   private notifyStroke(): void {

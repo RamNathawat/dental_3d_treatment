@@ -368,14 +368,21 @@ export function generateBlockout(
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    // Component 4: Apply Manual Sculpt Deltas (if any recorded)
+    // Component 4: Apply Manual Sculpt Deltas (Digital Wax Carver / Hot Spatula)
     // ────────────────────────────────────────────────────────────────────────
     if (sculptDeltas && sculptDeltas.has(i)) {
       const delta = sculptDeltas.get(i)!;
-      dispVector.x += delta[0];
-      dispVector.y += delta[1];
-      dispVector.z += delta[2];
-      displacementMagnitude = Math.max(displacementMagnitude, Math.hypot(delta[0], delta[1], delta[2]));
+      // delta[0] is the scalar wax thickness adjustment in millimeters (+ for add, - for carve)
+      const manualDelta = delta[0];
+      // Wax thickness cannot go negative (cannot dig into enamel) and is capped at 2.5mm
+      const netThickness = Math.max(0, Math.min(2.5, displacementMagnitude + manualDelta));
+      displacementMagnitude = netThickness;
+
+      if (netThickness > 0.04) {
+        dispVector.copy(vNorm).multiplyScalar(netThickness);
+      } else {
+        dispVector.set(0, 0, 0);
+      }
     }
 
     // Apply displacement to merged geometry and record for discrete wax overlay
