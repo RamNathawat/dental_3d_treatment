@@ -285,7 +285,7 @@ export function generateBlockout(
       (distFromTip <= 3.2 && (isUpper ? vNorm.y < -0.20 : vNorm.y > 0.20))
     );
 
-    const isClinicalCrown = !isFullArch || (distFromTip >= 1.0 && distFromTip <= 6.8);
+    const isClinicalCrown = !isFullArch || (distFromTip >= 0.8 && distFromTip <= (isUpper ? 11.5 : 10.5));
 
     // ────────────────────────────────────────────────────────────────────────
     // Component 1: Interproximal Wax Blockout
@@ -306,9 +306,9 @@ export function generateBlockout(
           }
         }
 
-        if (nearestContact && nearestDistSq < 10.0) {
+        if (nearestContact && nearestDistSq < 16.0) {
           const dy = Math.abs(vPos.y - nearestContact.center.y);
-          if (dy < 4.2) {
+          if (dy < 6.8) {
             // Compute coordinate along the tangent line between adjacent teeth
             const dx = vPos.x - nearestContact.center.x;
             const dz = vPos.z - nearestContact.center.z;
@@ -320,18 +320,18 @@ export function generateBlockout(
             // Surfaces facing outward radially (normRadialDot > 0.22) are facial enamel, not interproximal embrasures
             const isOuterFacial = isFullArch && (normRadialDot > 0.22 || rHypot >= contourR - 0.45);
 
-            // True embrasures have normal pointing toward adjacent tooth, sit within narrow interdental corridor, and are not outer facial enamel
-            const isEmbrasure = !isOuterFacial && dTangent < 1.1 && dotTangent > 0.40;
+            // True embrasures have normal pointing toward adjacent tooth or down into interdental papilla
+            const isEmbrasure = !isOuterFacial && dTangent < 1.8 && (dotTangent > 0.32 || (distFromTip > 4.5 && dTangent < 1.4));
             // Missing tooth edentulous span bridging
             const isEdentulousSpan =
               protocol.interproximal.bridgeSpaces &&
-              nearestContact.spanDist > 8.5 &&
-              dTangent < nearestContact.spanDist * 0.45;
+              nearestContact.spanDist > 7.5 &&
+              dTangent < nearestContact.spanDist * 0.48;
 
             if (isEmbrasure || isEdentulousSpan) {
               const embrasureFactor = isEdentulousSpan
                 ? 1.0
-                : Math.max(0, 1.0 - dTangent / 1.1) * Math.min(1.0, (dotTangent - 0.40) / 0.35);
+                : Math.max(0, 1.0 - dTangent / 1.8) * Math.min(1.0, (dotTangent - 0.25) / 0.45);
               const proxDisp = protocol.interproximal.thicknessMm * embrasureFactor;
 
               if (proxDisp > displacementMagnitude) {
