@@ -220,6 +220,13 @@ export function generateBlockout(
     const tip = smoothPeak[s]!;
     const distFromTip = isUpper ? vPos.y - tip : tip - vPos.y;
 
+    // Outward radial direction from arch center to suppress false facial enamel wax
+    const rx = vPos.x - midX;
+    const rz = vPos.z - focalZ;
+    const rHypot = Math.hypot(rx, rz);
+    const normRadialDot = rHypot > 0.001 ? (vNorm.x * rx + vNorm.z * rz) / rHypot : 0;
+    const contourR = smoothContour[s]!;
+
     // Identify tooth FDI number at this vertex
     const toothInfo = identifyToothAtPoint(
       { x: vPos.x, y: vPos.y, z: vPos.z },
@@ -281,16 +288,12 @@ export function generateBlockout(
             // Normal alignment with interdental tangent: in an embrasure groove, surface faces adjacent tooth
             const dotTangent = Math.abs(vNorm.x * nearestContact.tangent.x + vNorm.z * nearestContact.tangent.z);
 
-            // Compute outward radial direction from arch center to suppress false facial enamel wax
-            const rx = vPos.x - midX;
-            const rz = vPos.z - focalZ;
-            const rHypot = Math.hypot(rx, rz);
-            const normRadialDot = rHypot > 0.001 ? (vNorm.x * rx + vNorm.z * rz) / rHypot : 0;
-            const contourR = smoothContour[s]!;
-            const isOuterFacial = isFullArch && normRadialDot > 0.58 && (rHypot >= contourR - 0.45);
+            // Facial enamel suppression: in an embrasure groove, normal faces adjacent tooth (dotTangent high)
+            // Surfaces facing outward radially (normRadialDot > 0.22) are facial enamel, not interproximal embrasures
+            const isOuterFacial = isFullArch && (normRadialDot > 0.22 || rHypot >= contourR - 0.45);
 
             // True embrasures have normal pointing toward adjacent tooth, sit within narrow interdental corridor, and are not outer facial enamel
-            const isEmbrasure = !isOuterFacial && dTangent < 1.4 && dotTangent > 0.36;
+            const isEmbrasure = !isOuterFacial && dTangent < 1.1 && dotTangent > 0.40;
             // Missing tooth edentulous span bridging
             const isEdentulousSpan =
               protocol.interproximal.bridgeSpaces &&
@@ -300,7 +303,7 @@ export function generateBlockout(
             if (isEmbrasure || isEdentulousSpan) {
               const embrasureFactor = isEdentulousSpan
                 ? 1.0
-                : Math.max(0, 1.0 - dTangent / 1.4) * Math.min(1.0, (dotTangent - 0.36) / 0.4);
+                : Math.max(0, 1.0 - dTangent / 1.1) * Math.min(1.0, (dotTangent - 0.40) / 0.35);
               const proxDisp = protocol.interproximal.thicknessMm * embrasureFactor;
 
               if (proxDisp > displacementMagnitude) {
@@ -354,7 +357,11 @@ export function generateBlockout(
       const toothAllowed = protocol.undercut.perTooth[fdi] !== false;
       const depth = survey.depths[i] ?? 0;
 
-      if (toothAllowed && depth > protocol.undercut.maxDepthMm) {
+      // Facial enamel on anterior teeth or outer facial surfaces must NEVER receive digital wax
+      const isAnteriorFacial = isFullArch && normRadialDot > 0.20 && (Math.abs(angle) < 0.85 || fdi === 0 || (fdi % 10 <= 3));
+      const isOuterFacialCrown = isFullArch && normRadialDot > 0.38;
+
+      if (toothAllowed && !isAnteriorFacial && !isOuterFacialCrown && depth > protocol.undercut.maxDepthMm) {
         const excessDepth = depth - protocol.undercut.maxDepthMm;
         const undercutDisp = Math.min(1.5, excessDepth * 0.85);
 

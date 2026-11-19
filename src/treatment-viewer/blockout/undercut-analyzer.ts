@@ -184,6 +184,12 @@ export function analyzeUndercuts(
     const tip = smoothPeak[s]!;
     const distFromTip = isUpper ? yVal - tip : tip - yVal;
 
+    // Outward radial direction from arch focal center
+    const rx = x - midX;
+    const rz = z - focalZ;
+    const rHypot = Math.hypot(rx, rz);
+    const normRadialDot = rHypot > 0.001 ? (vNorm.x * rx + vNorm.z * rz) / rHypot : 0;
+
     // ────────────────────────────────────────────────────────────────────────
     // Clinical Boundary Exclusions:
     // 1. Base cut plane: flat mechanical mounting cut on clinical dental models (>16mm)
@@ -191,6 +197,9 @@ export function analyzeUndercuts(
     //    undercut depths or wax so the aligner seats with solid vertical occlusal stops
     // 3. Alveolar bone & deep gums: aligners terminate 1-2mm from CEJ; jawbone is NOT
     //    a dental undercut and must never receive automated dentition blockout
+    // 4. Anterior facial enamel: labial surface of incisors and canines is the primary
+    //    aesthetic and tracking surface; it is naturally draft-compliant during aligner
+    //    seating and must NEVER be flagged as a retentive locking undercut
     // ────────────────────────────────────────────────────────────────────────
     const isBaseCut = modelHeight > 16.0 && (isUpper
       ? (yVal >= maxY - 1.8 && vNorm.y > 0.65)
@@ -203,7 +212,9 @@ export function analyzeUndercuts(
 
     const isAlveolarBone = isFullArch && (distFromTip > 6.8);
 
-    if (isBaseCut || isOcclusalTable || isAlveolarBone) {
+    const isAnteriorFacial = isFullArch && normRadialDot > 0.20 && Math.abs(angle) < 0.85 && distFromTip <= 6.8;
+
+    if (isBaseCut || isOcclusalTable || isAlveolarBone || isAnteriorFacial) {
       depths[i] = 0;
       const cIdx = i * 3;
       heatmapColors[cIdx] = 0.25;

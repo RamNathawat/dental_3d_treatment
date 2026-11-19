@@ -1355,7 +1355,7 @@ export function createTreatmentApp(
       ]),
     ]),
     div("tv-header__actions", [
-      blockoutHeaderBtn,
+      // blockoutHeaderBtn is omitted here: patient-facing 3D progression viewer must not expose internal CAD lab blockout studio
       notesHeaderBtn,
       gridBtn,
       recenterBtn,
