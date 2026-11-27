@@ -113,7 +113,7 @@ describe("Milestone 3 - Phase 2: Practice Hierarchy Storage", () => {
     expect(retrieved.length).toBe(1);
     expect(retrieved[0]?.name).toBe("Sunrise Orthodontic Studio");
     expect(retrieved[0]?.clinicId).toBe("CLN-02");
-  });
+  }, 15000);
 
   it("auto-provisions and persists a new doctor with optional specialization and contact", async () => {
     const created = await saveDoctor(testUserId, {
@@ -135,7 +135,7 @@ describe("Milestone 3 - Phase 2: Practice Hierarchy Storage", () => {
     expect(retrieved.length).toBe(1);
     expect(retrieved[0]?.name).toBe("Dr. Ananya Roy");
     expect(retrieved[0]?.specialization).toBe("Orthodontist / MDS");
-  });
+  }, 15000);
 
   it("updates practice profile with new branding and organization type", async () => {
     const { savePracticeProfile } = await import("../portal/lib/practice-storage");

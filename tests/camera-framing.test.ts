@@ -41,14 +41,16 @@ describe("posing the camera for an axis view", () => {
     expect(poseFor("top").direction.toArray()).toEqual([0, 0, 1]);
   });
 
-  it("keeps Z up for a view that is not along it", () => {
+  it("keeps Z up for views along the vertical axis (front and back)", () => {
     expect(poseFor("front").up.toArray()).toEqual([0, 0, 1]);
-    expect(poseFor("right").up.toArray()).toEqual([0, 0, 1]);
+    expect(poseFor("back").up.toArray()).toEqual([0, 0, 1]);
   });
 
-  it("takes another up for the two views that look along Z, which would otherwise roll", () => {
+  it("takes Y up for views along the horizontal plane (top, bottom, left, right) so the dental arch displays in landscape", () => {
     expect(poseFor("top").up.toArray()).toEqual([0, 1, 0]);
     expect(poseFor("bottom").up.toArray()).toEqual([0, 1, 0]);
+    expect(poseFor("left").up.toArray()).toEqual([0, 1, 0]);
+    expect(poseFor("right").up.toArray()).toEqual([0, 1, 0]);
     // Not parallel to the direction it is looking along, which is what "up" has to avoid.
     expect(
       Math.abs(poseFor("top").up.dot(poseFor("top").direction)),

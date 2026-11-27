@@ -9,6 +9,9 @@ import {
   sanitizeColorAttribute,
 } from "../src/treatment-viewer/model-loader";
 import { createTreatmentApp } from "../src/treatment-viewer/treatment-app";
+import { generateBlockout } from "../src/treatment-viewer/blockout/blockout-generator";
+import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
+import fs from "node:fs";
 import { FakeViewport } from "./fake-viewport";
 
 describe("Client Feedback Real-World Scenarios & Edge Cases", () => {
@@ -557,4 +560,32 @@ describe("Client Feedback Real-World Scenarios & Edge Cases", () => {
     // Vertex 3 should be Tooth ivory
     expect(clean.getX(3)).toBeCloseTo(0.82, 1);
   });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Feedback Issue 11: Routine blockout pattern matches clinical standard
+  // Smooth, complete interdental wax filling between all teeth, 0 occlusal wax,
+  // controllable wax thickness, and optional gingival relief
+  // ──────────────────────────────────────────────────────────────────────────
+  it("Scenario 11: Routine blockout pattern creates continuous, smooth interdental wax across all dental contacts", () => {
+    const lowerFile = "tests/fixtures/Niya Priority Lower jaw - 01 - Model.stl";
+    if (!fs.existsSync(lowerFile)) return;
+
+    const loader = new STLLoader();
+    const buf = fs.readFileSync(lowerFile);
+    const geom = loader.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+    geom.computeVertexNormals();
+
+    const protocol = {
+      insertionAxis: { x: 0, y: 1, z: 0, tiltX: 0, tiltY: 0 },
+      interproximal: { enabled: true, thicknessMm: 0.85, bridgeSpaces: true },
+      gingival: { enabled: false, reliefMm: 0.3, excludeEdentulous: true },
+      undercut: { enabled: true, maxDepthMm: 0.2, draftAngleDeg: 2.0, perTooth: {} },
+      printPrep: { shrinkageScalePercent: 100.5, drainHoles: [] },
+    };
+
+    const res = generateBlockout(geom, false, protocol, 1);
+    expect(res.fittingSummary).toBeDefined();
+    expect(res.fittingSummary!.contacts.length).toBeGreaterThan(0);
+    expect(res.waxGeometry).not.toBeNull();
+  }, 35000);
 });

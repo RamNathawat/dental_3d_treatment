@@ -16,11 +16,17 @@ import {
   BufferGeometry,
   Color,
   DoubleSide,
+  Group,
+  LineBasicMaterial,
   Mesh,
+  MeshBasicMaterial,
   MeshPhysicalMaterial,
   MeshStandardMaterial,
   PerspectiveCamera,
+  Raycaster,
   Scene,
+  SphereGeometry,
+  Vector2,
 } from "three";
 import type { Viewport } from "../../viewer/viewport";
 import { computeAnatomicalColors } from "../../viewer/three-viewport";
@@ -31,7 +37,7 @@ import type {
   StageBlockoutResult,
 } from "./types";
 import { generateBlockout } from "./blockout-generator";
-import { WaxSculptor } from "./wax-sculptor";
+import { WaxSculptor, type SculptStrokeEvent } from "./wax-sculptor";
 import {
   createBatchStlZip,
   createNestedBuildPlateGeometry,
@@ -39,6 +45,12 @@ import {
   exportBinaryStl,
   prepareGeometryForPrint,
 } from "./print-prep";
+import {
+  extractEmbrasureSilhouettes,
+  createSilhouette3DObject,
+  type EmbrasureSilhouette,
+} from "./embrasure-silhouette";
+import type { DetectedContact } from "./mesh-contact-detector";
 
 export interface BlockoutStudioOptions {
   viewport: Viewport;
@@ -67,10 +79,12 @@ export class BlockoutStudio {
   // Active protocol (starts on Stage 1 as the reference)
   private protocol: BlockoutProtocol = {
     insertionAxis: { x: 0, y: -1, z: 0, tiltX: 0, tiltY: 0 },
-    interproximal: { enabled: true, thicknessMm: 0.6, bridgeSpaces: true },
+    interproximal: { enabled: true, thicknessMm: 0.6, bridgeSpaces: false },
+    singleGapFocusKey: "all",
+    selectedContactKey: null,
     gingival: { enabled: false, reliefMm: 0.3, excludeEdentulous: true },
     undercut: {
-      enabled: true,
+      enabled: false,
       maxDepthMm: 0.5,
       draftAngleDeg: 2.0,
       perTooth: {},
@@ -84,7 +98,10 @@ export class BlockoutStudio {
   // Cache of processed stages for the current arch
   private stageResults = new Map<number, StageBlockoutResult>();
   // Distinct sculpt deltas per stage
-  private stageSculptDeltas = new Map<number, Map<number, [number, number, number]>>();
+  private stageSculptDeltas = new Map<
+    number,
+    Map<number, [number, number, number]>
+  >();
 
   // 3D Objects in Viewport Scene
   private threeScene: Scene | null = null;
@@ -92,6 +109,22 @@ export class BlockoutStudio {
   private waxMesh: Mesh | null = null;
   private waxMaterial: MeshPhysicalMaterial;
   private sculptor: WaxSculptor | null = null;
+  private contactMarkersGroup: Group | null = null;
+  private embrasureSilhouettesGroup: Group | null = null;
+  private showEmbrasureSilhouettes = false;
+  private showContactMarkers = false;
+  private selectedContactKey: string | null = null;
+  private silhouettes: EmbrasureSilhouette[] = [];
+
+  // Draggable Contact Markers Interaction
+  private activeDraggedMarker: Mesh | null = null;
+  private hoveredMarker: Mesh | null = null;
+  private markerRaycaster = new Raycaster();
+  private markerPointerPos = new Vector2();
+  private onPointerMoveBound: ((e: PointerEvent) => void) | null = null;
+  private onPointerDownBound: ((e: PointerEvent) => void) | null = null;
+  private onPointerUpBound: ((e: PointerEvent) => void) | null = null;
+  private onDblClickBound: ((e: MouseEvent) => void) | null = null;
 
   // UI State
   private activeTab: "blockout" | "sculpt" | "prep" = "blockout";
@@ -113,20 +146,26 @@ export class BlockoutStudio {
     this.onArchChangeCallback = options.onArchChange;
     this.onTabChangeCallback = options.onTabChange;
 
-    this.threeScene = this.viewport.getThreeScene ? this.viewport.getThreeScene() : null;
-    this.threeCamera = this.viewport.getThreeCamera ? this.viewport.getThreeCamera() : null;
+    this.threeScene = this.viewport.getThreeScene
+      ? this.viewport.getThreeScene()
+      : null;
+    this.threeCamera = this.viewport.getThreeCamera
+      ? this.viewport.getThreeCamera()
+      : null;
 
-    // Realistic dental wax red material (#dc2626 / crimson)
+    // Realistic melted dental laboratory blockout wax material (glossy warm rose-crimson sheen)
     this.waxMaterial = new MeshPhysicalMaterial({
-      color: new Color(0xdc2626),
-      roughness: 0.28,
-      metalness: 0.04,
-      transmission: 0.12,
-      thickness: 0.8,
-      clearcoat: 0.35,
-      clearcoatRoughness: 0.2,
-      transparent: true,
-      opacity: 0.94,
+      color: new Color(0xffffff),
+      vertexColors: true,
+      roughness: 0.24,
+      metalness: 0.02,
+      clearcoat: 0.68,
+      clearcoatRoughness: 0.16,
+      sheen: 0.35,
+      sheenRoughness: 0.35,
+      sheenColor: new Color(0xff94a4),
+      transparent: false,
+      opacity: 1.0,
       side: DoubleSide,
       depthTest: true,
       depthWrite: true,
@@ -138,21 +177,101 @@ export class BlockoutStudio {
 
   public mount(container: HTMLElement): void {
     this.container = container;
-    this.initWaxMesh();
-    this.initSculptor();
+    try {
+      this.initWaxMesh();
+    } catch (e) {
+      console.warn("initWaxMesh warning:", e);
+    }
+    try {
+      this.initSculptor();
+    } catch (e) {
+      console.warn("initSculptor warning:", e);
+    }
+    try {
+      this.initMarkerInteraction();
+    } catch (e) {
+      console.warn("initMarkerInteraction warning:", e);
+    }
     this.renderUI();
-    this.loadCurrentStageBlockout();
+    try {
+      this.loadCurrentStageBlockout();
+    } catch (e) {
+      console.warn("loadCurrentStageBlockout warning:", e);
+    }
   }
 
   public unmount(): void {
+    const domEl = this.getCanvasDomElement();
+    if (domEl) {
+      if (this.onPointerMoveBound)
+        domEl.removeEventListener("pointermove", this.onPointerMoveBound);
+      if (this.onPointerDownBound)
+        domEl.removeEventListener("pointerdown", this.onPointerDownBound);
+      if (this.onPointerUpBound) {
+        domEl.removeEventListener("pointerup", this.onPointerUpBound);
+        domEl.removeEventListener("pointercancel", this.onPointerUpBound);
+      }
+      if (this.onDblClickBound)
+        domEl.removeEventListener("dblclick", this.onDblClickBound);
+      domEl.style.cursor = "default";
+    }
+    const controls = this.viewport.getControls
+      ? this.viewport.getControls()
+      : null;
+    if (controls) controls.enabled = true;
+
     if (this.sculptor) {
       this.sculptor.dispose();
       this.sculptor = null;
     }
-    if (this.waxMesh && this.threeScene) {
-      this.threeScene.remove(this.waxMesh);
+    if (this.waxMesh) {
+      if (this.waxMesh.parent) {
+        this.waxMesh.parent.remove(this.waxMesh);
+      } else if (this.threeScene) {
+        this.threeScene.remove(this.waxMesh);
+      }
       this.waxMesh.geometry.dispose();
       this.waxMesh = null;
+    }
+    if (this.contactMarkersGroup) {
+      if (this.contactMarkersGroup.parent) {
+        this.contactMarkersGroup.parent.remove(this.contactMarkersGroup);
+      } else if (this.threeScene) {
+        this.threeScene.remove(this.contactMarkersGroup);
+      }
+      while (this.contactMarkersGroup.children.length > 0) {
+        const child = this.contactMarkersGroup.children[0] as Mesh;
+        this.contactMarkersGroup.remove(child);
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) {
+          if (Array.isArray(child.material))
+            child.material.forEach((m) => m.dispose());
+          else child.material.dispose();
+        }
+      }
+      this.contactMarkersGroup = null;
+    }
+    if (this.embrasureSilhouettesGroup) {
+      if (this.embrasureSilhouettesGroup.parent) {
+        this.embrasureSilhouettesGroup.parent.remove(
+          this.embrasureSilhouettesGroup,
+        );
+      } else if (this.threeScene) {
+        this.threeScene.remove(this.embrasureSilhouettesGroup);
+      }
+      while (this.embrasureSilhouettesGroup.children.length > 0) {
+        const child = this.embrasureSilhouettesGroup.children[0] as Group;
+        this.embrasureSilhouettesGroup.remove(child);
+        child.traverse((c) => {
+          if ((c as Mesh).geometry) (c as Mesh).geometry.dispose();
+          if ((c as Mesh).material) {
+            const mat = (c as Mesh).material;
+            if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+            else mat.dispose();
+          }
+        });
+      }
+      this.embrasureSilhouettesGroup = null;
     }
     if (this.panelEl && this.panelEl.parentNode) {
       this.panelEl.parentNode.removeChild(this.panelEl);
@@ -211,12 +330,106 @@ export class BlockoutStudio {
   }
 
   public toggleWaxOverlay(show?: boolean): boolean {
-    this.showWaxOverlay = typeof show === "boolean" ? show : !this.showWaxOverlay;
+    this.showWaxOverlay =
+      typeof show === "boolean" ? show : !this.showWaxOverlay;
     if (this.waxMesh) {
       this.waxMesh.visible = this.showWaxOverlay;
     }
+    if (this.contactMarkersGroup) {
+      this.contactMarkersGroup.visible =
+        this.showWaxOverlay && this.showContactMarkers;
+    }
+    if (this.embrasureSilhouettesGroup) {
+      this.embrasureSilhouettesGroup.visible =
+        this.showWaxOverlay && this.showEmbrasureSilhouettes;
+    }
     this.syncOverlayCheckboxes();
     return this.showWaxOverlay;
+  }
+
+  public toggleEmbrasureSilhouettes(show?: boolean): boolean {
+    this.showEmbrasureSilhouettes =
+      typeof show === "boolean" ? show : !this.showEmbrasureSilhouettes;
+    if (this.embrasureSilhouettesGroup) {
+      this.embrasureSilhouettesGroup.visible =
+        this.showEmbrasureSilhouettes && this.showWaxOverlay;
+    }
+    this.syncOverlayCheckboxes();
+    return this.showEmbrasureSilhouettes;
+  }
+
+  public toggleContactMarkers(show?: boolean): boolean {
+    this.showContactMarkers =
+      typeof show === "boolean" ? show : !this.showContactMarkers;
+    if (this.contactMarkersGroup) {
+      this.contactMarkersGroup.visible =
+        this.showWaxOverlay && this.showContactMarkers;
+    }
+    this.syncOverlayCheckboxes();
+    return this.showContactMarkers;
+  }
+
+  public selectContact(key: string | null): void {
+    this.selectedContactKey = key;
+    this.highlightActiveSilhouette(key);
+
+    if (this.contactMarkersGroup) {
+      this.contactMarkersGroup.children.forEach((obj) => {
+        const marker = obj as Mesh;
+        if (marker.userData?.contactKey === key) {
+          (marker.material as MeshStandardMaterial).color.set(0xfacc15);
+          (marker.material as MeshStandardMaterial).emissive.set(0xd97706);
+        } else {
+          (marker.material as MeshStandardMaterial).color.set(0xe58189);
+          (marker.material as MeshStandardMaterial).emissive.set(0x9d414a);
+        }
+      });
+    }
+
+    this.container
+      ?.querySelectorAll<HTMLTableRowElement>(".bo-contact-row")
+      .forEach((tr) => {
+        const rowKey = tr.getAttribute("data-contact-key");
+        const isSel = rowKey === key;
+        tr.style.background = isSel ? "rgba(245, 158, 11, 0.18)" : "";
+        tr.style.borderLeft = isSel ? "3px solid #facc15" : "";
+      });
+
+    const focusPill = this.container?.querySelector(".bo-wax-focus-pill");
+    if (focusPill && this.protocol.singleGapFocusKey !== "all" && key) {
+      focusPill.innerHTML = `Active Focus: <strong style="color:#facc15;">${key}</strong> <span style="color:#64748b;">(Click any row or 3D sphere to inspect another gap)</span>`;
+    }
+
+    this.protocol.selectedContactKey = key;
+    if (this.protocol.singleGapFocusKey !== "all" && key) {
+      if (this.protocol.singleGapFocusKey !== key) {
+        this.protocol.singleGapFocusKey = key;
+        this.recomputeCurrentBlockout();
+      }
+    } else if (key) {
+      this.recomputeCurrentBlockout();
+    }
+  }
+
+  private highlightActiveSilhouette(activeKey: string | null): void {
+    if (!this.embrasureSilhouettesGroup) return;
+    this.embrasureSilhouettesGroup.children.forEach((child) => {
+      const isSel = child.name === `embrasure-${activeKey}`;
+      const primaryColor = isSel ? new Color(0xfbbf24) : new Color(0x06b6d4);
+      const opacity = isSel ? 0.38 : 0.16;
+
+      child.traverse((c) => {
+        if ((c as any).isLine || (c as any).isLineSegments) {
+          const mat = (c as any).material as LineBasicMaterial;
+          mat.color.copy(primaryColor);
+          mat.opacity = isSel ? 0.95 : 0.75;
+        } else if ((c as any).isMesh) {
+          const mat = (c as any).material as MeshBasicMaterial;
+          mat.color.copy(primaryColor);
+          mat.opacity = opacity;
+        }
+      });
+    });
   }
 
   public toggleHeatmap(show?: boolean): boolean {
@@ -237,14 +450,41 @@ export class BlockoutStudio {
   public setArch(arch: "upper" | "lower"): void {
     if ((arch === "upper") === this.isUpper) return;
     this.isUpper = arch === "upper";
+    if (
+      this.protocol.singleGapFocusKey &&
+      this.protocol.singleGapFocusKey !== "all"
+    ) {
+      const defaultFocus = this.isUpper ? "11-21" : "41-31";
+      this.selectedContactKey = defaultFocus;
+      this.protocol.selectedContactKey = defaultFocus;
+      this.protocol.singleGapFocusKey = defaultFocus;
+    } else {
+      this.selectedContactKey = null;
+      this.protocol.selectedContactKey = null;
+    }
     this.protocol.insertionAxis.y = this.isUpper ? -1 : 1;
     this.stageResults.clear();
     this.stageSculptDeltas.clear();
-    this.loadCurrentStageBlockout();
-    this.updateUI();
+    if (this.waxMesh && this.waxMesh.parent) {
+      this.waxMesh.parent.remove(this.waxMesh);
+    }
+    if (this.contactMarkersGroup && this.contactMarkersGroup.parent) {
+      this.contactMarkersGroup.parent.remove(this.contactMarkersGroup);
+    }
+    if (
+      this.embrasureSilhouettesGroup &&
+      this.embrasureSilhouettesGroup.parent
+    ) {
+      this.embrasureSilhouettesGroup.parent.remove(
+        this.embrasureSilhouettesGroup,
+      );
+    }
+    // Notify viewport to switch active visible layer FIRST before querying geometry
     if (this.onArchChangeCallback) {
       this.onArchChangeCallback(arch);
     }
+    this.loadCurrentStageBlockout();
+    this.updateUI();
   }
 
   public setStageIndex(index: number): void {
@@ -275,7 +515,7 @@ export class BlockoutStudio {
       this.threeScene,
       this.threeCamera,
       domEl as HTMLElement,
-      (evt) => {
+      (evt: SculptStrokeEvent) => {
         // Record deltas for current stage
         this.stageSculptDeltas.set(this.currentStageIndex, evt.deltas);
         this.recomputeCurrentBlockout();
@@ -359,13 +599,24 @@ export class BlockoutStudio {
   }
 
   private applyResultTo3D(result: StageBlockoutResult): void {
-    const layerMesh = this.viewport.getLayerMesh ? this.viewport.getLayerMesh(this.getLayerId()) : null;
+    const layerMesh = this.viewport.getLayerMesh
+      ? this.viewport.getLayerMesh(this.getLayerId())
+      : null;
     if (layerMesh) {
       layerMesh.visible = true;
     }
 
-    // 1. Digital Wax Overlay Mesh
+    // 1. Digital Wax Overlay Mesh (attached directly to active arch layer mesh so it inherits separation lift & transforms)
     if (this.waxMesh) {
+      if (layerMesh && this.waxMesh.parent !== layerMesh) {
+        if (this.waxMesh.parent) {
+          this.waxMesh.parent.remove(this.waxMesh);
+        }
+        layerMesh.add(this.waxMesh);
+        this.waxMesh.position.set(0, 0, 0);
+        this.waxMesh.rotation.set(0, 0, 0);
+        this.waxMesh.scale.set(1, 1, 1);
+      }
       if (this.showWaxOverlay && result.waxGeometry) {
         this.waxMesh.geometry.dispose();
         this.waxMesh.geometry = result.waxGeometry;
@@ -375,11 +626,161 @@ export class BlockoutStudio {
       }
     }
 
-    // 2. Base Mesh Shading (Heatmap or Anatomical)
+    // 2. Physical Interdental Contact Markers (Milestone 4.1 Visual Verification)
+    if (!this.contactMarkersGroup) {
+      this.contactMarkersGroup = new Group();
+      this.contactMarkersGroup.name = "contact-markers-group";
+    }
+
+    const targetParent = layerMesh || this.threeScene;
+    if (targetParent && this.contactMarkersGroup.parent !== targetParent) {
+      if (this.contactMarkersGroup.parent) {
+        this.contactMarkersGroup.parent.remove(this.contactMarkersGroup);
+      }
+      targetParent.add(this.contactMarkersGroup);
+      this.contactMarkersGroup.position.set(0, 0, 0);
+      this.contactMarkersGroup.rotation.set(0, 0, 0);
+      this.contactMarkersGroup.scale.set(1, 1, 1);
+    }
+
+    // Dispose old markers
+    while (this.contactMarkersGroup.children.length > 0) {
+      const child = this.contactMarkersGroup.children[0] as Mesh;
+      this.contactMarkersGroup.remove(child);
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        if (Array.isArray(child.material))
+          child.material.forEach((m) => m.dispose());
+        else child.material.dispose();
+      }
+    }
+
+    if (
+      this.showWaxOverlay &&
+      result.fittingSummary?.contacts &&
+      result.fittingSummary.contacts.length > 0
+    ) {
+      const markerGeom = new SphereGeometry(0.24, 16, 16);
+      const activeFocus =
+        this.selectedContactKey || (this.isUpper ? "11-21" : "41-31");
+
+      for (const c of result.fittingSummary.contacts) {
+        const isCustom = Boolean(
+          this.protocol.contactOverrides?.[c.contactKey],
+        );
+        const isSelected = c.contactKey === activeFocus;
+        const markerMat = new MeshStandardMaterial({
+          color: isSelected ? 0xfacc15 : 0xe58189,
+          emissive: isSelected ? 0xd97706 : isCustom ? 0xf43f5e : 0x9d414a,
+          emissiveIntensity: isSelected ? 1.0 : isCustom ? 1.0 : 0.8,
+          roughness: 0.2,
+          metalness: 0.1,
+        });
+
+        const marker = new Mesh(markerGeom, markerMat);
+        marker.position.set(
+          c.contactPoint[0],
+          c.contactPoint[1],
+          c.contactPoint[2],
+        );
+        marker.name = `contact-marker-${c.contactKey}`;
+        marker.userData = {
+          contactKey: c.contactKey,
+          contact: c,
+          isCustom,
+        };
+        this.contactMarkersGroup.add(marker);
+      }
+      this.contactMarkersGroup.visible =
+        this.showWaxOverlay && this.showContactMarkers;
+    } else {
+      this.contactMarkersGroup.visible = false;
+    }
+
+    // 3. Embrasure Boundary Silhouettes (Milestone 4.2 Visual Verification)
+    if (!this.embrasureSilhouettesGroup) {
+      this.embrasureSilhouettesGroup = new Group();
+      this.embrasureSilhouettesGroup.name = "embrasure-silhouettes-group";
+    }
+
+    if (
+      targetParent &&
+      this.embrasureSilhouettesGroup.parent !== targetParent
+    ) {
+      if (this.embrasureSilhouettesGroup.parent) {
+        this.embrasureSilhouettesGroup.parent.remove(
+          this.embrasureSilhouettesGroup,
+        );
+      }
+      targetParent.add(this.embrasureSilhouettesGroup);
+      this.embrasureSilhouettesGroup.position.set(0, 0, 0);
+      this.embrasureSilhouettesGroup.rotation.set(0, 0, 0);
+      this.embrasureSilhouettesGroup.scale.set(1, 1, 1);
+    }
+
+    // Dispose old silhouettes
+    while (this.embrasureSilhouettesGroup.children.length > 0) {
+      const child = this.embrasureSilhouettesGroup.children[0] as Group;
+      this.embrasureSilhouettesGroup.remove(child);
+      child.traverse((c) => {
+        if ((c as Mesh).geometry) (c as Mesh).geometry.dispose();
+        if ((c as Mesh).material) {
+          const mat = (c as Mesh).material;
+          if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+          else mat.dispose();
+        }
+      });
+    }
+
     const baseGeom = this.getBaseGeometry();
+    if (
+      this.showWaxOverlay &&
+      this.showEmbrasureSilhouettes &&
+      baseGeom &&
+      result.fittingSummary?.contacts &&
+      result.fittingSummary.contacts.length > 0
+    ) {
+      const detectedContacts: DetectedContact[] =
+        result.fittingSummary.contacts.map((c, idx) => ({
+          id: `contact-${idx + 1}`,
+          index: idx,
+          contactKey: c.contactKey,
+          label: c.label,
+          toothA: c.toothA,
+          toothB: c.toothB,
+          position: [c.contactPoint[0], c.contactPoint[1], c.contactPoint[2]],
+          normal: [0, 0, 1],
+          clearanceMm: c.clearanceMm ?? 0.35,
+          spanMm: c.spanMm,
+          apexY: c.apexY,
+          baseY: c.baseY,
+          buccalWidthMm: c.buccalWidthMm,
+          lingualWidthMm: c.lingualWidthMm,
+        }));
+
+      this.silhouettes = extractEmbrasureSilhouettes(
+        baseGeom,
+        this.isUpper,
+        detectedContacts,
+      );
+
+      for (const sil of this.silhouettes) {
+        const isSelected = sil.contactKey === this.selectedContactKey;
+        const silObj = createSilhouette3DObject(sil, isSelected, false);
+        this.embrasureSilhouettesGroup.add(silObj);
+      }
+      this.embrasureSilhouettesGroup.visible = true;
+    } else {
+      this.embrasureSilhouettesGroup.visible = false;
+    }
+
+    // 4. Base Mesh Shading (Heatmap or Anatomical)
     if (baseGeom) {
       if (this.showHeatmap && result.survey) {
-        baseGeom.setAttribute("color", new BufferAttribute(result.survey.heatmapColors, 3));
+        baseGeom.setAttribute(
+          "color",
+          new BufferAttribute(result.survey.heatmapColors, 3),
+        );
         if (baseGeom.attributes["color"]) {
           baseGeom.attributes["color"].needsUpdate = true;
         }
@@ -415,24 +816,317 @@ export class BlockoutStudio {
       baseGeom.setAttribute("color", baseGeom.userData.baseColors.clone());
     } else {
       const currentColor = baseGeom.getAttribute("color");
-      if (currentColor && currentColor.count === posCount && !this.showHeatmap) {
+      if (
+        currentColor &&
+        currentColor.count === posCount &&
+        !this.showHeatmap
+      ) {
         baseGeom.userData.baseColors = currentColor.clone();
       } else {
-        computeAnatomicalColors(baseGeom, this.isUpper ? "Upper Jaw" : "Lower Jaw");
+        computeAnatomicalColors(
+          baseGeom,
+          this.isUpper ? "Upper Jaw" : "Lower Jaw",
+        );
         if (baseGeom.getAttribute("color")) {
-          baseGeom.userData.baseColors = baseGeom.getAttribute("color")!.clone();
+          baseGeom.userData.baseColors = baseGeom
+            .getAttribute("color")!
+            .clone();
         }
       }
     }
     if (baseGeom.attributes["color"]) {
       baseGeom.attributes["color"].needsUpdate = true;
     }
-    const layerMesh = this.viewport.getLayerMesh ? this.viewport.getLayerMesh(this.getLayerId()) : null;
+    const layerMesh = this.viewport.getLayerMesh
+      ? this.viewport.getLayerMesh(this.getLayerId())
+      : null;
     if (layerMesh) {
       layerMesh.visible = true;
       if (layerMesh.material instanceof MeshStandardMaterial) {
-        layerMesh.material.vertexColors = Boolean(baseGeom.getAttribute("color"));
+        layerMesh.material.vertexColors = Boolean(
+          baseGeom.getAttribute("color"),
+        );
         layerMesh.material.needsUpdate = true;
+      }
+    }
+  }
+
+  // ─── Draggable Contact Marker Interactivity ─────────────────────────────────
+
+  private getCanvasDomElement(): HTMLElement | null {
+    if (this.viewport.getThreeRenderer) {
+      return this.viewport.getThreeRenderer().domElement;
+    }
+    return (
+      (this.container?.querySelector("canvas") as HTMLElement) || this.container
+    );
+  }
+
+  private initMarkerInteraction(): void {
+    const domEl = this.getCanvasDomElement();
+    if (!domEl) return;
+
+    this.onPointerMoveBound = (e: PointerEvent) =>
+      this.handleMarkerPointerMove(e);
+    this.onPointerDownBound = (e: PointerEvent) =>
+      this.handleMarkerPointerDown(e);
+    this.onPointerUpBound = (e: PointerEvent) => this.handleMarkerPointerUp(e);
+    this.onDblClickBound = (e: MouseEvent) => this.handleMarkerDblClick(e);
+
+    domEl.addEventListener("pointermove", this.onPointerMoveBound);
+    domEl.addEventListener("pointerdown", this.onPointerDownBound);
+    domEl.addEventListener("pointerup", this.onPointerUpBound);
+    domEl.addEventListener("pointercancel", this.onPointerUpBound);
+    domEl.addEventListener("dblclick", this.onDblClickBound);
+  }
+
+  private updatePointerPos(
+    e: MouseEvent | PointerEvent,
+    domEl: HTMLElement,
+  ): void {
+    const rect = domEl.getBoundingClientRect();
+    this.markerPointerPos.x =
+      ((e.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
+    this.markerPointerPos.y = -(
+      ((e.clientY - rect.top) / Math.max(1, rect.height)) * 2 -
+      1
+    );
+  }
+
+  private handleMarkerPointerMove(e: PointerEvent): void {
+    if (this.activeTab !== "blockout" || !this.showWaxOverlay) return;
+    const domEl = this.getCanvasDomElement();
+    if (!domEl) return;
+
+    this.updatePointerPos(e, domEl);
+    const camera = this.viewport.getThreeCamera
+      ? this.viewport.getThreeCamera()
+      : this.threeCamera;
+    if (!camera) return;
+
+    this.markerRaycaster.setFromCamera(this.markerPointerPos, camera);
+
+    if (this.activeDraggedMarker) {
+      // While dragging: raycast against tooth enamel mesh and conform sphere to the surface
+      const layerMesh = this.viewport.getLayerMesh
+        ? this.viewport.getLayerMesh(this.getLayerId())
+        : null;
+      if (!layerMesh) return;
+
+      const hits = this.markerRaycaster.intersectObject(layerMesh, false);
+      if (hits.length > 0 && hits[0]) {
+        const hitPoint = hits[0].point.clone();
+        if (this.activeDraggedMarker.parent) {
+          this.activeDraggedMarker.parent.worldToLocal(hitPoint);
+        }
+        this.activeDraggedMarker.position.copy(hitPoint);
+        domEl.style.cursor = "grabbing";
+
+        const key = this.activeDraggedMarker.userData?.contactKey;
+        if (key) {
+          this.previewMarkerDragInTable(key, hitPoint.y);
+        }
+      }
+    } else {
+      // Hovering over markers
+      if (!this.contactMarkersGroup || !this.contactMarkersGroup.visible)
+        return;
+
+      const hits = this.markerRaycaster.intersectObjects(
+        this.contactMarkersGroup.children,
+        false,
+      );
+      if (hits.length > 0 && hits[0]) {
+        const marker = hits[0].object as Mesh;
+        if (this.hoveredMarker !== marker) {
+          if (
+            this.hoveredMarker &&
+            this.hoveredMarker !== this.activeDraggedMarker
+          ) {
+            (this.hoveredMarker.material as MeshStandardMaterial).color.set(
+              0xe58189,
+            );
+            (this.hoveredMarker.material as MeshStandardMaterial).emissive.set(
+              0x9d414a,
+            );
+          }
+          this.hoveredMarker = marker;
+          (marker.material as MeshStandardMaterial).color.set(0xfacc15);
+          (marker.material as MeshStandardMaterial).emissive.set(0xd97706);
+        }
+        domEl.style.cursor = "grab";
+      } else {
+        if (
+          this.hoveredMarker &&
+          this.hoveredMarker !== this.activeDraggedMarker
+        ) {
+          (this.hoveredMarker.material as MeshStandardMaterial).color.set(
+            0xe58189,
+          );
+          (this.hoveredMarker.material as MeshStandardMaterial).emissive.set(
+            0x9d414a,
+          );
+          this.hoveredMarker = null;
+        }
+        if (domEl.style.cursor === "grab") {
+          domEl.style.cursor = "default";
+        }
+      }
+    }
+  }
+
+  private handleMarkerPointerDown(e: PointerEvent): void {
+    if (this.activeTab !== "blockout" || !this.showWaxOverlay) return;
+    const domEl = this.getCanvasDomElement();
+    if (!domEl) return;
+
+    this.updatePointerPos(e, domEl);
+    const camera = this.viewport.getThreeCamera
+      ? this.viewport.getThreeCamera()
+      : this.threeCamera;
+    if (
+      !camera ||
+      !this.contactMarkersGroup ||
+      !this.contactMarkersGroup.visible
+    )
+      return;
+
+    this.markerRaycaster.setFromCamera(this.markerPointerPos, camera);
+    const hits = this.markerRaycaster.intersectObjects(
+      this.contactMarkersGroup.children,
+      false,
+    );
+
+    if (hits.length > 0 && hits[0]) {
+      const marker = hits[0].object as Mesh;
+      this.activeDraggedMarker = marker;
+      const key = marker.userData?.contactKey;
+      if (key) {
+        this.selectContact(key);
+      }
+      (marker.material as MeshStandardMaterial).color.set(0xff9900);
+      (marker.material as MeshStandardMaterial).emissive.set(0xff5500);
+      domEl.style.cursor = "grabbing";
+
+      // Disable orbit camera controls during dragging
+      const controls = this.viewport.getControls
+        ? this.viewport.getControls()
+        : null;
+      if (controls) {
+        controls.enabled = false;
+      }
+
+      try {
+        domEl.setPointerCapture(e.pointerId);
+      } catch {}
+
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+
+  private handleMarkerPointerUp(e: PointerEvent): void {
+    if (!this.activeDraggedMarker) return;
+    const domEl = this.getCanvasDomElement();
+
+    try {
+      if (domEl) {
+        domEl.releasePointerCapture(e.pointerId);
+      }
+    } catch {}
+
+    // Re-enable orbit camera controls
+    const controls = this.viewport.getControls
+      ? this.viewport.getControls()
+      : null;
+    if (controls) {
+      controls.enabled = true;
+    }
+
+    const key = this.activeDraggedMarker.userData?.contactKey;
+    if (key) {
+      const pos = this.activeDraggedMarker.position;
+      const newPos: [number, number, number] = [
+        parseFloat(pos.x.toFixed(2)),
+        parseFloat(pos.y.toFixed(2)),
+        parseFloat(pos.z.toFixed(2)),
+      ];
+
+      if (!this.protocol.contactOverrides) {
+        this.protocol.contactOverrides = {};
+      }
+      this.protocol.contactOverrides[key] = newPos;
+
+      console.log(
+        `%c[Clinical Blockout] Contact override saved: %c${key} %c-> [${newPos.join(", ")}]`,
+        "color: #e58189; font-weight: bold;",
+        "color: #facc15; font-weight: bold;",
+        "color: #fda4af;",
+      );
+
+      // Invalidate cached results so all stages adopt the calibrated contact point
+      this.stageResults.clear();
+      this.recomputeCurrentBlockout();
+    }
+
+    if (domEl) {
+      domEl.style.cursor = "default";
+    }
+    this.activeDraggedMarker = null;
+    this.hoveredMarker = null;
+  }
+
+  private handleMarkerDblClick(e: MouseEvent): void {
+    if (this.activeTab !== "blockout" || !this.showWaxOverlay) return;
+    const domEl = this.getCanvasDomElement();
+    if (!domEl) return;
+
+    this.updatePointerPos(e, domEl);
+    const camera = this.viewport.getThreeCamera
+      ? this.viewport.getThreeCamera()
+      : this.threeCamera;
+    if (
+      !camera ||
+      !this.contactMarkersGroup ||
+      !this.contactMarkersGroup.visible
+    )
+      return;
+
+    this.markerRaycaster.setFromCamera(this.markerPointerPos, camera);
+    const hits = this.markerRaycaster.intersectObjects(
+      this.contactMarkersGroup.children,
+      false,
+    );
+
+    if (hits.length > 0 && hits[0]) {
+      const marker = hits[0].object as Mesh;
+      const key = marker.userData?.contactKey;
+      if (
+        key &&
+        this.protocol.contactOverrides &&
+        this.protocol.contactOverrides[key]
+      ) {
+        delete this.protocol.contactOverrides[key];
+        console.log(
+          `[Clinical Blockout] Reset contact override for ${key} to auto-detected position`,
+        );
+        this.stageResults.clear();
+        this.recomputeCurrentBlockout();
+      }
+    }
+  }
+
+  private previewMarkerDragInTable(contactKey: string, y: number): void {
+    const row = this.container?.querySelector(`.bo-contact-row-${contactKey}`);
+    if (row) {
+      const apexCell = row.querySelector(".bo-contact-apex");
+      if (apexCell) {
+        apexCell.textContent = `${y.toFixed(1)}*`;
+        (apexCell as HTMLElement).style.color = "#facc15";
+      }
+      const fitCell = row.querySelector(".bo-contact-fit");
+      if (fitCell) {
+        fitCell.innerHTML = `<span style="color:#facc15;font-weight:600;">Moving...</span>`;
       }
     }
   }
@@ -444,9 +1138,14 @@ export class BlockoutStudio {
     this.isBatchProcessing = true;
 
     const totalStages = this.manifest.treatmentStages.length;
-    const progressEls = this.container?.querySelectorAll<HTMLElement>(".bo-propagate-progress");
-    const progressBars = this.container?.querySelectorAll<HTMLElement>(".bo-progress-bar-fill");
-    const progressLabels = this.container?.querySelectorAll<HTMLElement>(".bo-progress-label");
+    const progressEls = this.container?.querySelectorAll<HTMLElement>(
+      ".bo-propagate-progress",
+    );
+    const progressBars = this.container?.querySelectorAll<HTMLElement>(
+      ".bo-progress-bar-fill",
+    );
+    const progressLabels =
+      this.container?.querySelectorAll<HTMLElement>(".bo-progress-label");
 
     progressEls?.forEach((el) => {
       el.hidden = false;
@@ -553,7 +1252,10 @@ export class BlockoutStudio {
       list.push(res);
     }
 
-    const nested = createNestedBuildPlateGeometry(list, this.protocol.printPrep);
+    const nested = createNestedBuildPlateGeometry(
+      list,
+      this.protocol.printPrep,
+    );
     if (!nested) return;
 
     const patientName = this.manifest.patientName ?? this.manifest.caseId;
@@ -566,6 +1268,19 @@ export class BlockoutStudio {
 
   private renderUI(): void {
     if (!this.container) return;
+
+    this.panelEl?.remove();
+    this.dockEl?.remove();
+    this.expandPillEl?.remove();
+
+    const activeGapKey =
+      this.selectedContactKey || (this.isUpper ? "11-21" : "41-31");
+    const focusPillContent =
+      this.protocol.singleGapFocusKey === "all"
+        ? "Showing full arch digital wax across all interproximal embrasures (Titan CAD standard)."
+        : 'Active Focus: <strong style="color:#ffe600;">' +
+          activeGapKey +
+          '</strong> <span style="color:#64748b;">(Click any row or 3D sphere to inspect another gap)</span>';
 
     const panel = document.createElement("div");
     panel.className = "bo-studio-panel";
@@ -605,35 +1320,99 @@ export class BlockoutStudio {
       <div class="bo-tab-body">
         <!-- TAB 1: BLOCKOUT CONFIG -->
         <div class="bo-pane bo-pane-blockout ${this.activeTab === "blockout" ? "" : "bo-pane--hidden"}">
-          <!-- Survey & Overlays -->
-          <div class="bo-section">
-            <h4 class="bo-section-title">Visual Overlays</h4>
+          <!-- Collapsible 3D Wax Fit & Contact Inspector -->
+          <details class="bo-section bo-fitting-details" style="background: rgba(14, 165, 233, 0.05); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 8px; padding: 10px; margin-bottom: 12px;">
+            <summary style="font-weight: 600; font-size: 13px; color: #38bdf8; cursor: pointer; display: flex; align-items: center; justify-content: space-between; list-style: none;">
+              <span>🔍 3D Model &amp; Contact Inspector</span>
+              <span class="bo-fit-badge" style="font-size: 11px; background: #0284c7; color: white; padding: 2px 8px; border-radius: 10px; font-weight: 500;">Scanning...</span>
+            </summary>
+            <div style="margin-top: 10px; font-size: 12px; line-height: 1.5; color: #cbd5e1;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;">
+                <div style="background: rgba(15, 23, 42, 0.7); padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05);">
+                  <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase;">Model 3D Extents</div>
+                  <div class="bo-model-bounds" style="font-family: monospace; font-size: 10px; color: #f8fafc; word-break: break-all;">-</div>
+                </div>
+                <div style="background: rgba(15, 23, 42, 0.7); padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05);">
+                  <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase;">Wax 3D Extents</div>
+                  <div class="bo-wax-bounds" style="font-family: monospace; font-size: 10px; color: #38bdf8; word-break: break-all;">-</div>
+                </div>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 5px 8px; background: rgba(15, 23, 42, 0.5); border-radius: 4px; margin-bottom: 8px; font-size: 11px;">
+                <span>Wax Volume: <strong class="bo-wax-volume" style="color: #38bdf8;">- mm³</strong></span>
+                <span>Interdental Fit: <strong class="bo-contacts-sealed" style="color: #4ade80;">- / -</strong></span>
+              </div>
+              <div style="max-height: 140px; overflow-y: auto; background: rgba(15, 23, 42, 0.85); border-radius: 4px; padding: 4px 6px; border: 1px solid rgba(255,255,255,0.08);">
+                <table style="width: 100%; border-collapse: collapse; font-size: 10px; font-family: monospace;">
+                  <thead>
+                    <tr style="color: #94a3b8; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.12);">
+                      <th style="padding: 2px 4px;">Contact</th>
+                      <th style="padding: 2px 4px;">Span</th>
+                      <th style="padding: 2px 4px;">Apex Y</th>
+                      <th style="padding: 2px 4px;">Fit</th>
+                    </tr>
+                  </thead>
+                  <tbody class="bo-contacts-table-body">
+                    <tr><td colspan="4" style="text-align: center; color: #64748b; padding: 6px;">Analyzing contact fits...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="bo-contacts-tip-container" style="display: flex; align-items: center; justify-content: space-between; margin-top: 6px; font-size: 10px; color: #94a3b8;">
+                <span>💡 Drag spheres in 3D to tune • Dbl-click to reset</span>
+                <button type="button" class="bo-btn-copy-coords" style="display: none; background: rgba(250,204,21,0.15); border: 1px solid rgba(250,204,21,0.3); color: #fde047; border-radius: 3px; font-size: 9px; padding: 2px 6px; cursor: pointer;">📋 Copy Coords</button>
+              </div>
+            </div>
+          </details>
+
+          <!-- Display Overlays -->
+          <div class="bo-section bo-section-overlays">
+            <h4 class="bo-section-title">Display Overlays</h4>
             <div class="bo-toggle-row">
               <label class="bo-switch">
                 <input type="checkbox" class="bo-chk-wax" ${this.showWaxOverlay ? "checked" : ""}>
                 <span class="bo-slider"></span>
               </label>
-              <span class="bo-toggle-label">Show Red Digital Wax</span>
+              <span class="bo-toggle-label">Clinical Digital Wax</span>
             </div>
             <div class="bo-toggle-row">
               <label class="bo-switch">
-                <input type="checkbox" class="bo-chk-heatmap" ${this.showHeatmap ? "checked" : ""}>
+                <input type="checkbox" class="bo-chk-markers" ${this.showContactMarkers ? "checked" : ""}>
                 <span class="bo-slider"></span>
               </label>
-              <span class="bo-toggle-label">Survey Undercut Heatmap</span>
+              <span class="bo-toggle-label">Contact Markers (Draggable)</span>
+            </div>
+            <div class="bo-toggle-row">
+              <label class="bo-switch">
+                <input type="checkbox" class="bo-chk-silhouettes" ${this.showEmbrasureSilhouettes ? "checked" : ""}>
+                <span class="bo-slider"></span>
+              </label>
+              <span class="bo-toggle-label">Embrasure Silhouettes</span>
             </div>
           </div>
 
           <!-- Component 1: Interproximal Wax -->
-          <div class="bo-section">
+          <div class="bo-section bo-section-interproximal">
             <div class="bo-section-header">
-              <h4 class="bo-section-title">1. Interproximal Wax</h4>
+              <h4 class="bo-section-title">1. Interproximal Wax <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#D83D56;margin-left:5px;vertical-align:middle;" title="Interproximal Digital Wax"></span></h4>
               <label class="bo-switch">
                 <input type="checkbox" class="bo-chk-prox" ${this.protocol.interproximal.enabled ? "checked" : ""}>
                 <span class="bo-slider"></span>
               </label>
             </div>
-            <p class="bo-desc">Bridges narrow embrasures between adjacent teeth to prevent aligner lock.</p>
+            <p class="bo-desc">Conformal wax filling embrasures between adjacent teeth.</p>
+
+            <div style="margin: 8px 0;">
+              <div style="display:flex; gap:6px; margin-bottom: 6px;">
+                <button type="button" class="bo-btn-wax-mode bo-btn-wax-mode--all" style="flex:1; padding:6px 8px; font-size:11px; font-weight:600; border-radius:6px; cursor:pointer; transition:all 0.2s ease; border: 1px solid ${this.protocol.singleGapFocusKey === "all" ? "#e58189" : "rgba(255,255,255,0.15)"}; background: ${this.protocol.singleGapFocusKey === "all" ? "rgba(229,129,137,0.18)" : "rgba(255,255,255,0.05)"}; color: ${this.protocol.singleGapFocusKey === "all" ? "#e58189" : "#94a3b8"};">
+                  ★ Full Arch
+                </button>
+                <button type="button" class="bo-btn-wax-mode bo-btn-wax-mode--single" style="flex:1; padding:6px 8px; font-size:11px; font-weight:600; border-radius:6px; cursor:pointer; transition:all 0.2s ease; border: 1px solid ${this.protocol.singleGapFocusKey !== "all" ? "#e58189" : "rgba(255,255,255,0.15)"}; background: ${this.protocol.singleGapFocusKey !== "all" ? "rgba(229,129,137,0.18)" : "rgba(255,255,255,0.05)"}; color: ${this.protocol.singleGapFocusKey !== "all" ? "#e58189" : "#94a3b8"};">
+                  Single Gap
+                </button>
+              </div>
+              <div class="bo-wax-focus-pill" style="font-size:11px; color:#cbd5e1; padding:6px 8px; background:rgba(229,129,137,0.08); border-left:3px solid #e58189; border-radius:4px; line-height:1.4;">
+                ${focusPillContent}
+              </div>
+            </div>
             <div class="bo-range-group">
               <div class="bo-range-meta">
                 <span>Wax Thickness</span>
@@ -641,22 +1420,18 @@ export class BlockoutStudio {
               </div>
               <input type="range" class="bo-range-input bo-range-prox" min="0.1" max="1.5" step="0.05" value="${this.protocol.interproximal.thicknessMm}">
             </div>
-            <label class="bo-checkbox-label">
-              <input type="checkbox" class="bo-chk-bridge" ${this.protocol.interproximal.bridgeSpaces ? "checked" : ""}>
-              <span>Bridge Missing Tooth / Edentulous Spans</span>
-            </label>
           </div>
 
           <!-- Component 2: Gingival Line Relief -->
-          <div class="bo-section">
+          <div class="bo-section bo-section-gingival">
             <div class="bo-section-header">
-              <h4 class="bo-section-title">2. Gingival Margin Relief</h4>
+              <h4 class="bo-section-title">2. Gingival Margin Relief <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#4ade80;margin-left:5px;vertical-align:middle;" title="Gingival Margin Relief"></span></h4>
               <label class="bo-switch">
                 <input type="checkbox" class="bo-chk-ging" ${this.protocol.gingival.enabled ? "checked" : ""}>
                 <span class="bo-slider"></span>
               </label>
             </div>
-            <p class="bo-desc">Doctor decides per case. Relieves cervical constriction along the tooth-gum junction.</p>
+            <p class="bo-desc">Relieves cervical constriction along the tooth-gum CEJ boundary.</p>
             <div class="bo-range-group">
               <div class="bo-range-meta">
                 <span>Margin Relief</span>
@@ -666,16 +1441,23 @@ export class BlockoutStudio {
             </div>
           </div>
 
-          <!-- Component 3: Dentition Undercut Blockout -->
-          <div class="bo-section">
+          <!-- Component 3: Dentition Undercut Blockout & Heatmap -->
+          <div class="bo-section bo-section-undercut">
             <div class="bo-section-header">
-              <h4 class="bo-section-title">3. Dentition Undercuts</h4>
+              <h4 class="bo-section-title">3. Dentition Undercuts <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#38bdf8;margin-left:5px;vertical-align:middle;" title="Blue Undercut Blockout"></span></h4>
               <label class="bo-switch">
                 <input type="checkbox" class="bo-chk-uc" ${this.protocol.undercut.enabled ? "checked" : ""}>
                 <span class="bo-slider"></span>
               </label>
             </div>
-            <p class="bo-desc">Blocks retentive undercuts below maximum contour along the draw axis.</p>
+            <p class="bo-desc">Blocks retentive crown undercuts in blue along the draw path.</p>
+            <div class="bo-toggle-row" style="margin-bottom: 8px;">
+              <label class="bo-switch">
+                <input type="checkbox" class="bo-chk-heatmap" ${this.showHeatmap ? "checked" : ""}>
+                <span class="bo-slider"></span>
+              </label>
+              <span class="bo-toggle-label">Undercut Heatmap Overlay</span>
+            </div>
             <div class="bo-range-group">
               <div class="bo-range-meta">
                 <span>Max Allowable Depth</span>
@@ -781,15 +1563,11 @@ export class BlockoutStudio {
     this.dockEl = dock;
 
     dock.innerHTML = `
-      <!-- Overlays (Red Wax & Heatmap) -->
+      <!-- Overlays (Digital Wax) -->
       <div class="bo-dock-group bo-dock-overlays">
-        <button type="button" class="bo-dock-pill bo-dock-pill--wax ${this.showWaxOverlay ? "bo-dock-pill--active" : ""}" title="Toggle Red Digital Wax 3D Layer">
+        <button type="button" class="bo-dock-pill bo-dock-pill--wax ${this.showWaxOverlay ? "bo-dock-pill--active" : ""}" title="Toggle Clinical Digital Wax 3D Layer">
           <span class="bo-dock-pill-dot bo-dock-pill-dot--red"></span>
           <span>Wax</span>
-        </button>
-        <button type="button" class="bo-dock-pill bo-dock-pill--heatmap ${this.showHeatmap ? "bo-dock-pill--active" : ""}" title="Toggle Clinical Undercut Heatmap">
-          <span class="bo-dock-pill-dot bo-dock-pill-dot--heat"></span>
-          <span>Heatmap</span>
         </button>
       </div>
 
@@ -808,6 +1586,9 @@ export class BlockoutStudio {
             <polyline points="9 18 15 12 9 6"></polyline>
           </svg>
         </button>
+        <span class="bo-dock-stage-badge ${this.currentStageIndex === 0 ? "bo-dock-stage-badge--ref" : ""}">
+          ${this.currentStageIndex === 0 ? "★ Ref" : `Stage ${this.currentStageIndex + 1}/${totalStages}`}
+        </span>
       </div>
 
       <div class="bo-dock-divider"></div>
@@ -891,25 +1672,31 @@ export class BlockoutStudio {
     if (!this.panelEl) return;
 
     // Minimize Panel (Does not exit studio to 3D progression viewer)
-    this.panelEl.querySelector(".bo-btn-minimize")?.addEventListener("click", () => {
-      this.setMinimized(true);
-    });
+    this.panelEl
+      .querySelector(".bo-btn-minimize")
+      ?.addEventListener("click", () => {
+        this.setMinimized(true);
+      });
 
     // Arch Selector
-    this.panelEl.querySelectorAll<HTMLButtonElement>(".bo-pill-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const arch = btn.dataset["arch"] as "upper" | "lower";
-        this.setArch(arch);
+    this.panelEl
+      .querySelectorAll<HTMLButtonElement>(".bo-pill-btn")
+      .forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const arch = btn.dataset["arch"] as "upper" | "lower";
+          this.setArch(arch);
+        });
       });
-    });
 
     // Internal Tabs if present
-    this.panelEl.querySelectorAll<HTMLButtonElement>(".bo-tab").forEach((tab) => {
-      tab.addEventListener("click", () => {
-        const t = tab.dataset["tab"] as "blockout" | "sculpt" | "prep";
-        if (t) this.setActiveTab(t);
+    this.panelEl
+      .querySelectorAll<HTMLButtonElement>(".bo-tab")
+      .forEach((tab) => {
+        tab.addEventListener("click", () => {
+          const t = tab.dataset["tab"] as "blockout" | "sculpt" | "prep";
+          if (t) this.setActiveTab(t);
+        });
       });
-    });
 
     // Overlays
     const chkWax = this.panelEl.querySelector<HTMLInputElement>(".bo-chk-wax");
@@ -917,19 +1704,53 @@ export class BlockoutStudio {
       this.toggleWaxOverlay(chkWax.checked);
     });
 
-    const chkHeatmap = this.panelEl.querySelector<HTMLInputElement>(".bo-chk-heatmap");
+    const chkMarkers =
+      this.panelEl.querySelector<HTMLInputElement>(".bo-chk-markers");
+    chkMarkers?.addEventListener("change", () => {
+      this.toggleContactMarkers(chkMarkers.checked);
+    });
+
+    const chkSilhouettes = this.panelEl.querySelector<HTMLInputElement>(
+      ".bo-chk-silhouettes",
+    );
+    chkSilhouettes?.addEventListener("change", () => {
+      this.toggleEmbrasureSilhouettes(chkSilhouettes.checked);
+    });
+
+    const chkHeatmap =
+      this.panelEl.querySelector<HTMLInputElement>(".bo-chk-heatmap");
     chkHeatmap?.addEventListener("change", () => {
       this.toggleHeatmap(chkHeatmap.checked);
     });
 
     // Component 1: Interproximal
-    const chkProx = this.panelEl.querySelector<HTMLInputElement>(".bo-chk-prox");
+    const chkProx =
+      this.panelEl.querySelector<HTMLInputElement>(".bo-chk-prox");
     chkProx?.addEventListener("change", () => {
       this.protocol.interproximal.enabled = chkProx.checked;
       this.recomputeCurrentBlockout();
     });
 
-    const rngProx = this.panelEl.querySelector<HTMLInputElement>(".bo-range-prox");
+    const btnModeSingle = this.panelEl.querySelector<HTMLButtonElement>(
+      ".bo-btn-wax-mode--single",
+    );
+    const btnModeAll = this.panelEl.querySelector<HTMLButtonElement>(
+      ".bo-btn-wax-mode--all",
+    );
+    btnModeSingle?.addEventListener("click", () => {
+      this.protocol.singleGapFocusKey =
+        this.selectedContactKey || (this.isUpper ? "11-21" : "41-31");
+      this.recomputeCurrentBlockout();
+      this.renderUI();
+    });
+    btnModeAll?.addEventListener("click", () => {
+      this.protocol.singleGapFocusKey = "all";
+      this.recomputeCurrentBlockout();
+      this.renderUI();
+    });
+
+    const rngProx =
+      this.panelEl.querySelector<HTMLInputElement>(".bo-range-prox");
     rngProx?.addEventListener("input", () => {
       const val = parseFloat(rngProx.value);
       this.protocol.interproximal.thicknessMm = val;
@@ -938,20 +1759,16 @@ export class BlockoutStudio {
       this.recomputeCurrentBlockout();
     });
 
-    const chkBridge = this.panelEl.querySelector<HTMLInputElement>(".bo-chk-bridge");
-    chkBridge?.addEventListener("change", () => {
-      this.protocol.interproximal.bridgeSpaces = chkBridge.checked;
-      this.recomputeCurrentBlockout();
-    });
-
     // Component 2: Gingival
-    const chkGing = this.panelEl.querySelector<HTMLInputElement>(".bo-chk-ging");
+    const chkGing =
+      this.panelEl.querySelector<HTMLInputElement>(".bo-chk-ging");
     chkGing?.addEventListener("change", () => {
       this.protocol.gingival.enabled = chkGing.checked;
       this.recomputeCurrentBlockout();
     });
 
-    const rngGing = this.panelEl.querySelector<HTMLInputElement>(".bo-range-ging");
+    const rngGing =
+      this.panelEl.querySelector<HTMLInputElement>(".bo-range-ging");
     rngGing?.addEventListener("input", () => {
       const val = parseFloat(rngGing.value);
       this.protocol.gingival.reliefMm = val;
@@ -977,18 +1794,23 @@ export class BlockoutStudio {
     });
 
     // Component 4: Sculpt Tools
-    this.panelEl.querySelectorAll<HTMLButtonElement>(".bo-mode-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const mode = btn.dataset["mode"] as SculptMode;
-        this.panelEl?.querySelectorAll(".bo-mode-btn").forEach((b) => b.classList.remove("bo-mode-btn--active"));
-        btn.classList.add("bo-mode-btn--active");
-        if (this.sculptor) {
-          this.sculptor.setConfig({ mode });
-        }
+    this.panelEl
+      .querySelectorAll<HTMLButtonElement>(".bo-mode-btn")
+      .forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const mode = btn.dataset["mode"] as SculptMode;
+          this.panelEl
+            ?.querySelectorAll(".bo-mode-btn")
+            .forEach((b) => b.classList.remove("bo-mode-btn--active"));
+          btn.classList.add("bo-mode-btn--active");
+          if (this.sculptor) {
+            this.sculptor.setConfig({ mode });
+          }
+        });
       });
-    });
 
-    const rngRadius = this.panelEl.querySelector<HTMLInputElement>(".bo-range-radius");
+    const rngRadius =
+      this.panelEl.querySelector<HTMLInputElement>(".bo-range-radius");
     rngRadius?.addEventListener("input", () => {
       const val = parseFloat(rngRadius.value);
       const lbl = this.panelEl?.querySelector(".bo-val-radius");
@@ -996,7 +1818,8 @@ export class BlockoutStudio {
       if (this.sculptor) this.sculptor.setConfig({ radiusMm: val });
     });
 
-    const rngStrength = this.panelEl.querySelector<HTMLInputElement>(".bo-range-strength");
+    const rngStrength =
+      this.panelEl.querySelector<HTMLInputElement>(".bo-range-strength");
     rngStrength?.addEventListener("input", () => {
       const val = parseFloat(rngStrength.value);
       const lbl = this.panelEl?.querySelector(".bo-val-strength");
@@ -1004,18 +1827,21 @@ export class BlockoutStudio {
       if (this.sculptor) this.sculptor.setConfig({ strength: val });
     });
 
-    const btnUndo = this.panelEl.querySelector<HTMLButtonElement>(".bo-btn-undo");
+    const btnUndo =
+      this.panelEl.querySelector<HTMLButtonElement>(".bo-btn-undo");
     btnUndo?.addEventListener("click", () => {
       if (this.sculptor) this.sculptor.undo();
     });
 
-    const btnRedo = this.panelEl.querySelector<HTMLButtonElement>(".bo-btn-redo");
+    const btnRedo =
+      this.panelEl.querySelector<HTMLButtonElement>(".bo-btn-redo");
     btnRedo?.addEventListener("click", () => {
       if (this.sculptor) this.sculptor.redo();
     });
 
     // Component 5: Print Prep & Scale
-    const rngShrink = this.panelEl.querySelector<HTMLInputElement>(".bo-range-shrink");
+    const rngShrink =
+      this.panelEl.querySelector<HTMLInputElement>(".bo-range-shrink");
     rngShrink?.addEventListener("input", () => {
       const val = parseFloat(rngShrink.value);
       this.protocol.printPrep.shrinkageScalePercent = val;
@@ -1023,41 +1849,82 @@ export class BlockoutStudio {
       if (lbl) lbl.textContent = `${val.toFixed(1)}%`;
     });
 
-    const btnAddHole = this.panelEl.querySelector<HTMLButtonElement>(".bo-btn-add-hole");
+    const btnAddHole =
+      this.panelEl.querySelector<HTMLButtonElement>(".bo-btn-add-hole");
     btnAddHole?.addEventListener("click", () => {
       // Add standard bilateral suction holes at the posterior palate / base
       this.protocol.printPrep.drainHoles = [
-        { id: "hole-left", position: [-18, 0, -10], normal: [0, 1, 0], diameterMm: 3.0 },
-        { id: "hole-right", position: [18, 0, -10], normal: [0, 1, 0], diameterMm: 3.0 },
+        {
+          id: "hole-left",
+          position: [-18, 0, -10],
+          normal: [0, 1, 0],
+          diameterMm: 3.0,
+        },
+        {
+          id: "hole-right",
+          position: [18, 0, -10],
+          normal: [0, 1, 0],
+          diameterMm: 3.0,
+        },
       ];
       this.renderHolesList();
       this.recomputeCurrentBlockout();
     });
 
+    // Copy Tuned Contact Coordinates
+    this.panelEl
+      .querySelectorAll<HTMLButtonElement>(".bo-btn-copy-coords")
+      .forEach((btn) => {
+        btn.addEventListener("click", () => {
+          if (
+            !this.protocol.contactOverrides ||
+            Object.keys(this.protocol.contactOverrides).length === 0
+          )
+            return;
+          const text = JSON.stringify(this.protocol.contactOverrides, null, 2);
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(text);
+            btn.textContent = "✓ Copied!";
+            setTimeout(() => {
+              btn.textContent = "📋 Copy Coords";
+            }, 2000);
+          }
+        });
+      });
+
     // Export Buttons
-    this.panelEl.querySelector(".bo-btn-export-stage")?.addEventListener("click", () => this.exportCurrentStageStl());
-    this.panelEl.querySelector(".bo-btn-export-all")?.addEventListener("click", () => this.exportAllStagesZip());
-    this.panelEl.querySelector(".bo-btn-export-nested")?.addEventListener("click", () => this.exportNestedBuildPlateStl());
+    this.panelEl
+      .querySelector(".bo-btn-export-stage")
+      ?.addEventListener("click", () => this.exportCurrentStageStl());
+    this.panelEl
+      .querySelector(".bo-btn-export-all")
+      ?.addEventListener("click", () => this.exportAllStagesZip());
+    this.panelEl
+      .querySelector(".bo-btn-export-nested")
+      ?.addEventListener("click", () => this.exportNestedBuildPlateStl());
 
     // Batch Propagate CTA
-    this.panelEl.querySelector(".bo-btn-propagate")?.addEventListener("click", () => this.propagateToAllStages());
+    this.panelEl
+      .querySelector(".bo-btn-propagate")
+      ?.addEventListener("click", () => this.propagateToAllStages());
   }
 
   private bindDockEvents(): void {
     if (!this.dockEl) return;
 
-    // Quick overlay toggles
-    this.dockEl.querySelector(".bo-dock-pill--wax")?.addEventListener("click", () => {
-      this.toggleWaxOverlay();
-    });
+    // Quick overlay toggle
+    this.dockEl
+      .querySelector(".bo-dock-pill--wax")
+      ?.addEventListener("click", () => {
+        this.toggleWaxOverlay();
+      });
 
-    this.dockEl.querySelector(".bo-dock-pill--heatmap")?.addEventListener("click", () => {
-      this.toggleHeatmap();
-    });
-
-    const prevBtn = this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-prev");
-    const nextBtn = this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-next");
-    const slider = this.dockEl.querySelector<HTMLInputElement>(".bo-dock-slider");
+    const prevBtn =
+      this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-prev");
+    const nextBtn =
+      this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-next");
+    const slider =
+      this.dockEl.querySelector<HTMLInputElement>(".bo-dock-slider");
 
     prevBtn?.addEventListener("click", () => {
       if (this.currentStageIndex > 0) {
@@ -1079,14 +1946,18 @@ export class BlockoutStudio {
       }
     });
 
-    this.dockEl.querySelector(".bo-dock-btn-reset")?.addEventListener("click", () => {
-      this.viewport.setView("top");
-      this.viewport.fitAll();
-    });
+    this.dockEl
+      .querySelector(".bo-dock-btn-reset")
+      ?.addEventListener("click", () => {
+        this.viewport.setView("top");
+        this.viewport.fitAll();
+      });
 
-    this.dockEl.querySelector(".bo-btn-propagate")?.addEventListener("click", () => {
-      this.propagateToAllStages();
-    });
+    this.dockEl
+      .querySelector(".bo-btn-propagate")
+      ?.addEventListener("click", () => {
+        this.propagateToAllStages();
+      });
   }
 
   private updateActiveTabPanes(): void {
@@ -1096,36 +1967,61 @@ export class BlockoutStudio {
     const panePrep = this.panelEl.querySelector(".bo-pane-prep");
     const modeLabel = this.panelEl.querySelector(".bo-panel-mode-label");
 
-    paneBlockout?.classList.toggle("bo-pane--hidden", this.activeTab !== "blockout");
-    paneSculpt?.classList.toggle("bo-pane--hidden", this.activeTab !== "sculpt");
+    paneBlockout?.classList.toggle(
+      "bo-pane--hidden",
+      this.activeTab !== "blockout",
+    );
+    paneSculpt?.classList.toggle(
+      "bo-pane--hidden",
+      this.activeTab !== "sculpt",
+    );
     panePrep?.classList.toggle("bo-pane--hidden", this.activeTab !== "prep");
 
     if (modeLabel) {
-      if (this.activeTab === "blockout") modeLabel.textContent = "Step 1: Undercut Survey & Wax Blockout";
-      else if (this.activeTab === "sculpt") modeLabel.textContent = "Step 2: Digital Wax Carver (Hot Spatula)";
-      else if (this.activeTab === "prep") modeLabel.textContent = "Step 3: Print Prep, Drainage & STL Export";
+      if (this.activeTab === "blockout")
+        modeLabel.textContent = "Step 1: Undercut Survey & Wax Blockout";
+      else if (this.activeTab === "sculpt")
+        modeLabel.textContent = "Step 2: Digital Wax Carver (Hot Spatula)";
+      else if (this.activeTab === "prep")
+        modeLabel.textContent = "Step 3: Print Prep, Drainage & STL Export";
     }
 
-    this.panelEl.querySelectorAll<HTMLButtonElement>(".bo-tab").forEach((btn) => {
-      btn.classList.toggle("bo-tab--active", btn.dataset["tab"] === this.activeTab);
-    });
+    this.panelEl
+      .querySelectorAll<HTMLButtonElement>(".bo-tab")
+      .forEach((btn) => {
+        btn.classList.toggle(
+          "bo-tab--active",
+          btn.dataset["tab"] === this.activeTab,
+        );
+      });
   }
 
   private syncOverlayCheckboxes(): void {
-    const waxChks = this.container?.querySelectorAll<HTMLInputElement>(".bo-chk-wax");
+    const waxChks =
+      this.container?.querySelectorAll<HTMLInputElement>(".bo-chk-wax");
     waxChks?.forEach((chk) => {
       chk.checked = this.showWaxOverlay;
     });
-    const heatChks = this.container?.querySelectorAll<HTMLInputElement>(".bo-chk-heatmap");
+    const markerChks =
+      this.container?.querySelectorAll<HTMLInputElement>(".bo-chk-markers");
+    markerChks?.forEach((chk) => {
+      chk.checked = this.showContactMarkers;
+    });
+    const silChks = this.container?.querySelectorAll<HTMLInputElement>(
+      ".bo-chk-silhouettes",
+    );
+    silChks?.forEach((chk) => {
+      chk.checked = this.showEmbrasureSilhouettes;
+    });
+    const heatChks =
+      this.container?.querySelectorAll<HTMLInputElement>(".bo-chk-heatmap");
     heatChks?.forEach((chk) => {
       chk.checked = this.showHeatmap;
     });
 
-    const dockWax = this.dockEl?.querySelector<HTMLButtonElement>(".bo-dock-pill--wax");
+    const dockWax =
+      this.dockEl?.querySelector<HTMLButtonElement>(".bo-dock-pill--wax");
     dockWax?.classList.toggle("bo-dock-pill--active", this.showWaxOverlay);
-
-    const dockHeat = this.dockEl?.querySelector<HTMLButtonElement>(".bo-dock-pill--heatmap");
-    dockHeat?.classList.toggle("bo-dock-pill--active", this.showHeatmap);
   }
 
   private renderHolesList(): void {
@@ -1151,26 +2047,129 @@ export class BlockoutStudio {
   }
 
   private updateMetricsDisplay(result: StageBlockoutResult): void {
-    if (!result.survey) return;
-    const maxEls = this.container?.querySelectorAll(".bo-metric-max");
-    const avgEls = this.container?.querySelectorAll(".bo-metric-avg");
-    const areaEls = this.container?.querySelectorAll(".bo-metric-area");
+    if (result.survey) {
+      const maxEls = this.container?.querySelectorAll(".bo-metric-max");
+      const avgEls = this.container?.querySelectorAll(".bo-metric-avg");
+      const areaEls = this.container?.querySelectorAll(".bo-metric-area");
 
-    maxEls?.forEach((el) => {
-      el.textContent = `${result.survey!.maxDepthMm.toFixed(2)} mm`;
-    });
-    avgEls?.forEach((el) => {
-      el.textContent = `${result.survey!.avgDepthMm.toFixed(2)} mm`;
-    });
-    areaEls?.forEach((el) => {
-      el.textContent = `${result.survey!.undercutAreaMm2.toFixed(1)} mm²`;
-    });
+      maxEls?.forEach((el) => {
+        el.textContent = `${result.survey!.maxDepthMm.toFixed(2)} mm`;
+      });
+      avgEls?.forEach((el) => {
+        el.textContent = `${result.survey!.avgDepthMm.toFixed(2)} mm`;
+      });
+      areaEls?.forEach((el) => {
+        el.textContent = `${result.survey!.undercutAreaMm2.toFixed(1)} mm²`;
+      });
+    }
+
+    // Populate 3D Model & Wax Fitting Inspector
+    if (result.fittingSummary) {
+      const summary = result.fittingSummary;
+      const modelBoundsEls =
+        this.container?.querySelectorAll(".bo-model-bounds");
+      const waxBoundsEls = this.container?.querySelectorAll(".bo-wax-bounds");
+      const waxVolEls = this.container?.querySelectorAll(".bo-wax-volume");
+      const sealedEls = this.container?.querySelectorAll(".bo-contacts-sealed");
+      const badgeEls = this.container?.querySelectorAll(".bo-fit-badge");
+      const tableBodyEls = this.container?.querySelectorAll(
+        ".bo-contacts-table-body",
+      );
+
+      const mb = summary.modelBounds;
+      const modelBoundsStr = `X:[${mb.min[0].toFixed(1)}, ${mb.max[0].toFixed(1)}] Y:[${mb.min[1].toFixed(1)}, ${mb.max[1].toFixed(1)}] Z:[${mb.min[2].toFixed(1)}, ${mb.max[2].toFixed(1)}]`;
+      modelBoundsEls?.forEach((el) => {
+        el.textContent = modelBoundsStr;
+      });
+
+      if (summary.waxBounds) {
+        const wb = summary.waxBounds;
+        const waxBoundsStr = `X:[${wb.min[0].toFixed(1)}, ${wb.max[0].toFixed(1)}] Y:[${wb.min[1].toFixed(1)}, ${wb.max[1].toFixed(1)}] Z:[${wb.min[2].toFixed(1)}, ${wb.max[2].toFixed(1)}]`;
+        waxBoundsEls?.forEach((el) => {
+          el.textContent = waxBoundsStr;
+        });
+      } else {
+        waxBoundsEls?.forEach((el) => {
+          el.textContent = "None";
+        });
+      }
+
+      waxVolEls?.forEach((el) => {
+        el.textContent = `${summary.totalWaxVolumeMm3.toFixed(1)} mm³`;
+      });
+
+      const isAllSealed =
+        summary.sealedContacts >= summary.totalContacts &&
+        summary.totalContacts > 0;
+      sealedEls?.forEach((el) => {
+        el.textContent = `${summary.sealedContacts} / ${summary.totalContacts} (${isAllSealed ? "100%" : Math.round((summary.sealedContacts / Math.max(1, summary.totalContacts)) * 100) + "%"})`;
+      });
+
+      badgeEls?.forEach((el) => {
+        (el as HTMLElement).style.background = "#0284c7";
+        el.textContent = `✓ ${summary.contacts.length} Contacts Found`;
+      });
+
+      if (tableBodyEls && summary.contacts.length > 0) {
+        const rowsHtml = summary.contacts
+          .map((c) => {
+            const isTuned = Boolean(
+              this.protocol.contactOverrides?.[c.contactKey],
+            );
+            const isSelected = c.contactKey === this.selectedContactKey;
+            const sil = this.silhouettes.find(
+              (s) => s.contactKey === c.contactKey,
+            );
+            const dimSpan = sil
+              ? `<span style="color: ${isSelected ? "#fbbf24" : "#38bdf8"}; font-weight: 600;" title="Embrasure Silhouette: H=${sil.heightMm}mm, W=${sil.spanMm}mm, D=${sil.depthMm}mm">${sil.spanMm}mm <small style="color: #94a3b8; font-size: 8px;">(H:${sil.heightMm})</small></span>`
+              : `${c.spanMm.toFixed(1)}mm`;
+            const fitText = isTuned
+              ? `<span style="color: #facc15; font-weight: 600;" title="User calibrated: [${c.contactPoint.map((v) => v.toFixed(1)).join(", ")}]">★ Tuned</span>`
+              : `<span style="color: #e58189;">✓ ${c.clearanceMm !== undefined ? c.clearanceMm.toFixed(2) + "mm" : "0.35mm"}</span>`;
+            return `
+            <tr class="bo-contact-row bo-contact-row-${c.contactKey}" data-contact-key="${c.contactKey}" style="cursor: pointer; transition: background 0.15s ease; border-bottom: 1px solid rgba(255,255,255,0.05); ${isSelected ? "background: rgba(56, 189, 248, 0.18); border-left: 3px solid #38bdf8;" : isTuned ? "background: rgba(250, 204, 21, 0.08);" : ""}">
+              <td style="padding: 2px 4px; color: ${isSelected ? "#38bdf8" : isTuned ? "#fde047" : "#f8fafc"}; font-weight: ${isSelected ? "700" : "normal"};" title="${c.label} (Click to inspect silhouette, drag sphere in 3D to tune)">${c.contactKey}${isTuned ? " ★" : ""}</td>
+              <td style="padding: 2px 4px;">${dimSpan}</td>
+              <td class="bo-contact-apex" style="padding: 2px 4px; color: #38bdf8;">${c.apexY.toFixed(1)}</td>
+              <td class="bo-contact-fit" style="padding: 2px 4px;">${fitText}</td>
+            </tr>
+          `;
+          })
+          .join("");
+        tableBodyEls.forEach((el) => {
+          el.innerHTML = rowsHtml;
+          el.querySelectorAll<HTMLTableRowElement>(".bo-contact-row").forEach(
+            (tr) => {
+              tr.addEventListener("click", () => {
+                const key = tr.getAttribute("data-contact-key");
+                if (key) {
+                  this.selectContact(key);
+                }
+              });
+            },
+          );
+        });
+      }
+
+      const copyBtns = this.container?.querySelectorAll<HTMLButtonElement>(
+        ".bo-btn-copy-coords",
+      );
+      const hasOverrides = Boolean(
+        this.protocol.contactOverrides &&
+        Object.keys(this.protocol.contactOverrides).length > 0,
+      );
+      copyBtns?.forEach((btn) => {
+        btn.style.display = hasOverrides ? "inline-block" : "none";
+      });
+    }
   }
 
   private updateUndoRedoButtons(): void {
     if (!this.panelEl || !this.sculptor) return;
-    const btnUndo = this.panelEl.querySelector<HTMLButtonElement>(".bo-btn-undo");
-    const btnRedo = this.panelEl.querySelector<HTMLButtonElement>(".bo-btn-redo");
+    const btnUndo =
+      this.panelEl.querySelector<HTMLButtonElement>(".bo-btn-undo");
+    const btnRedo =
+      this.panelEl.querySelector<HTMLButtonElement>(".bo-btn-redo");
     if (btnUndo) btnUndo.disabled = !this.sculptor.canUndo();
     if (btnRedo) btnRedo.disabled = !this.sculptor.canRedo();
   }
@@ -1192,22 +2191,38 @@ export class BlockoutStudio {
 
     // Update dock stepper indicator, slider and button disabled states
     if (this.dockEl) {
-      const prevBtn = this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-prev");
-      const nextBtn = this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-next");
+      const stageBadgeEl = this.dockEl.querySelector(".bo-dock-stage-badge");
+      if (stageBadgeEl) {
+        if (this.currentStageIndex === 0) {
+          stageBadgeEl.className =
+            "bo-dock-stage-badge bo-dock-stage-badge--ref";
+          stageBadgeEl.textContent = "★ Ref";
+        } else {
+          stageBadgeEl.className = "bo-dock-stage-badge";
+          stageBadgeEl.textContent = `Stage ${this.currentStageIndex + 1}/${totalStages}`;
+        }
+      }
+      const prevBtn =
+        this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-prev");
+      const nextBtn =
+        this.dockEl.querySelector<HTMLButtonElement>(".bo-dock-step-next");
       if (prevBtn) prevBtn.disabled = this.currentStageIndex <= 0;
       if (nextBtn) nextBtn.disabled = this.currentStageIndex >= totalStages - 1;
 
-      const slider = this.dockEl.querySelector<HTMLInputElement>(".bo-dock-slider");
+      const slider =
+        this.dockEl.querySelector<HTMLInputElement>(".bo-dock-slider");
       if (slider) {
         slider.value = String(this.currentStageIndex);
       }
     }
 
     // Update arch pill buttons
-    this.container?.querySelectorAll<HTMLButtonElement>(".bo-pill-btn").forEach((btn) => {
-      const arch = btn.dataset["arch"] === "upper";
-      btn.classList.toggle("bo-pill-btn--active", arch === this.isUpper);
-    });
+    this.container
+      ?.querySelectorAll<HTMLButtonElement>(".bo-pill-btn")
+      .forEach((btn) => {
+        const arch = btn.dataset["arch"] === "upper";
+        btn.classList.toggle("bo-pill-btn--active", arch === this.isUpper);
+      });
 
     this.syncOverlayCheckboxes();
     this.updateActiveTabPanes();

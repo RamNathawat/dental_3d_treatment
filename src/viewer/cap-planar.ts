@@ -161,9 +161,14 @@ export function capPlanarOpenings(
     const spanX = Math.max(...xVals) - Math.min(...xVals);
     const spanZ = Math.max(...zVals) - Math.min(...zVals);
 
-    // Capping tolerance: allow clinical cuts with height variation up to 3.2mm,
-    // or up to 4.5mm for wide arch-spanning loops.
-    if (yDiff > 3.2 && !(spanX > 20.0 && spanZ > 20.0 && yDiff <= 4.5)) continue;
+    // Dental horseshoe arch protection: distinguish true flat/slightly-tilted base cut from anatomical loops
+    const loopNearCut = isUpper
+      ? Math.abs(maxLoopY - cutY) < 1.8
+      : Math.abs(minLoopY - cutY) < 1.8;
+    const isBaseCut = loopNearCut && yDiff <= 2.6;
+    if (!isBaseCut && spanX > 15.0 && spanZ > 15.0) continue;
+    // Capping tolerance: allow base cuts with height variation up to 2.8mm
+    if (!isBaseCut && yDiff > 2.8) continue;
     // Skip tiny micro-loops under 2mm
     if (spanX < 2.0 && spanZ < 2.0) continue;
 
@@ -208,6 +213,19 @@ export function capPlanarOpenings(
       const p1 = pts.get(k1);
       const p2 = pts.get(k2);
       if (p0 && p1 && p2) {
+        // Exclude cross-palate / cross-tongue bridging chords across the hollow dental horseshoe arch
+        const cx = (p0.x + p1.x + p2.x) / 3;
+        const cz = (p0.z + p1.z + p2.z) / 3;
+        if (!isUpper && Math.abs(cx) < 9.0 && cz > -6.0 && cz < 16.0) {
+          continue;
+        }
+        const d01 = Math.hypot(p0.x - p1.x, p0.z - p1.z);
+        const d12 = Math.hypot(p1.x - p2.x, p1.z - p2.z);
+        const d20 = Math.hypot(p2.x - p0.x, p2.z - p0.z);
+        if (d01 > 35.0 || d12 > 35.0 || d20 > 35.0) {
+          continue;
+        }
+
         capTriangles.push(p0, p1, p2);
       }
     }

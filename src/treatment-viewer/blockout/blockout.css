@@ -1257,3 +1257,124 @@
   }
 }
 
+/* ── Collapsible Left Camera Orientation Dock ──────────────────────────────── */
+.tv-cad-view-dock {
+  position: absolute;
+  top: 50%;
+  left: 18px;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  background: var(--tv-surface-glass);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--tv-border);
+  border-radius: 18px;
+  padding: 6px;
+  box-shadow: var(--tv-shadow-glass);
+  z-index: 50;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.tv-cad-view-dock__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 26px;
+  background: var(--tv-surface-sunken);
+  border: 1px solid var(--tv-border-subtle);
+  border-radius: 8px;
+  color: var(--tv-text-sub);
+  cursor: pointer;
+  margin-bottom: 5px;
+  transition: all 0.2s ease;
+}
+
+.tv-cad-view-dock__toggle:hover {
+  background: var(--tv-gold-mid);
+  color: var(--tv-gold);
+  border-color: var(--tv-border-gold-subtle);
+}
+
+.tv-cad-view-dock__arrow {
+  transition: transform 0.25s ease;
+}
+
+.tv-cad-view-dock__buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tv-cad-view-dock .tv-cam-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 68px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--tv-text-sub);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.tv-cad-view-dock .tv-cam-btn:hover {
+  background: var(--tv-gold-light);
+  color: var(--tv-gold);
+  border-color: var(--tv-border-gold-subtle);
+}
+
+.tv-cad-view-dock .tv-cam-btn--active {
+  background: var(--tv-gold-mid) !important;
+  color: var(--tv-gold) !important;
+  border-color: var(--tv-border-gold-subtle) !important;
+  box-shadow: var(--tv-shadow-sm) !important;
+}
+
+.tv-cad-view-dock .tv-cam-btn--gold {
+  color: var(--tv-gold);
+}
+
+.tv-cad-view-dock .tv-cam-btn--gold:hover {
+  background: var(--tv-gold-mid);
+  color: var(--tv-gold-hover);
+  border-color: var(--tv-border-gold-subtle);
+}
+
+/* Collapsed state */
+.tv-cad-view-dock--collapsed {
+  left: 8px;
+  padding: 4px;
+  border-radius: 20px;
+}
+
+.tv-cad-view-dock--collapsed .tv-cad-view-dock__toggle {
+  margin-bottom: 0;
+  width: 26px;
+  height: 38px;
+  border-radius: 12px;
+}
+
+.tv-cad-view-dock--collapsed .tv-cad-view-dock__arrow {
+  transform: rotate(180deg);
+}
+
+.tv-cad-view-dock--collapsed .tv-cad-view-dock__buttons {
+  display: none !important;
+}
+
+
+
+
+

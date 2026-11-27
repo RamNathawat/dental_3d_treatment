@@ -254,7 +254,7 @@ export class WaxSculptor {
 
       try {
         this.domElement.setPointerCapture(e.pointerId);
-      } catch (_) {}
+      } catch {}
 
       // Record undo state at start of stroke
       this.undoStack.push(new Map(this.activeDeltas));
@@ -273,7 +273,7 @@ export class WaxSculptor {
       if (e) {
         try {
           this.domElement.releasePointerCapture(e.pointerId);
-        } catch (_) {}
+        } catch {}
       }
       if (this.hasStrokeModified) {
         this.notifyStroke();

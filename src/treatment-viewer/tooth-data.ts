@@ -90,35 +90,37 @@ export function identifyToothAtPoint(
 ): ToothInfo {
   const spanX = bounds ? bounds.maxX - bounds.minX : 0;
   const isFullArch = spanX > 30;
-  const midX = bounds && isFullArch ? (bounds.minX + bounds.maxX) / 2 : isUpper ? 1.97 : 1.25;
-  const maxZ = bounds && isFullArch ? bounds.maxZ : isUpper ? 41.55 : 38.50;
+  const midX = bounds && isFullArch ? (bounds.minX + bounds.maxX) / 2 : (isUpper ? 1.97 : 1.25);
+  const minZ = bounds && isFullArch ? bounds.minZ : (isUpper ? -12.0 : -10.0);
+  const focalZ = isFullArch ? minZ - 2.0 : -12.0;
 
   // Patient left is positive X (+X > midX); Patient right is negative X (<= midX)
   const isLeft = point.x > midX;
-  const dx = Math.abs(point.x - midX);
-  const dz = Math.max(0, maxZ - point.z);
-  const s = Math.hypot(dx, dz);
 
-  // Position 1 to 8 based on anatomical arc distance from anterior midline
+  // Angular coordinate relative to dental arch center (smooth monotonic progression along arch)
+  const theta = Math.atan2(point.x - midX, Math.max(0.1, point.z - focalZ));
+  const a = Math.abs(theta);
+
+  // Position 1 to 8 based on anatomical angular arc along dental arch
   let position = 1;
   if (isUpper) {
-    if (s < 5.5) position = 1;
-    else if (s < 10.0) position = 2;
-    else if (s < 17.5) position = 3;
-    else if (s < 24.5) position = 4;
-    else if (s < 33.0) position = 5;
-    else if (s < 44.0) position = 6;
-    else if (s < 55.0) position = 7;
-    else position = 8;
+    if (a < 0.12) position = 1;       // Central Incisor (#11 / #21)
+    else if (a < 0.24) position = 2;  // Lateral Incisor (#12 / #22)
+    else if (a < 0.38) position = 3;  // Canine (#13 / #23)
+    else if (a < 0.50) position = 4;  // 1st Premolar (#14 / #24)
+    else if (a < 0.72) position = 5;  // 2nd Premolar (#15 / #25)
+    else if (a < 1.05) position = 6;  // 1st Molar (#16 / #26)
+    else if (a < 1.38) position = 7;  // 2nd Molar (#17 / #27)
+    else position = 8;                // 3rd Molar (#18 / #28)
   } else {
-    if (s < 4.5) position = 1;
-    else if (s < 9.5) position = 2;
-    else if (s < 16.5) position = 3;
-    else if (s < 25.0) position = 4;
-    else if (s < 34.0) position = 5;
-    else if (s < 46.0) position = 6;
-    else if (s < 56.0) position = 7;
-    else position = 8;
+    if (a < 0.10) position = 1;       // Central Incisor (#41 / #31)
+    else if (a < 0.22) position = 2;  // Lateral Incisor (#42 / #32)
+    else if (a < 0.35) position = 3;  // Canine (#43 / #33)
+    else if (a < 0.48) position = 4;  // 1st Premolar (#44 / #34)
+    else if (a < 0.65) position = 5;  // 2nd Premolar (#45 / #35)
+    else if (a < 1.15) position = 6;  // 1st Molar (#46 / #36)
+    else if (a < 1.40) position = 7;  // 2nd Molar (#47 / #37)
+    else position = 8;                // 3rd Molar (#48 / #38)
   }
 
   const quadrant = isUpper ? (isLeft ? 2 : 1) : (isLeft ? 3 : 4);
@@ -203,7 +205,12 @@ export function computeToothCentroids(
 
   const centroids: Record<number, [number, number, number]> = {};
   for (const [fdi, acc] of accumulators.entries()) {
-    if (acc.count > 0) {
+    // Only register a tooth centroid if it has a substantial crown vertex cluster.
+    // Third molars (18, 28, 38, 48) require a genuine full crown cluster to filter out
+    // distal cut edge noise on standard 14-tooth dental arches.
+    const isThirdMolar = (fdi % 10 === 8);
+    const minVertexCount = count < 30 ? 1 : (isThirdMolar ? 150 : 30);
+    if (acc.count >= minVertexCount) {
       centroids[fdi] = [acc.xSum / acc.count, acc.ySum / acc.count, acc.zSum / acc.count];
     }
   }
@@ -342,6 +349,7 @@ export interface DentalContactDefinition {
 }
 
 export const UPPER_DENTAL_CONTACTS: readonly DentalContactDefinition[] = [
+  { contact: "18-17", toothA: 18, toothB: 17, label: "18 - 17 (UR8 - UR7)", arch: "upper" },
   { contact: "17-16", toothA: 17, toothB: 16, label: "17 - 16 (UR7 - UR6)", arch: "upper" },
   { contact: "16-15", toothA: 16, toothB: 15, label: "16 - 15 (UR6 - UR5)", arch: "upper" },
   { contact: "15-14", toothA: 15, toothB: 14, label: "15 - 14 (UR5 - UR4)", arch: "upper" },
@@ -355,9 +363,11 @@ export const UPPER_DENTAL_CONTACTS: readonly DentalContactDefinition[] = [
   { contact: "24-25", toothA: 24, toothB: 25, label: "24 - 25 (UL4 - UL5)", arch: "upper" },
   { contact: "25-26", toothA: 25, toothB: 26, label: "25 - 26 (UL5 - UL6)", arch: "upper" },
   { contact: "26-27", toothA: 26, toothB: 27, label: "26 - 27 (UL6 - UL7)", arch: "upper" },
+  { contact: "27-28", toothA: 27, toothB: 28, label: "27 - 28 (UL7 - UL8)", arch: "upper" },
 ];
 
 export const LOWER_DENTAL_CONTACTS: readonly DentalContactDefinition[] = [
+  { contact: "48-47", toothA: 48, toothB: 47, label: "48 - 47 (LR8 - LR7)", arch: "lower" },
   { contact: "47-46", toothA: 47, toothB: 46, label: "47 - 46 (LR7 - LR6)", arch: "lower" },
   { contact: "46-45", toothA: 46, toothB: 45, label: "46 - 45 (LR6 - LR5)", arch: "lower" },
   { contact: "45-44", toothA: 45, toothB: 44, label: "45 - 44 (LR5 - LR4)", arch: "lower" },
@@ -371,6 +381,7 @@ export const LOWER_DENTAL_CONTACTS: readonly DentalContactDefinition[] = [
   { contact: "34-35", toothA: 34, toothB: 35, label: "34 - 35 (LL4 - LL5)", arch: "lower" },
   { contact: "35-36", toothA: 35, toothB: 36, label: "35 - 36 (LL5 - LL6)", arch: "lower" },
   { contact: "36-37", toothA: 36, toothB: 37, label: "36 - 37 (LL6 - LL7)", arch: "lower" },
+  { contact: "37-38", toothA: 37, toothB: 38, label: "37 - 38 (LL7 - LL8)", arch: "lower" },
 ];
 
 export const ALL_DENTAL_CONTACTS: readonly DentalContactDefinition[] = [

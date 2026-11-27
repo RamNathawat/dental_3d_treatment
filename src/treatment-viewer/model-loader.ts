@@ -51,7 +51,7 @@ const modelStore =
   !isTestEnv &&
   typeof window !== "undefined" &&
   typeof indexedDB !== "undefined"
-    ? createStore("dental-models-db-v3", "glb-cache")
+    ? createStore("dental-models-db-v4", "glb-cache")
     : null;
 
 export type ModelProgressCallback = (
@@ -843,6 +843,79 @@ function safeMergeGeometries(g1: BufferGeometry, g2: BufferGeometry): BufferGeom
 
 /** Extracts native BufferGeometries directly from an in-memory GLB buffer in ~10ms.
  * Safely preserves multi-mesh containers and separates distinct attachment submeshes. */
+export function pruneCrossPalateTriangles(geom: BufferGeometry): BufferGeometry {
+  const pos = geom.getAttribute("position");
+  if (!pos) return geom;
+  const index = geom.getIndex();
+  const count = index ? index.count / 3 : pos.count / 3;
+
+  const validIndices: number[] = [];
+  let pruned = false;
+
+  for (let t = 0; t < count; t++) {
+    const i0 = index ? index.getX(t * 3) : t * 3;
+    const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+    const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+
+    const x0 = pos.getX(i0), y0 = pos.getY(i0), z0 = pos.getZ(i0);
+    const x1 = pos.getX(i1), y1 = pos.getY(i1), z1 = pos.getZ(i1);
+    const x2 = pos.getX(i2), y2 = pos.getY(i2), z2 = pos.getZ(i2);
+
+    // If all three vertices are near-coplanar on the base plane, preserve them as solid base cap
+    const isPlanarBase = Math.abs(y0 - y1) < 0.25 && Math.abs(y1 - y2) < 0.25 && Math.abs(y2 - y0) < 0.25;
+    if (isPlanarBase) {
+      validIndices.push(i0, i1, i2);
+      continue;
+    }
+
+    const d01 = Math.hypot(x0 - x1, y0 - y1, z0 - z1);
+    const d12 = Math.hypot(x1 - x2, y1 - y2, z1 - z2);
+    const d20 = Math.hypot(x2 - x0, y2 - y0, z2 - z0);
+    const maxEdge = Math.max(d01, d12, d20);
+
+    const cx = (x0 + x1 + x2) / 3;
+    const cz = (z0 + z1 + z2) / 3;
+    // Cross-palate or cross-tongue bridging chords across the arch interior
+    const isCrossArch = maxEdge > 35.0 || (maxEdge > 12.0 && Math.abs(cx) < 8.0 && cz > -6.0 && cz < 16.0);
+
+    if (isCrossArch) {
+      pruned = true;
+      continue;
+    }
+
+    validIndices.push(i0, i1, i2);
+  }
+
+  if (!pruned) return geom;
+
+  const newGeom = geom.clone();
+  newGeom.setIndex(validIndices);
+  if (newGeom.groups && newGeom.groups.length > 0) {
+    newGeom.clearGroups();
+  }
+  newGeom.computeVertexNormals();
+  if (geom.userData?.baseColors) {
+    newGeom.userData.baseColors = geom.userData.baseColors.clone();
+  }
+  return newGeom;
+}
+
+function finalizeLoadedArchGeometry(
+  geom: BufferGeometry,
+  isUpper: boolean,
+): BufferGeometry {
+  // Prune bogus cross-arch bridge triangles FIRST so genuine base-cap triangles added next are never stripped
+  let finalized = pruneCrossPalateTriangles(geom);
+  finalized = capPlanarOpenings(finalized, isUpper);
+  if (finalized.getAttribute("color")) {
+    finalized.userData.baseColors = finalized.getAttribute("color")!.clone();
+  }
+  finalized.computeVertexNormals();
+  finalized.computeBoundingBox();
+  finalized.computeBoundingSphere();
+  return finalized;
+}
+
 export async function extractGeometriesFromGlb(
   glbBuffer: ArrayBuffer,
 ): Promise<ExtractedGlbGeometries | null> {
@@ -911,9 +984,12 @@ export async function extractGeometriesFromGlb(
       baseGeom.userData.baseColors = baseGeom.getAttribute("color")!.clone();
     }
 
+    const cleanFull = fullGeom;
+    const cleanBase = baseGeom;
+
     return {
-      full: fullGeom,
-      noAttachments: baseGeom,
+      full: cleanFull,
+      noAttachments: cleanBase,
       hasAttachments: true,
     };
   }
@@ -926,13 +1002,15 @@ export async function extractGeometriesFromGlb(
       : mergeGeometries(baseGeoms, false) || baseGeoms[0]!;
   calibrateGeometryColors(baseGeom);
 
-  if (baseGeom.getAttribute("color")) {
-    baseGeom.userData.baseColors = baseGeom.getAttribute("color")!.clone();
+  const cleanBase = baseGeom;
+
+  if (cleanBase.getAttribute("color")) {
+    cleanBase.userData.baseColors = cleanBase.getAttribute("color")!.clone();
   }
 
   return {
-    full: baseGeom,
-    noAttachments: baseGeom,
+    full: cleanBase,
+    noAttachments: cleanBase,
     hasAttachments: false,
   };
 }
@@ -1237,22 +1315,12 @@ export async function loadStageGeometries(
           }
         }
         if (upperGeom) {
-          upperGeom = capPlanarOpenings(upperGeom, true);
+          upperGeom = finalizeLoadedArchGeometry(upperGeom, true);
           if (upperNoAttGeom && upperNoAttGeom !== upperGeom) {
-            upperNoAttGeom = capPlanarOpenings(upperNoAttGeom, true);
+            upperNoAttGeom = finalizeLoadedArchGeometry(upperNoAttGeom, true);
+          } else {
+            upperNoAttGeom = upperGeom;
           }
-          if (upperGeom.getAttribute("color")) {
-            upperGeom.userData.baseColors = upperGeom.getAttribute("color")!.clone();
-          }
-          upperGeom.computeBoundingBox();
-          upperGeom.computeBoundingSphere();
-        }
-        if (upperNoAttGeom) {
-          if (upperNoAttGeom.getAttribute("color")) {
-            upperNoAttGeom.userData.baseColors = upperNoAttGeom.getAttribute("color")!.clone();
-          }
-          upperNoAttGeom.computeBoundingBox();
-          upperNoAttGeom.computeBoundingSphere();
         }
       }
 
@@ -1300,22 +1368,12 @@ export async function loadStageGeometries(
           }
         }
         if (lowerGeom) {
-          lowerGeom = capPlanarOpenings(lowerGeom, false);
+          lowerGeom = finalizeLoadedArchGeometry(lowerGeom, false);
           if (lowerNoAttGeom && lowerNoAttGeom !== lowerGeom) {
-            lowerNoAttGeom = capPlanarOpenings(lowerNoAttGeom, false);
+            lowerNoAttGeom = finalizeLoadedArchGeometry(lowerNoAttGeom, false);
+          } else {
+            lowerNoAttGeom = lowerGeom;
           }
-          if (lowerGeom.getAttribute("color")) {
-            lowerGeom.userData.baseColors = lowerGeom.getAttribute("color")!.clone();
-          }
-          lowerGeom.computeBoundingBox();
-          lowerGeom.computeBoundingSphere();
-        }
-        if (lowerNoAttGeom) {
-          if (lowerNoAttGeom.getAttribute("color")) {
-            lowerNoAttGeom.userData.baseColors = lowerNoAttGeom.getAttribute("color")!.clone();
-          }
-          lowerNoAttGeom.computeBoundingBox();
-          lowerNoAttGeom.computeBoundingSphere();
         }
       }
 

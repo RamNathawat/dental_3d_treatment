@@ -27,7 +27,12 @@ const VIEW_DIRECTIONS: Record<StandardView, readonly [number, number, number]> =
  * "Up" is what stops the camera rolling about its own line of sight, so a view straight down that
  * axis has to name another one — there is no up-most direction left to take.
  */
-const PLAN_VIEWS: ReadonlySet<StandardView> = new Set(["top", "bottom"]);
+const PLAN_VIEWS: ReadonlySet<StandardView> = new Set([
+  "top",
+  "bottom",
+  "left",
+  "right",
+]);
 const PLAN_VIEW_UP: readonly [number, number, number] = [0, 1, 0];
 const SCAN_UP: readonly [number, number, number] = [0, 0, 1];
 

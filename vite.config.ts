@@ -15,7 +15,7 @@ export default defineConfig({
   },
   plugins: [
     {
-      name: "clean-dist-models",
+      name: "clean-dist-models-and-sync-portal",
       async closeBundle() {
         const fs = await import("node:fs");
         const path = await import("node:path");
@@ -26,6 +26,22 @@ export default defineConfig({
         const distM3d = path.resolve("dist/models/Niya Priority.m3d");
         if (fs.existsSync(distM3d)) {
           fs.rmSync(distM3d, { force: true });
+        }
+
+        // Automatically sync built assets and treatment.html to portal/public/
+        const portalAssets = path.resolve("portal/public/assets");
+        const distAssets = path.resolve("dist/assets");
+        if (fs.existsSync(distAssets) && fs.existsSync(portalAssets)) {
+          fs.cpSync(distAssets, portalAssets, { recursive: true, force: true });
+        }
+        const distTreatment = path.resolve("dist/treatment.html");
+        const portalTreatment = path.resolve("portal/public/treatment.html");
+        if (fs.existsSync(distTreatment) && fs.existsSync(path.dirname(portalTreatment))) {
+          let html = fs.readFileSync(distTreatment, "utf-8");
+          const timestamp = Date.now();
+          html = html.replace(/src="\/assets\/treatment-main\.js"/g, `src="/assets/treatment-main.js?v=${timestamp}"`);
+          html = html.replace(/href="\/assets\/treatment-main\.css"/g, `href="/assets/treatment-main.css?v=${timestamp}"`);
+          fs.writeFileSync(portalTreatment, html, "utf-8");
         }
       },
     },

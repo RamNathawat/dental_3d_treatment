@@ -281,11 +281,13 @@ class ThreeViewport implements Viewport {
     });
     installOrbitDrag(canvas, {
       onTurn: (drag) => {
+        if (this.isCameraLocked) return;
         this.turnCamera(drag);
       },
       onEnd: () => {
         this.handleCameraSettled();
       },
+      isLocked: () => this.isCameraLocked,
     });
     // A held finger asks for a new orbit centre, which is what a touch screen has instead of the
     // right-drag that moves one around with a mouse.
@@ -549,8 +551,19 @@ class ThreeViewport implements Viewport {
     return this.renderer;
   }
 
+  private isCameraLocked = false;
+
   getControls(): OrbitControls {
     return this.controls;
+  }
+
+  setCameraLocked(locked: boolean): void {
+    this.isCameraLocked = locked;
+    this.controls.enabled = !locked;
+  }
+
+  getCameraLocked(): boolean {
+    return this.isCameraLocked;
   }
 
   projectPoint(

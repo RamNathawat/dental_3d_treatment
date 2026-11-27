@@ -8,6 +8,8 @@ export interface OrbitDragHandlers {
   onTurn(drag: { readonly x: number; readonly y: number }): void;
   /** The drag is over — call it a turn, and whatever it changed is worth remembering. */
   onEnd(): void;
+  /** If returns true, camera rotation is locked. */
+  isLocked?(): boolean;
 }
 
 /**
@@ -27,6 +29,10 @@ export function installOrbitDrag(
   let turned = false;
 
   canvas.addEventListener("pointerdown", (event) => {
+    if (event.defaultPrevented || handlers.isLocked?.()) {
+      dragging = null;
+      return;
+    }
     // A second finger is the page's gesture, and it ends whatever drag was under way; the other mouse
     // buttons are the pan and the browser's own menu.
     if (!event.isPrimary || event.button !== 0) {
@@ -43,6 +49,10 @@ export function installOrbitDrag(
   });
 
   canvas.addEventListener("pointermove", (event) => {
+    if (handlers.isLocked?.()) {
+      dragging = null;
+      return;
+    }
     if (dragging === null || event.pointerId !== dragging.pointerId) return;
 
     const drag = {

@@ -91,6 +91,8 @@ export interface Viewport {
   getThreeCamera?(): import("three").PerspectiveCamera;
   getThreeRenderer?(): import("three").WebGLRenderer;
   getControls?(): any;
+  setCameraLocked?(locked: boolean): void;
+  getCameraLocked?(): boolean;
   /** Projects a 3D coordinate in scan space to 2D canvas pixel coordinates. */
   projectPoint?(
     point: { x: number; y: number; z: number },

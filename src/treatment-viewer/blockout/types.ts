@@ -101,6 +101,75 @@ export interface BlockoutProtocol {
   gingival: GingivalConfig;
   undercut: UndercutConfig;
   printPrep: PrintPrepConfig;
+  /**
+   * User-calibrated / dragged contact point overrides by contactKey (e.g. "16-15": [x, y, z]).
+   * Propagates from reference stage across transitional stages.
+   */
+  contactOverrides?: Record<string, [number, number, number]>;
+  /**
+   * User-added custom contact points.
+   */
+  customContacts?: Array<{
+    key: string;
+    position: [number, number, number];
+    label?: string;
+  }>;
+  /**
+   * Contacts disabled or deleted by the user.
+   */
+  disabledContacts?: Record<string, boolean>;
+  /**
+   * Milestone 4.3 single gap wax focus (e.g. "11-21", "41-31", or "all").
+   */
+  singleGapFocusKey?: string | null;
+  /**
+   * Currently active or selected contact key for golden highlight in full-arch mode.
+   */
+  selectedContactKey?: string | null;
+}
+
+export const DEFAULT_BLOCKOUT_PROTOCOL: BlockoutProtocol = {
+  insertionAxis: { x: 0, y: -1, z: 0, tiltX: 0, tiltY: 0 },
+  interproximal: { enabled: true, thicknessMm: 0.6, bridgeSpaces: false },
+  singleGapFocusKey: "all",
+  gingival: { enabled: false, reliefMm: 0.3, excludeEdentulous: true },
+  undercut: {
+    enabled: false,
+    maxDepthMm: 0.5,
+    draftAngleDeg: 2.0,
+    perTooth: {},
+  },
+  printPrep: {
+    shrinkageScalePercent: 100.5,
+    drainHoles: [],
+  },
+};
+
+/** Diagnostic fitting details for a single interdental contact. */
+export interface ContactFittingDiagnostic {
+  readonly contactKey: string;
+  readonly label: string;
+  readonly toothA: number;
+  readonly toothB: number;
+  readonly spanMm: number;
+  readonly contactPoint: [number, number, number];
+  readonly normal?: [number, number, number];
+  readonly apexY: number;
+  readonly baseY: number;
+  readonly buccalWidthMm: number;
+  readonly lingualWidthMm: number;
+  readonly isSealed: boolean;
+  readonly clearanceMm?: number;
+}
+
+/** Comprehensive 3D fitting summary comparing model geometry to wax blockout. */
+export interface ModelFittingSummary {
+  readonly modelBounds: { min: [number, number, number]; max: [number, number, number] };
+  readonly waxBounds: { min: [number, number, number]; max: [number, number, number] } | null;
+  readonly totalContacts: number;
+  readonly sealedContacts: number;
+  readonly totalWaxVolumeMm3: number;
+  readonly contacts: ContactFittingDiagnostic[];
 }
 
 /** Active state of a specific transitional stage within the Blockout Studio. */
@@ -119,4 +188,6 @@ export interface StageBlockoutResult {
   sculptDeltas?: Map<number, [number, number, number]>;
   /** Timestamp when blockout was generated or modified. */
   lastUpdated: number;
+  /** Real-time 3D model vs wax fitting verification summary. */
+  fittingSummary?: ModelFittingSummary;
 }

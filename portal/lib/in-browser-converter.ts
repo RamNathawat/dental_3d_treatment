@@ -286,9 +286,11 @@ export function capPlanarOpenings(
     const spanX = Math.max(...xVals) - Math.min(...xVals);
     const spanZ = Math.max(...zVals) - Math.min(...zVals);
 
-    // Capping tolerance: allow clinical cuts with height variation up to 3.2mm,
-    // or up to 4.5mm for wide arch-spanning loops.
-    if (yDiff > 3.2 && !(spanX > 20.0 && spanZ > 20.0 && yDiff <= 4.5)) continue;
+    // Dental horseshoe arch protection: distinguish true flat base cut from anatomical loops
+    const isBaseCut = Math.abs(minLoopY - cutY) < 0.8 && yDiff < 0.8;
+    if (!isBaseCut && spanX > 15.0 && spanZ > 15.0) continue;
+    // Capping tolerance: allow flat base cuts with height variation up to 2.8mm
+    if (!isBaseCut && yDiff > 2.8) continue;
     // Skip tiny micro-loops under 2mm
     if (spanX < 2.0 && spanZ < 2.0) continue;
 
@@ -332,6 +334,19 @@ export function capPlanarOpenings(
         p1 = pts.get(k1),
         p2 = pts.get(k2);
       if (p0 && p1 && p2) {
+        // Exclude cross-palate / cross-tongue bridging chords across the hollow dental horseshoe arch
+        const cx = (p0.x + p1.x + p2.x) / 3;
+        const cz = (p0.z + p1.z + p2.z) / 3;
+        if (!isUpper && Math.abs(cx) < 9.0 && cz > -6.0 && cz < 16.0) {
+          continue;
+        }
+        const d01 = Math.hypot(p0.x - p1.x, p0.z - p1.z);
+        const d12 = Math.hypot(p1.x - p2.x, p1.z - p2.z);
+        const d20 = Math.hypot(p2.x - p0.x, p2.z - p0.z);
+        if (d01 > 35.0 || d12 > 35.0 || d20 > 35.0) {
+          continue;
+        }
+
         capTriangles.push(p0, p1, p2);
       }
     }
@@ -1485,10 +1500,9 @@ export async function processDentalZipInBrowser(
         let solidGeom: THREE.BufferGeometry | null = null;
         const attGeoms: THREE.BufferGeometry[] = [];
 
-        // 1. Process Gum
+        // 1. Process Gum (Do NOT run capPlanarOpenings on gum.obj — gum scan is an open horseshoe surface; capping with 2D Earcut creates flat plates across the hollow palate)
         if (stageData.gum) {
           let geom = parseMeshBuffer(stageData.gum, "gum.obj");
-          geom = capPlanarOpenings(geom, arch === "Upper");
           // ClinCheck / 3Shape vascular coral-rose gingiva (#CC5C6A in linear: 0.46, 0.085, 0.105)
           const count = geom.attributes.position ? geom.attributes.position.count : 0;
           if (count > 0) {

@@ -182,14 +182,20 @@ export function createTreatmentApp(
   const isSingleArchUpper = caseHasUpper && !caseHasLower;
   const isSingleArchLower = !caseHasUpper && caseHasLower;
 
+  // Milestone 4: CAD blockout mode flag
+  let isBlockoutStudioActive =
+    options.initialMode === "blockout" ||
+    (typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("mode") === "blockout");
+
   const state: AppState = {
     manifest,
     currentIndex: -1,
     activeTemplateStage: null,
     loading: false,
     error: null,
-    upperVisible: !isSingleArchLower,
-    lowerVisible: !isSingleArchUpper,
+    upperVisible: isBlockoutStudioActive ? !isSingleArchLower : !isSingleArchLower,
+    lowerVisible: isBlockoutStudioActive ? (isSingleArchLower ? true : false) : !isSingleArchUpper,
     attachmentsVisible: false,
     playbackSpeed: 1,
     isPlaying: false,
@@ -234,11 +240,6 @@ export function createTreatmentApp(
   let upperToothDisplacements: Record<number, number> | null = null;
   let lowerToothDisplacements: Record<number, number> | null = null;
 
-  // Milestone 4: CAD blockout mode flag
-  let isBlockoutStudioActive =
-    options.initialMode === "blockout" ||
-    (typeof window !== "undefined" &&
-      new URLSearchParams(window.location.search).get("mode") === "blockout");
 
   // ── DOM ──────────────────────────────────────────────────────────────────
 
@@ -559,6 +560,9 @@ export function createTreatmentApp(
     if (blockoutStudioInstance) {
       blockoutStudioInstance.setArch("upper");
     }
+    if (cadCamBottomBtn.classList.contains("tv-cam-btn--active")) {
+      viewport.setView("front");
+    }
   });
 
   const cadArchLowerBtn = document.createElement("button");
@@ -569,6 +573,9 @@ export function createTreatmentApp(
   cadArchLowerBtn.addEventListener("click", () => {
     if (blockoutStudioInstance) {
       blockoutStudioInstance.setArch("lower");
+    }
+    if (cadCamBottomBtn.classList.contains("tv-cam-btn--active")) {
+      viewport.setView("back");
     }
   });
 
@@ -619,19 +626,92 @@ export function createTreatmentApp(
     cadTabPrepBtn.classList.toggle("tv-cad-tab-btn--active", tab === "prep");
   }
 
-  const cadCamFrontBtn = makeBtn("Front", () => viewport.setView("top"), "tv-cad-tool-btn");
-  cadCamFrontBtn.title = "Frontal smile camera view";
-  const cadCamOcclusalBtn = makeBtn("Occlusal", () => viewport.setView("front"), "tv-cad-tool-btn");
-  cadCamOcclusalBtn.title = "Top-down occlusal camera view";
+  // ── Left Floating Collapsible CAD Camera View Toolbar ──────────────────────
+  let isCadViewDockCollapsed = false;
+  const cadViewToggleBtn = document.createElement("button");
+  cadViewToggleBtn.type = "button";
+  cadViewToggleBtn.className = "tv-cad-view-dock__toggle";
+  cadViewToggleBtn.setAttribute("aria-label", "Collapse camera view controls");
+  cadViewToggleBtn.innerHTML = `
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="tv-cad-view-dock__arrow">
+      <polyline points="15 18 9 12 15 6"></polyline>
+    </svg>
+  `;
+  cadViewToggleBtn.title = "Collapse camera views";
+
+  function setActiveCadCamBtn(btn: HTMLButtonElement): void {
+    [cadCamFrontBtn, cadCamBackBtn, cadCamLeftBtn, cadCamRightBtn, cadCamBottomBtn].forEach((b) => {
+      b.classList.remove("tv-cam-btn--active");
+    });
+    btn.classList.add("tv-cam-btn--active");
+  }
+
+  const cadCamFrontBtn = makeBtn("Front", () => {
+    viewport.setView("top");
+    setActiveCadCamBtn(cadCamFrontBtn);
+  }, "tv-cam-btn tv-cam-btn--active");
+  cadCamFrontBtn.title = "Frontal smile view";
+
+  const cadCamBackBtn = makeBtn("Back", () => {
+    viewport.setView("bottom");
+    setActiveCadCamBtn(cadCamBackBtn);
+  }, "tv-cam-btn");
+  cadCamBackBtn.title = "Lingual / back view";
+
+  const cadCamLeftBtn = makeBtn("Left", () => {
+    viewport.setView("left");
+    setActiveCadCamBtn(cadCamLeftBtn);
+  }, "tv-cam-btn");
+  cadCamLeftBtn.title = "Left lateral profile view";
+
+  const cadCamRightBtn = makeBtn("Right", () => {
+    viewport.setView("right");
+    setActiveCadCamBtn(cadCamRightBtn);
+  }, "tv-cam-btn");
+  cadCamRightBtn.title = "Right lateral profile view";
+
+  const cadCamBottomBtn = makeBtn("Bottom", () => {
+    // When viewing lower arch: occlusal view of teeth is from above (+Y looking down -> "back")
+    // When viewing upper arch: occlusal view of teeth is from below (-Y looking up -> "front")
+    const isLower = blockoutStudioInstance
+      ? blockoutStudioInstance.getArch() === "lower"
+      : (!state.upperVisible && state.lowerVisible);
+    viewport.setView(isLower ? "back" : "front");
+    setActiveCadCamBtn(cadCamBottomBtn);
+  }, "tv-cam-btn");
+  cadCamBottomBtn.title = "Occlusal view of teeth";
+
   const cadCamResetBtn = makeBtn(
     "Reset",
     () => {
       viewport.setView("top");
       viewport.fitAll();
+      setActiveCadCamBtn(cadCamFrontBtn);
     },
-    "tv-cad-tool-btn tv-cad-tool-btn--accent",
+    "tv-cam-btn tv-cam-btn--gold",
   );
   cadCamResetBtn.title = "Reset and frame dental models in frontal smile position";
+
+  const cadViewButtonsEl = div("tv-cad-view-dock__buttons", [
+    cadCamFrontBtn,
+    cadCamBackBtn,
+    cadCamLeftBtn,
+    cadCamRightBtn,
+    cadCamBottomBtn,
+    cadCamResetBtn,
+  ]);
+
+  const cadViewDockEl = div("tv-cad-view-dock", [
+    cadViewToggleBtn,
+    cadViewButtonsEl,
+  ]);
+  cadViewDockEl.hidden = true; // Shown when Blockout/CAD mode is active
+
+  cadViewToggleBtn.addEventListener("click", () => {
+    isCadViewDockCollapsed = !isCadViewDockCollapsed;
+    cadViewDockEl.classList.toggle("tv-cad-view-dock--collapsed", isCadViewDockCollapsed);
+    cadViewToggleBtn.title = isCadViewDockCollapsed ? "Expand camera views" : "Collapse camera views";
+  });
 
   const cadThemeToggleBtn = makeBtn(
     isDarkMode ? "Light" : "Dark",
@@ -653,9 +733,6 @@ export function createTreatmentApp(
       cadWorkspaceTabsEl,
     ]),
     div("tv-cad-top-bar__right", [
-      cadCamFrontBtn,
-      cadCamOcclusalBtn,
-      cadCamResetBtn,
       cadThemeToggleBtn,
     ]),
   ]);
@@ -807,8 +884,13 @@ export function createTreatmentApp(
   const camFrontBtn = makeBtn("Front", () => viewport.setView("top"), "tv-cam-btn");
   camFrontBtn.title = "Frontal smile view";
 
-  const camBottomBtn = makeBtn("Bottom", () => viewport.setView("front"), "tv-cam-btn");
-  camBottomBtn.title = "Bottom view";
+  const camBottomBtn = makeBtn("Bottom", () => {
+    const isLower = blockoutStudioInstance
+      ? blockoutStudioInstance.getArch() === "lower"
+      : (!state.upperVisible && state.lowerVisible);
+    viewport.setView(isLower ? "back" : "front");
+  }, "tv-cam-btn");
+  camBottomBtn.title = "Occlusal view of teeth";
 
   const camBackBtn = makeBtn("Back", () => viewport.setView("bottom"), "tv-cam-btn");
   camBackBtn.title = "Lingual/back view";
@@ -1340,6 +1422,7 @@ export function createTreatmentApp(
     notesBackdropEl,
     notesDrawerEl,
     cameraDockEl,
+    cadViewDockEl,
     bottomDockEl,
     expandPillEl,
     loadingEl,
@@ -1431,6 +1514,8 @@ export function createTreatmentApp(
     stageTopBarEl.style.display = active ? "none" : "";
     cameraDockEl.hidden = active;
     cameraDockEl.style.display = active ? "none" : "";
+    cadViewDockEl.hidden = !active;
+    cadViewDockEl.style.display = active ? "flex" : "none";
     toothTooltipEl.hidden = true;
     toothTooltipEl.style.display = active ? "none" : "";
   }
@@ -1494,6 +1579,13 @@ export function createTreatmentApp(
   type ArchMode = "lower" | "upper" | "both";
 
   function setArchMode(mode: ArchMode): void {
+    if (isBlockoutStudioActive || blockoutStudioInstance) {
+      if (mode === "both") {
+        const currArch = blockoutStudioInstance?.getArch() ?? (state.upperVisible ? "upper" : "lower");
+        mode = currArch === "lower" ? "lower" : "upper";
+      }
+    }
+
     if (mode === "lower") {
       state.upperVisible = false;
       state.lowerVisible = true;
@@ -2054,6 +2146,16 @@ export function createTreatmentApp(
           viewport.setLayerVisible(activeLowerId, state.lowerVisible);
           viewport.setLayerOpacity(activeLowerId, 1);
         }
+
+        if (isBlockoutStudioActive || blockoutStudioInstance) {
+          const isUp = (blockoutStudioInstance?.getArch() ?? (state.upperVisible ? "upper" : "lower")) === "upper";
+          state.upperVisible = isUp;
+          state.lowerVisible = !isUp;
+          viewport.setLayerVisible(activeUpperId, isUp);
+          viewport.setLayerVisible(activeLowerId, !isUp);
+          if (prevUpperId) viewport.setLayerVisible(prevUpperId, isUp);
+          if (prevLowerId) viewport.setLayerVisible(prevLowerId, !isUp);
+        }
       }
 
       if (isFirstSuccessfulLoad) {
@@ -2166,6 +2268,16 @@ export function createTreatmentApp(
         viewport.setLayerVisible(nextLowerId, state.lowerVisible);
         viewport.setLayerOpacity(nextLowerId, 0);
         activeLowerId = nextLowerId;
+
+        if (isBlockoutStudioActive || blockoutStudioInstance) {
+          const isUp = (blockoutStudioInstance?.getArch() ?? (state.upperVisible ? "upper" : "lower")) === "upper";
+          state.upperVisible = isUp;
+          state.lowerVisible = !isUp;
+          viewport.setLayerVisible(activeUpperId, isUp);
+          viewport.setLayerVisible(activeLowerId, !isUp);
+          if (prevUpperId) viewport.setLayerVisible(prevUpperId, isUp);
+          if (prevLowerId) viewport.setLayerVisible(prevLowerId, !isUp);
+        }
       }
 
       // Update centroids and per-tooth displacements for the newly loaded stage

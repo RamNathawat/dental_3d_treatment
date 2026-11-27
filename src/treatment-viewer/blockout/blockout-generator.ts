@@ -1,40 +1,29 @@
 /**
  * Digital Wax Blockout Mesh Generator.
  *
- * Implements:
- * 1. Interproximal Wax Blockout (embrasures & missing tooth spans).
- * 2. Gingival Line Relief (cervical margin blockout, doctor toggleable).
- * 3. Dentition Undercut Fill (draft angle positive, per-tooth overrides).
- *
- * Produces:
- * - A discrete "Digital Wax" overlay mesh (rendered in dental wax red #dc2626).
- * - A unified watertight model geometry ready for binary STL export.
+ * Clean scaffold ready for Milestone 1: Contact Point & Gap Detection.
+ * All legacy cylinder and heuristic quad-loft wax generation has been completely removed.
  */
 
 import {
   BufferAttribute,
   BufferGeometry,
+  Color,
   Vector3,
 } from "three";
+import { identifyToothAtPoint } from "../tooth-data";
 import type {
   BlockoutProtocol,
+  ContactFittingDiagnostic,
+  ModelFittingSummary,
   StageBlockoutResult,
 } from "./types";
 import { analyzeUndercuts } from "./undercut-analyzer";
+import { detectMeshContacts, type DetectedContact } from "./mesh-contact-detector";
 import {
-  computeToothCentroids,
-  identifyToothAtPoint,
-  LOWER_DENTAL_CONTACTS,
-  UPPER_DENTAL_CONTACTS,
-} from "../tooth-data";
-
-interface ResolvedContact {
-  center: Vector3;
-  tangent: Vector3;
-  spanDist: number;
-  toothA: number;
-  toothB: number;
-}
+  buildConformalMeshContext,
+  createWaxWedgeGeometry,
+} from "./wax-wedge-generator";
 
 /**
  * Generates blockout geometry for a dental arch according to the clinical protocol.
@@ -66,7 +55,7 @@ export function generateBlockout(
   const norm = baseGeometry.getAttribute("normal");
   const count = pos.count;
 
-  // Run automated survey analysis
+  // Run automated draw-axis survey analysis for undercut heatmap, metrics & Component 3
   const survey = analyzeUndercuts(
     baseGeometry,
     isUpper,
@@ -74,7 +63,7 @@ export function generateBlockout(
     protocol.undercut.draftAngleDeg,
   );
 
-  // Compute arch extents and geometry centers
+  // Compute arch extents
   let minX = Infinity, maxX = -Infinity;
   let minY = Infinity, maxY = -Infinity;
   let minZ = Infinity, maxZ = -Infinity;
@@ -86,254 +75,275 @@ export function generateBlockout(
     if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
   }
 
-  const midX = (minX + maxX) / 2;
+  const midX = (minX + maxX) * 0.5;
   const focalZ = minZ - 12.0;
   const maxSpanAngle = 0.95;
-  const bounds = { minX, maxX, minZ, maxZ };
-
-  // Pre-calculate interdental contact locations using real tooth centroids
-  const toothCentroids = computeToothCentroids(baseGeometry, isUpper);
-  const contactDefinitions = isUpper ? UPPER_DENTAL_CONTACTS : LOWER_DENTAL_CONTACTS;
-  const resolvedContacts: ResolvedContact[] = [];
-
-  for (const def of contactDefinitions) {
-    const cA = toothCentroids[def.toothA];
-    const cB = toothCentroids[def.toothB];
-    if (cA && cB) {
-      const vA = new Vector3(cA[0], cA[1], cA[2]);
-      const vB = new Vector3(cB[0], cB[1], cB[2]);
-      const center = new Vector3().addVectors(vA, vB).multiplyScalar(0.5);
-      const tangent = new Vector3(vB.x - vA.x, 0, vB.z - vA.z);
-      const spanDist = tangent.length();
-      if (spanDist > 0.001) {
-        tangent.normalize();
-        resolvedContacts.push({
-          center,
-          tangent,
-          spanDist,
-          toothA: def.toothA,
-          toothB: def.toothB,
-        });
-      }
-    }
-  }
-
-  // Track arch curve crown peak heights
-  const numSectors = 120;
-  const peakY = new Float32Array(numSectors);
-  peakY.fill(isUpper ? Infinity : -Infinity);
-
-  for (let i = 0; i < count; i++) {
-    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-    const angle = Math.atan2(x - midX, z - focalZ);
-    const s = Math.max(
-      0,
-      Math.min(
-        numSectors - 1,
-        Math.floor(((angle + maxSpanAngle) / (2 * maxSpanAngle)) * numSectors),
-      ),
-    );
-    if (isUpper) {
-      if (y < peakY[s]!) peakY[s] = y;
-    } else {
-      if (y > peakY[s]!) peakY[s] = y;
-    }
-  }
-
-  const smoothPeak = new Float32Array(numSectors);
-  for (let s = 0; s < numSectors; s++) {
-    let sum = 0, w = 0;
-    for (let d = -3; d <= 3; d++) {
-      const idx = s + d;
-      if (idx >= 0 && idx < numSectors) {
-        const v = peakY[idx]!;
-        if (isUpper ? v < Infinity : v > -Infinity) {
-          sum += v;
-          w++;
-        }
-      }
-    }
-    smoothPeak[s] = w > 0 ? sum / w : (isUpper ? minY : maxY);
-  }
-
   const spanX = maxX - minX;
   const isFullArch = spanX > 30.0;
+  const modelHeight = maxY - minY;
+  const archBounds = isFullArch ? { minX, maxX, minZ, maxZ } : undefined;
 
-  // Track maximum height of contour within clinical crown zone
-  const maxContourRadius = new Float32Array(numSectors);
-  maxContourRadius.fill(0);
+  // Milestone 4.1: Pure mesh-based topological contact detection
+  const detected = detectMeshContacts(baseGeometry, isUpper);
+  const contacts: ContactFittingDiagnostic[] = detected
+    .filter((c) => !protocol.disabledContacts?.[c.contactKey])
+    .map((c) => {
+      const override = protocol.contactOverrides?.[c.contactKey];
+      const pt: [number, number, number] = override
+        ? [override[0], override[1], override[2]]
+        : c.position;
+      return {
+        contactKey: c.contactKey,
+        label: c.label,
+        toothA: c.toothA,
+        toothB: c.toothB,
+        spanMm: c.spanMm,
+        contactPoint: pt,
+        normal: c.normal,
+        apexY: override ? pt[1] : c.apexY,
+        baseY: c.baseY,
+        buccalWidthMm: c.buccalWidthMm,
+        lingualWidthMm: c.lingualWidthMm,
+        isSealed: true,
+        clearanceMm: c.clearanceMm,
+      };
+    });
 
-  for (let i = 0; i < count; i++) {
-    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-    const angle = Math.atan2(x - midX, z - focalZ);
-    const s = Math.max(
-      0,
-      Math.min(
-        numSectors - 1,
-        Math.floor(((angle + maxSpanAngle) / (2 * maxSpanAngle)) * numSectors),
-      ),
-    );
-    const tip = smoothPeak[s]!;
-    const distFromTip = isUpper ? y - tip : tip - y;
+  // Include user-added custom contact points
+  if (protocol.customContacts && protocol.customContacts.length > 0) {
+    for (const cc of protocol.customContacts) {
+      if (protocol.disabledContacts?.[cc.key]) continue;
+      const override = protocol.contactOverrides?.[cc.key];
+      const pt: [number, number, number] = override
+        ? [override[0], override[1], override[2]]
+        : cc.position;
+      contacts.push({
+        contactKey: cc.key,
+        label: cc.label || `Custom Contact (${cc.key})`,
+        toothA: 0,
+        toothB: 0,
+        spanMm: 6.5,
+        contactPoint: pt,
+        apexY: pt[1],
+        baseY: pt[1] - (isUpper ? 4.0 : -4.0),
+        buccalWidthMm: 2.0,
+        lingualWidthMm: 2.0,
+        isSealed: true,
+        clearanceMm: 0.35,
+      });
+    }
+  }
 
-    if (!isFullArch || (distFromTip >= 0 && distFromTip <= 7.2)) {
-      const r = Math.hypot(x - midX, z - focalZ);
-      if (r > maxContourRadius[s]!) {
-        maxContourRadius[s] = r;
+  // Milestone 4: Full-Arch 3D Volumetric Wax Blockout Generation
+  // Component 1 (Interproximal Pink/Rose), Component 2 (Gingival Green), Component 3 (Undercut Blue)
+  const allPositions: number[] = [];
+  const allNormals: number[] = [];
+  const allColors: number[] = [];
+  let sumVolume = 0;
+
+  if (protocol.interproximal.enabled && contacts.length > 0) {
+    const focusKey = protocol.singleGapFocusKey;
+
+    let targetContacts: ContactFittingDiagnostic[] = [];
+    if (focusKey === "all" || !focusKey) {
+      targetContacts = contacts;
+    } else {
+      const match = contacts.find((c) => c.contactKey === focusKey);
+      targetContacts = match ? [match] : contacts;
+    }
+
+    const defaultWaxColor = new Color(0xD83D56); // Lab-wax crimson-rose (#D83D56)
+    const highlightWaxColor = new Color(0xFACC15); // Focused gap gold (#FACC15)
+
+    const meshContext = buildConformalMeshContext(baseGeometry, isUpper);
+    const thicknessMm = protocol.interproximal.thicknessMm ?? 0.60;
+
+    for (const c of targetContacts) {
+      const isSelected =
+        focusKey && focusKey !== "all"
+          ? c.contactKey === focusKey
+          : protocol.selectedContactKey
+            ? c.contactKey === protocol.selectedContactKey
+            : false;
+      const curColor = isSelected ? highlightWaxColor : defaultWaxColor;
+      const isUserTuned = Boolean(protocol.contactOverrides?.[c.contactKey]);
+
+      const detectedC: DetectedContact = {
+        id: `contact-${c.contactKey}`,
+        index: 0,
+        contactKey: c.contactKey,
+        label: c.label,
+        toothA: c.toothA,
+        toothB: c.toothB,
+        position: [c.contactPoint[0], c.contactPoint[1], c.contactPoint[2]],
+        normal: c.normal ?? [1, 0, 0],
+        clearanceMm: c.clearanceMm ?? 0.35,
+        spanMm: c.spanMm,
+        apexY: c.apexY,
+        baseY: c.baseY,
+        buccalWidthMm: c.buccalWidthMm,
+        lingualWidthMm: c.lingualWidthMm,
+      };
+
+      const isAnt = Math.abs(c.toothA % 10) <= 3 && Math.abs(c.toothB % 10) <= 3;
+      const isMolar = Math.abs(c.toothA % 10) >= 6 || Math.abs(c.toothB % 10) >= 6;
+      const wedge = createWaxWedgeGeometry(detectedC, isUpper, {
+        concavityMm: 0.25,
+        maxSpanMm: isAnt ? 0.48 : (isMolar ? 0.85 : 0.64),
+        thicknessMm,
+        meshContext,
+        isUserTuned,
+      });
+
+      const posAttr = wedge.getAttribute("position");
+      const normAttr = wedge.getAttribute("normal");
+      if (posAttr && normAttr) {
+        for (let i = 0; i < posAttr.count; i++) {
+          allPositions.push(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
+          allNormals.push(normAttr.getX(i), normAttr.getY(i), normAttr.getZ(i));
+          allColors.push(curColor.r, curColor.g, curColor.b);
+        }
+
+        const singleVol = Math.max(
+          0.8,
+          c.spanMm *
+            0.18 *
+            (Math.abs(c.baseY - c.apexY) || 2.8) *
+            ((c.buccalWidthMm || 1.2) + (c.lingualWidthMm || 1.2)) *
+            0.18,
+        );
+        sumVolume += singleVol;
       }
     }
   }
 
-  const smoothContour = new Float32Array(numSectors);
-  for (let s = 0; s < numSectors; s++) {
-    let sum = 0, w = 0;
-    for (let d = -2; d <= 2; d++) {
-      const idx = s + d;
-      if (idx >= 0 && idx < numSectors) {
-        sum += maxContourRadius[idx]!;
-        w++;
+  // Compute vertex-level surface relief for Component 2 (Gingival Margin Relief) and Component 3 (Blue Undercuts)
+  const needSurfaceRelief = protocol.gingival.enabled || protocol.undercut.enabled;
+  const mergedGeometry = baseGeometry.clone();
+  const mergedPos = mergedGeometry.getAttribute("position");
+
+  if (needSurfaceRelief && norm) {
+    // 1. Curve of Spee sector peak tracking
+    const numSectors = 120;
+    const peakY = new Float32Array(numSectors);
+    peakY.fill(isUpper ? Infinity : -Infinity);
+    for (let i = 0; i < count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const angle = Math.atan2(x - midX, z - focalZ);
+      const s = Math.max(
+        0,
+        Math.min(
+          numSectors - 1,
+          Math.floor(((angle + maxSpanAngle) / (2 * maxSpanAngle)) * numSectors),
+        ),
+      );
+      if (isUpper ? y < peakY[s]! : y > peakY[s]!) {
+        peakY[s] = y;
       }
     }
-    smoothContour[s] = w > 0 ? sum / w : maxContourRadius[s]!;
-  }
+    const smoothPeak = new Float32Array(numSectors);
+    for (let s = 0; s < numSectors; s++) {
+      let sumY = 0, w = 0;
+      for (let d = -3; d <= 3; d++) {
+        const idx = s + d;
+        if (idx >= 0 && idx < numSectors) {
+          const v = peakY[idx]!;
+          if (isUpper ? v < Infinity : v > -Infinity) {
+            sumY += v;
+            w++;
+          }
+        }
+      }
+      smoothPeak[s] = w > 0 ? sumY / w : (isUpper ? minY : maxY);
+    }
 
-  // Pre-calculate cervical margin boundary vertices separating crown enamel from gingiva
-  const colorAttr =
-    (baseGeometry.userData.baseColors instanceof BufferAttribute
-      ? baseGeometry.userData.baseColors
-      : null) || (baseGeometry.getAttribute("color") as BufferAttribute | undefined);
-
-  const isCervicalBorder = new Uint8Array(count);
-  let hasCervicalBorder = false;
-
-  if (colorAttr) {
+    // 2. Cervical CEJ boundary detection (supports Uint8 & Float32 vertex colors + un-welded meshes)
+    const colorAttr =
+      (baseGeometry.userData?.baseColors instanceof BufferAttribute &&
+      baseGeometry.userData.baseColors.count === count
+        ? baseGeometry.userData.baseColors
+        : null) || (baseGeometry.getAttribute("color") as BufferAttribute | undefined);
     const isGumVertex = new Uint8Array(count);
+    const isCervicalBorder = new Uint8Array(count);
     let gumCount = 0;
     let toothCount = 0;
+    let hasCervicalBorder = false;
 
-    for (let i = 0; i < count; i++) {
-      let r = colorAttr.getX(i);
-      let g = colorAttr.getY(i);
-      let b = colorAttr.getZ(i);
-      // Normalize if in 0..255 range (e.g. Uint8Array attributes from GLB accessors)
-      if (r > 1.0 || g > 1.0 || b > 1.0) {
-        r /= 255.0;
-        g /= 255.0;
-        b /= 255.0;
-      }
-      const isAttachment =
-        (r > 0.75 && g > 0.16 && g < 0.55 && b < 0.18) ||
-        (r > 0.85 && g > 0.35 && g < 0.72 && b < 0.28);
-      // Gum tissue has distinct coral-rose color: high red, low green (< 0.28), and r significantly higher than g
-      if (!isAttachment && (g < 0.28 && r > 0.30 && (r - g) > 0.10)) {
-        isGumVertex[i] = 1;
-        gumCount++;
-      } else {
-        toothCount++;
-      }
-    }
-
-    // Only compute boundary if mesh contains both tooth enamel and gingiva
-    if (gumCount > 0 && toothCount > 0) {
-      const index = baseGeometry.getIndex();
-      const numTris = index ? index.count / 3 : Math.floor(count / 3);
-      // Pass 1: Mark direct boundary vertices (level 2) on triangles bridging tooth and gum (welded single-mesh scans)
-      for (let t = 0; t < numTris; t++) {
-        const i0 = index ? index.getX(t * 3) : t * 3;
-        const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
-        const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
-        const sum = isGumVertex[i0]! + isGumVertex[i1]! + isGumVertex[i2]!;
-        if (sum === 1 || sum === 2) {
-          isCervicalBorder[i0] = 2;
-          isCervicalBorder[i1] = 2;
-          isCervicalBorder[i2] = 2;
-          hasCervicalBorder = true;
+    if (colorAttr && colorAttr.count === count) {
+      for (let i = 0; i < count; i++) {
+        let r = colorAttr.getX(i);
+        let g = colorAttr.getY(i);
+        let b = colorAttr.getZ(i);
+        if (r > 1.0 || g > 1.0 || b > 1.0) {
+          r /= 255.0;
+          g /= 255.0;
+          b /= 255.0;
+        }
+        const isAttachment =
+          (r > 0.75 && g > 0.16 && g < 0.55 && b < 0.18) ||
+          (r > 0.85 && g > 0.35 && g < 0.72 && b < 0.28);
+        if (!isAttachment && g < 0.30 && r > 0.30 && r - g > 0.08) {
+          isGumVertex[i] = 1;
+          gumCount++;
+        } else {
+          toothCount++;
         }
       }
 
-      // Pass 1b: If mesh contains separate un-welded submeshes (e.g. Maestro 3D multi-mesh GLBs
-      // where tooth and gum meshes are merged without welded boundary edges), detect open boundary
-      // collar edges between the teeth and gingival sockets
-      if (!hasCervicalBorder) {
-        const edgeMap = new Map<number, number>();
+      const index = baseGeometry.getIndex();
+      const numTris = index ? Math.floor(index.count / 3) : Math.floor(count / 3);
+
+      if (gumCount > 0 && toothCount > 0 && protocol.gingival.enabled) {
+        // Pass 1: Direct CEJ seam triangles (welded meshes)
         for (let t = 0; t < numTris; t++) {
           const i0 = index ? index.getX(t * 3) : t * 3;
           const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
           const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
-          const k0 = i0 < i1 ? i0 * 1000000 + i1 : i1 * 1000000 + i0;
-          const k1 = i1 < i2 ? i1 * 1000000 + i2 : i2 * 1000000 + i1;
-          const k2 = i2 < i0 ? i2 * 1000000 + i0 : i0 * 1000000 + i2;
-          edgeMap.set(k0, (edgeMap.get(k0) || 0) + 1);
-          edgeMap.set(k1, (edgeMap.get(k1) || 0) + 1);
-          edgeMap.set(k2, (edgeMap.get(k2) || 0) + 1);
+          const sum = isGumVertex[i0]! + isGumVertex[i1]! + isGumVertex[i2]!;
+          if (sum === 1 || sum === 2) {
+            isCervicalBorder[i0] = 2;
+            isCervicalBorder[i1] = 2;
+            isCervicalBorder[i2] = 2;
+            hasCervicalBorder = true;
+          }
         }
 
-        const gumB: number[] = [];
-        const toothB: number[] = [];
-        const baseCutGumY = isUpper ? maxY - 1.5 : minY + 1.5;
-
-        edgeMap.forEach((cnt, k) => {
-          if (cnt === 1) {
-            const v1 = Math.floor(k / 1000000);
-            const v2 = k % 1000000;
-            for (const v of [v1, v2]) {
-              if (isGumVertex[v] === 1) {
-                // Filter out mechanical flat base cuts of the dental model
-                const y = pos.getY(v);
-                if (isUpper ? y < baseCutGumY : y > baseCutGumY) {
-                  gumB.push(v);
-                }
-              } else {
-                toothB.push(v);
-              }
+        // Spatial proximity fallback for un-welded multi-mesh GLB models (e.g. Maestro 3D)
+        if (!hasCervicalBorder) {
+          const cellSize = 0.6;
+          const toothBuckets = new Map<string, number[]>();
+          for (let i = 0; i < count; i++) {
+            if (isGumVertex[i] === 0) {
+              const key = `${Math.round(pos.getX(i) / cellSize)},${Math.round(pos.getY(i) / cellSize)},${Math.round(pos.getZ(i) / cellSize)}`;
+              let arr = toothBuckets.get(key);
+              if (!arr) { arr = []; toothBuckets.set(key, arr); }
+              arr.push(i);
             }
           }
-        });
-
-        if (gumB.length > 0 && toothB.length > 0) {
-          const uniqueGumB = Array.from(new Set(gumB));
-          const uniqueToothB = Array.from(new Set(toothB));
-
-          const cs = 0.8;
-          const grid = new Map<string, number[]>();
-          for (const gv of uniqueGumB) {
-            const gx = Math.floor(pos.getX(gv) / cs);
-            const gy = Math.floor(pos.getY(gv) / cs);
-            const gz = Math.floor(pos.getZ(gv) / cs);
-            const gk = `${gx},${gy},${gz}`;
-            let l = grid.get(gk);
-            if (!l) {
-              l = [];
-              grid.set(gk, l);
-            }
-            l.push(gv);
-          }
-
-          const maxDistSq = 0.45 * 0.45;
-          for (const tv of uniqueToothB) {
-            const px = pos.getX(tv);
-            const py = pos.getY(tv);
-            const pz = pos.getZ(tv);
-            const gx = Math.floor(px / cs);
-            const gy = Math.floor(py / cs);
-            const gz = Math.floor(pz / cs);
-            let matched = false;
-            for (let dx = -1; dx <= 1 && !matched; dx++) {
-              for (let dy = -1; dy <= 1 && !matched; dy++) {
-                for (let dz = -1; dz <= 1 && !matched; dz++) {
-                  const l = grid.get(`${gx + dx},${gy + dy},${gz + dz}`);
-                  if (l) {
-                    for (let m = 0; m < l.length; m++) {
-                      const gv = l[m]!;
+          const threshSq = 0.45 * 0.45;
+          for (let i = 0; i < count; i++) {
+            if (isGumVertex[i] === 1) {
+              const px = pos.getX(i), py = pos.getY(i), pz = pos.getZ(i);
+              const bx = Math.round(px / cellSize);
+              const by = Math.round(py / cellSize);
+              const bz = Math.round(pz / cellSize);
+              let foundSeam = false;
+              for (let ox = -1; ox <= 1 && !foundSeam; ox++) {
+                for (let oy = -1; oy <= 1 && !foundSeam; oy++) {
+                  for (let oz = -1; oz <= 1 && !foundSeam; oz++) {
+                    const bucket = toothBuckets.get(`${bx + ox},${by + oy},${bz + oz}`);
+                    if (!bucket) continue;
+                    for (let bi = 0; bi < bucket.length; bi++) {
+                      const ti = bucket[bi]!;
                       const d2 =
-                        (px - pos.getX(gv)) ** 2 +
-                        (py - pos.getY(gv)) ** 2 +
-                        (pz - pos.getZ(gv)) ** 2;
-                      if (d2 <= maxDistSq) {
-                        isCervicalBorder[tv] = 2;
-                        isCervicalBorder[gv] = 2;
+                        (px - pos.getX(ti)) ** 2 +
+                        (py - pos.getY(ti)) ** 2 +
+                        (pz - pos.getZ(ti)) ** 2;
+                      if (d2 <= threshSq) {
+                        isCervicalBorder[i] = 2;
+                        isCervicalBorder[ti] = 2;
                         hasCervicalBorder = true;
-                        matched = true;
+                        foundSeam = true;
                         break;
                       }
                     }
@@ -343,291 +353,276 @@ export function generateBlockout(
             }
           }
         }
-      }
 
-      // Pass 2: Dilate 1-ring neighbors to level 1 for a smooth, rounded clinical relief bead
-      if (hasCervicalBorder) {
-        for (let t = 0; t < numTris; t++) {
-          const i0 = index ? index.getX(t * 3) : t * 3;
-          const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
-          const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
-          const hasLevel2 =
-            isCervicalBorder[i0] === 2 ||
-            isCervicalBorder[i1] === 2 ||
-            isCervicalBorder[i2] === 2;
-          if (hasLevel2) {
-            if (isCervicalBorder[i0] === 0) isCervicalBorder[i0] = 1;
-            if (isCervicalBorder[i1] === 0) isCervicalBorder[i1] = 1;
-            if (isCervicalBorder[i2] === 0) isCervicalBorder[i2] = 1;
+        // Pass 2: Smooth 1-ring dilation around CEJ seam
+        if (hasCervicalBorder) {
+          for (let t = 0; t < numTris; t++) {
+            const i0 = index ? index.getX(t * 3) : t * 3;
+            const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+            const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+            if (
+              isCervicalBorder[i0] === 2 ||
+              isCervicalBorder[i1] === 2 ||
+              isCervicalBorder[i2] === 2
+            ) {
+              if (isCervicalBorder[i0] === 0) isCervicalBorder[i0] = 1;
+              if (isCervicalBorder[i1] === 0) isCervicalBorder[i1] = 1;
+              if (isCervicalBorder[i2] === 0) isCervicalBorder[i2] = 1;
+            }
           }
         }
       }
     }
-  }
 
-  // Clone positions for the merged final geometry
-  const mergedPositions = new Float32Array(pos.array);
-  // Arrays for the standalone "Red Digital Wax" overlay
-  const waxVertexIndices: number[] = [];
-  const waxOffsets = new Float32Array(count * 3);
-  const vertexDisplacements = new Float32Array(count);
+    const dispX = new Float32Array(count);
+    const dispY = new Float32Array(count);
+    const dispZ = new Float32Array(count);
+    const reliefMag = new Float32Array(count);
+    const reliefType = new Uint8Array(count); // 1 = Gingival Green (#4ade80), 2 = Undercut Blue (#38bdf8)
 
-  const vPos = new Vector3();
-  const vNorm = new Vector3();
+    const vPos = new Vector3();
+    const vNorm = new Vector3();
 
-  // Iterate over every vertex and calculate blockout additions
-  for (let i = 0; i < count; i++) {
-    vPos.set(pos.getX(i), pos.getY(i), pos.getZ(i));
-    vNorm.set(norm.getX(i), norm.getY(i), norm.getZ(i));
+    for (let i = 0; i < count; i++) {
+      vPos.set(pos.getX(i), pos.getY(i), pos.getZ(i));
+      vNorm.set(norm.getX(i), norm.getY(i), norm.getZ(i));
 
-    const angle = Math.atan2(vPos.x - midX, vPos.z - focalZ);
-    const s = Math.max(
-      0,
-      Math.min(
-        numSectors - 1,
-        Math.floor(((angle + maxSpanAngle) / (2 * maxSpanAngle)) * numSectors),
-      ),
-    );
-    const tip = smoothPeak[s]!;
-    const distFromTip = isUpper ? vPos.y - tip : tip - vPos.y;
+      const angle = Math.atan2(vPos.x - midX, vPos.z - focalZ);
+      const s = Math.max(
+        0,
+        Math.min(
+          numSectors - 1,
+          Math.floor(((angle + maxSpanAngle) / (2 * maxSpanAngle)) * numSectors),
+        ),
+      );
+      const tip = smoothPeak[s]!;
+      const distFromTip = isUpper ? vPos.y - tip : tip - vPos.y;
 
-    // Outward radial direction from arch center to suppress false facial enamel wax
-    const rx = vPos.x - midX;
-    const rz = vPos.z - focalZ;
-    const rHypot = Math.hypot(rx, rz);
-    const normRadialDot = rHypot > 0.001 ? (vNorm.x * rx + vNorm.z * rz) / rHypot : 0;
-    const contourR = smoothContour[s]!;
+      const rx = vPos.x - midX;
+      const rz = vPos.z - focalZ;
+      const rHypot = Math.hypot(rx, rz);
+      const normRadialDot = rHypot > 0.001 ? (vNorm.x * rx + vNorm.z * rz) / rHypot : 0;
 
-    // Identify tooth FDI number at this vertex
-    const toothInfo = identifyToothAtPoint(
-      { x: vPos.x, y: vPos.y, z: vPos.z },
-      isUpper,
-      bounds,
-    );
-    const fdi = toothInfo.fdi;
+      const isBaseCut = modelHeight > 16.0 && (isUpper
+        ? (vPos.y >= maxY - 1.8 && vNorm.y > 0.65)
+        : (vPos.y <= minY + 1.8 && vNorm.y < -0.65));
+      const isBaseZone = modelHeight > 12.0 && (isUpper ? vPos.y >= maxY - 2.2 : vPos.y <= minY + 2.2);
+      const isOcclusalTable = isFullArch && (
+        distFromTip <= 1.2 ||
+        (distFromTip <= 3.2 && (isUpper ? vNorm.y < -0.20 : vNorm.y > 0.20))
+      );
+      const isClinicalCrown = !isFullArch || (distFromTip >= 0.8 && distFromTip <= (isUpper ? 10.5 : 9.8));
 
-    let displacementMagnitude = 0;
-    const dispVector = new Vector3();
+      const toothInfo = identifyToothAtPoint({ x: vPos.x, y: vPos.y, z: vPos.z }, isUpper, archBounds);
+      const fdi = toothInfo.fdi;
 
-    // ────────────────────────────────────────────────────────────────────────
-    // Clinical Boundary Exclusions:
-    // 1. Base cut plane: flat mechanical mounting cut on clinical dental models (>16mm)
-    //    where normals point vertically into the cut base (maxY for upper, minY for lower)
-    // 2. Occlusal table & incisal edges: functional biting surfaces must NEVER have
-    //    blockout wax so the aligner seats with solid vertical occlusal indexing
-    // 3. Clinical crown boundary: dentition undercuts are confined to the anatomical crown
-    //    (<= 6.8mm) to strictly prevent wax blankets over the alveolar bone & chin
-    // ────────────────────────────────────────────────────────────────────────
-    const modelHeight = maxY - minY;
-    const isBaseCut = modelHeight > 16.0 && (isUpper
-      ? (vPos.y >= maxY - 1.8 && vNorm.y > 0.65)
-      : (vPos.y <= minY + 1.8 && vNorm.y < -0.65));
+      let curMag = 0;
+      let dxOut = 0;
+      let dyOut = 0;
+      let dzOut = 0;
+      let curType = 0;
 
-    const isOcclusalTable = isFullArch && (
-      distFromTip <= 1.2 ||
-      (distFromTip <= 3.2 && (isUpper ? vNorm.y < -0.20 : vNorm.y > 0.20))
-    );
+      // Component 2: Gingival Margin Relief (#4ade80 green collar along CEJ)
+      if (protocol.gingival.enabled && !isBaseCut && !isBaseZone && !isOcclusalTable) {
+        let baseCrownHeight = isUpper ? 5.4 : 4.8;
+        const absAngle = Math.abs(angle);
+        if (absAngle > 0.22 && absAngle < 0.46) baseCrownHeight += 0.55;
+        else if (absAngle >= 0.46) baseCrownHeight -= 0.55;
+        const scallop = Math.max(-0.8, Math.min(0.5, 0.4 * Math.max(0, normRadialDot)));
+        const cejHeight = baseCrownHeight + scallop;
 
-    const isClinicalCrown = !isFullArch || (distFromTip >= 0.8 && distFromTip <= (isUpper ? 11.5 : 10.5));
+        const borderLevel = hasCervicalBorder
+          ? isCervicalBorder[i]!
+          : (distFromTip >= cejHeight - 0.45 && distFromTip <= cejHeight + 0.45 ? 2 : 0);
 
-    // ────────────────────────────────────────────────────────────────────────
-    // Component 1: Interproximal Wax Blockout
-    // ────────────────────────────────────────────────────────────────────────
-    if (protocol.interproximal.enabled && !isBaseCut && !isOcclusalTable && isClinicalCrown) {
-      if (resolvedContacts.length > 0) {
-        // Anatomical contact zone check: find nearest interdental contact
-        let nearestContact: ResolvedContact | null = null;
-        let nearestDistSq = Infinity;
-
-        for (const rc of resolvedContacts) {
-          const dx = vPos.x - rc.center.x;
-          const dz = vPos.z - rc.center.z;
-          const distSq = dx * dx + dz * dz;
-          if (distSq < nearestDistSq) {
-            nearestDistSq = distSq;
-            nearestContact = rc;
-          }
-        }
-
-        if (nearestContact && nearestDistSq < 16.0) {
-          const dy = Math.abs(vPos.y - nearestContact.center.y);
-          if (dy < 6.8) {
-            // Compute coordinate along the tangent line between adjacent teeth
-            const dx = vPos.x - nearestContact.center.x;
-            const dz = vPos.z - nearestContact.center.z;
-            const dTangent = Math.abs(dx * nearestContact.tangent.x + dz * nearestContact.tangent.z);
-            // Normal alignment with interdental tangent: in an embrasure groove, surface faces adjacent tooth
-            const dotTangent = Math.abs(vNorm.x * nearestContact.tangent.x + vNorm.z * nearestContact.tangent.z);
-
-            // Facial enamel suppression: in an embrasure groove, normal faces adjacent tooth (dotTangent high)
-            // Surfaces facing outward radially (normRadialDot > 0.22) are facial enamel, not interproximal embrasures
-            const isOuterFacial = isFullArch && (normRadialDot > 0.22 || rHypot >= contourR - 0.45);
-
-            // True embrasures have normal pointing toward adjacent tooth or down into interdental papilla
-            const isEmbrasure = !isOuterFacial && dTangent < 1.8 && (dotTangent > 0.32 || (distFromTip > 4.5 && dTangent < 1.4));
-            // Missing tooth edentulous span bridging
-            const isEdentulousSpan =
-              protocol.interproximal.bridgeSpaces &&
-              nearestContact.spanDist > 7.5 &&
-              dTangent < nearestContact.spanDist * 0.48;
-
-            if (isEmbrasure || isEdentulousSpan) {
-              const embrasureFactor = isEdentulousSpan
-                ? 1.0
-                : Math.max(0, 1.0 - dTangent / 1.8) * Math.min(1.0, (dotTangent - 0.25) / 0.45);
-              const proxDisp = protocol.interproximal.thicknessMm * embrasureFactor;
-
-              if (proxDisp > displacementMagnitude) {
-                displacementMagnitude = proxDisp;
-                dispVector.copy(vNorm).multiplyScalar(proxDisp);
+        if (borderLevel > 0 && distFromTip >= 2.2) {
+          const isEdentulous = protocol.gingival.excludeEdentulous && (fdi % 10 === 8);
+          if (!isEdentulous) {
+            const reliefFactor = borderLevel === 2 ? 1.0 : 0.62;
+            const gDisp = protocol.gingival.reliefMm * reliefFactor;
+            if (gDisp > curMag) {
+              curMag = gDisp;
+              curType = 1;
+              const hLen = Math.hypot(vNorm.x, vNorm.z);
+              if (hLen < 0.15) {
+                const invR = rHypot > 1e-4 ? 1.0 / rHypot : 1.0;
+                dxOut = rx * invR * gDisp;
+                dzOut = rz * invR * gDisp;
+              } else {
+                dxOut = (vNorm.x / hLen) * gDisp;
+                dzOut = (vNorm.z / hLen) * gDisp;
               }
             }
           }
         }
-      } else {
-        // Fallback for simple unit test / cylinder geometries
-        const isCrownHeight = distFromTip >= 1.0 && distFromTip <= 5.8;
-        const horizontalNormalAngle = Math.abs(vNorm.x);
-
-        if (isCrownHeight && horizontalNormalAngle > 0.65) {
-          const proxFactor = Math.min(1.0, (horizontalNormalAngle - 0.65) / 0.3);
-          const proxDisp = protocol.interproximal.thicknessMm * proxFactor;
-          if (proxDisp > displacementMagnitude) {
-            displacementMagnitude = proxDisp;
-            dispVector.set(vNorm.x * 0.8, 0, vNorm.z * 0.8).normalize().multiplyScalar(proxDisp);
-          }
-        }
       }
-    }
 
-    // ────────────────────────────────────────────────────────────────────────
-    // Component 2: Gingival Line Blockout (Cervical Margin Relief)
-    // ────────────────────────────────────────────────────────────────────────
-    if (protocol.gingival.enabled && !isBaseCut && !isOcclusalTable) {
-      // Anatomical crown height fallback (ONLY for unsegmented monochromatic casts with no color or mesh separation)
-      let baseCrownHeight = isUpper ? 9.2 : 8.2;
-      const absAngle = Math.abs(angle);
-      if (absAngle > 0.22 && absAngle < 0.46) {
-        baseCrownHeight -= 0.6; // lateral/canine
-      } else if (absAngle >= 0.46) {
-        baseCrownHeight -= 1.8; // premolars & molars have shorter crowns
-      }
-      const scallop = Math.max(-0.8, Math.min(0.5, 0.4 * Math.max(0, normRadialDot)));
-      const cejHeight = baseCrownHeight + scallop;
+      // Component 3: Dentition Undercuts (#38bdf8 blue blockout wax over crown undercuts)
+      if (protocol.undercut.enabled && !isBaseCut && !isBaseZone && !isOcclusalTable && isClinicalCrown) {
+        const toothAllowed = protocol.undercut.perTooth[fdi] !== false;
+        const depth = survey.depths[i] ?? 0;
+        const isGum = gumCount > 0 && toothCount > 0 && isGumVertex[i] === 1 && (!isFullArch || distFromTip > 4.5);
+        const isAnteriorFacial = isFullArch && normRadialDot > 0.25 && (Math.abs(angle) < 0.85 || fdi === 0 || (fdi % 10 <= 3));
+        const isOuterFacialCrown = isFullArch && normRadialDot > 0.38;
+        const isAnteriorTooth = Math.abs(angle) < 0.65 || (fdi !== 0 && fdi % 10 <= 2);
+        const isAnteriorLingualEnamel = isFullArch && isAnteriorTooth && normRadialDot < -0.10 && distFromTip < 6.5;
 
-      // True cervical margin zone: strictly along the CEJ boundary (never in the middle of crown enamel)
-      const borderLevel = hasCervicalBorder
-        ? isCervicalBorder[i]!
-        : (distFromTip >= cejHeight - 0.45 && distFromTip <= cejHeight + 0.45 ? 2 : 0);
-
-      if (borderLevel > 0 && distFromTip >= 1.5) {
-        // Exclude missing tooth spans if requested (teeth 18, 28, 38, 48)
-        const isEdentulous = protocol.gingival.excludeEdentulous && (fdi % 10 === 8);
-        if (!isEdentulous) {
-          const reliefFactor = borderLevel === 2 ? 1.0 : 0.65;
-          const gingivalDisp = protocol.gingival.reliefMm * reliefFactor;
-          if (gingivalDisp > displacementMagnitude) {
-            displacementMagnitude = gingivalDisp;
-            // Displace outward along cervical horizontal normal (with radial fallback)
-            const hNormX = vNorm.x;
-            const hNormZ = vNorm.z;
-            const hLen = Math.hypot(hNormX, hNormZ);
-            let dx = hNormX;
-            let dz = hNormZ;
-            if (hLen < 0.15) {
-              const rx = vPos.x - midX;
-              const rz = vPos.z - focalZ;
-              const rLen = Math.hypot(rx, rz) || 1;
-              dx = rx / rLen;
-              dz = rz / rLen;
+        if (
+          toothAllowed &&
+          !isGum &&
+          !isAnteriorFacial &&
+          !isOuterFacialCrown &&
+          !isAnteriorLingualEnamel &&
+          depth > protocol.undercut.maxDepthMm
+        ) {
+          const excess = depth - protocol.undercut.maxDepthMm;
+          const uDisp = Math.min(1.6, excess * 0.90);
+          if (uDisp > curMag) {
+            curMag = uDisp;
+            curType = 2;
+            const hLen = Math.hypot(vNorm.x, vNorm.z);
+            if (hLen > 0.20) {
+              dxOut = (vNorm.x / hLen) * uDisp;
+              dzOut = (vNorm.z / hLen) * uDisp;
             } else {
-              dx /= hLen;
-              dz /= hLen;
+              const invR = rHypot > 1e-4 ? 1.0 / rHypot : 1.0;
+              dxOut = rx * invR * uDisp;
+              dzOut = rz * invR * uDisp;
             }
-            dispVector.set(dx, 0, dz).multiplyScalar(gingivalDisp);
+            dyOut = 0;
           }
         }
       }
-    }
 
-    // ────────────────────────────────────────────────────────────────────────
-    // Component 3: Dentition Undercut Blockout
-    // ────────────────────────────────────────────────────────────────────────
-    if (protocol.undercut.enabled && !isBaseCut && !isOcclusalTable && isClinicalCrown) {
-      // Check per-tooth override (doctor can disable blockout on specific teeth)
-      const toothAllowed = protocol.undercut.perTooth[fdi] !== false;
-      const depth = survey.depths[i] ?? 0;
+      if (curMag > 0.025) {
+        reliefMag[i] = curMag;
+        dispX[i] = dxOut;
+        dispY[i] = dyOut;
+        dispZ[i] = dzOut;
+        reliefType[i] = curType;
 
-      // Facial enamel on anterior teeth or outer facial surfaces must NEVER receive digital wax
-      const isAnteriorFacial = isFullArch && normRadialDot > 0.20 && (Math.abs(angle) < 0.85 || fdi === 0 || (fdi % 10 <= 3));
-      const isOuterFacialCrown = isFullArch && normRadialDot > 0.38;
-      // Anterior incisal & lingual crown protection: anterior teeth (#11, #12, #21, #22)
-      // must keep their lingual fossa clean for torque and retraction control
-      const isAnteriorTooth = Math.abs(angle) < 0.65 || (fdi !== 0 && fdi % 10 <= 2);
-      const isAnteriorLingualEnamel = isFullArch && isAnteriorTooth && normRadialDot < -0.10 && distFromTip < 6.5;
-
-      if (toothAllowed && !isAnteriorFacial && !isOuterFacialCrown && !isAnteriorLingualEnamel && depth > protocol.undercut.maxDepthMm) {
-        const excessDepth = depth - protocol.undercut.maxDepthMm;
-        const undercutDisp = Math.min(1.5, excessDepth * 0.85);
-
-        if (undercutDisp > displacementMagnitude) {
-          displacementMagnitude = undercutDisp;
-          // Offset radially outward from arch center to eliminate negative draft
-          const radial = new Vector3(vPos.x - midX, 0, vPos.z - focalZ).normalize();
-          dispVector.copy(radial).multiplyScalar(undercutDisp);
+        if (mergedPos) {
+          mergedPos.setXYZ(
+            i,
+            mergedPos.getX(i) + dxOut,
+            mergedPos.getY(i) + dyOut,
+            mergedPos.getZ(i) + dzOut,
+          );
         }
       }
     }
 
-    // ────────────────────────────────────────────────────────────────────────
-    // Component 4: Apply Manual Sculpt Deltas (Digital Wax Carver / Hot Spatula)
-    // ────────────────────────────────────────────────────────────────────────
-    if (sculptDeltas && sculptDeltas.has(i)) {
-      const delta = sculptDeltas.get(i)!;
-      // delta[0] is the scalar wax thickness adjustment in millimeters (+ for add, - for carve)
-      const manualDelta = delta[0];
-      // Wax thickness cannot go negative (cannot dig into enamel) and is capped at 2.5mm
-      const netThickness = Math.max(0, Math.min(2.5, displacementMagnitude + manualDelta));
-      displacementMagnitude = netThickness;
+    // Emit smooth Titan-CAD colored overlay patches (Green #4ade80 = Gingival Relief, Blue #38bdf8 = Undercuts)
+    const gingColor = new Color(0x4ade80);
+    const ucColor = new Color(0x38bdf8);
+    const index = baseGeometry.getIndex();
+    const numTris = index ? Math.floor(index.count / 3) : Math.floor(count / 3);
+    let reliefTris = 0;
 
-      if (netThickness > 0.04) {
-        dispVector.copy(vNorm).multiplyScalar(netThickness);
-      } else {
-        dispVector.set(0, 0, 0);
+    for (let t = 0; t < numTris; t++) {
+      const i0 = index ? index.getX(t * 3) : t * 3;
+      const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+      const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+
+      const m0 = reliefMag[i0]!;
+      const m1 = reliefMag[i1]!;
+      const m2 = reliefMag[i2]!;
+      if (m0 <= 0.025 && m1 <= 0.025 && m2 <= 0.025) continue;
+
+      // Require >= 2 vertices active OR single active vertex > 0.12mm to suppress stray single-vertex spikes
+      const activeCount = (m0 > 0.025 ? 1 : 0) + (m1 > 0.025 ? 1 : 0) + (m2 > 0.025 ? 1 : 0);
+      if (activeCount === 1 && Math.max(m0, m1, m2) < 0.12) continue;
+
+      const tDom = (reliefType[i0] === 2 || reliefType[i1] === 2 || reliefType[i2] === 2) ? 2 : 1;
+      const triColor = tDom === 2 ? ucColor : gingColor;
+
+      for (const vi of [i0, i1, i2]) {
+        const nx = norm.getX(vi);
+        const ny = norm.getY(vi);
+        const nz = norm.getZ(vi);
+        const m = reliefMag[vi]!;
+        if (m > 0.025) {
+          allPositions.push(
+            pos.getX(vi) + dispX[vi]! + nx * 0.02,
+            pos.getY(vi) + dispY[vi]! + ny * 0.02,
+            pos.getZ(vi) + dispZ[vi]! + nz * 0.02,
+          );
+        } else {
+          // Feather skirt pinches smoothly inside the tooth/gum surface to avoid ragged edges or Z-fighting
+          allPositions.push(
+            pos.getX(vi) - nx * 0.03,
+            pos.getY(vi) - ny * 0.03,
+            pos.getZ(vi) - nz * 0.03,
+          );
+        }
+        allNormals.push(nx, ny, nz);
+        allColors.push(triColor.r, triColor.g, triColor.b);
       }
+      reliefTris++;
     }
-
-    // Apply displacement to merged geometry and record for discrete wax overlay
-    vertexDisplacements[i] = displacementMagnitude;
-    if (displacementMagnitude > 0.04) {
-      const idx0 = i * 3;
-      const idx1 = idx0 + 1;
-      const idx2 = idx0 + 2;
-      mergedPositions[idx0] = (mergedPositions[idx0] ?? 0) + dispVector.x;
-      mergedPositions[idx1] = (mergedPositions[idx1] ?? 0) + dispVector.y;
-      mergedPositions[idx2] = (mergedPositions[idx2] ?? 0) + dispVector.z;
-
-      waxVertexIndices.push(i);
-      waxOffsets[idx0] = dispVector.x;
-      waxOffsets[idx1] = dispVector.y;
-      waxOffsets[idx2] = dispVector.z;
+    if (reliefTris > 0) {
+      sumVolume += reliefTris * 0.015;
     }
+    if (mergedPos) mergedPos.needsUpdate = true;
+    mergedGeometry.computeVertexNormals();
   }
 
-  // Create final merged BufferGeometry
-  const mergedGeometry = baseGeometry.clone();
-  mergedGeometry.setAttribute("position", new BufferAttribute(mergedPositions, 3));
-  mergedGeometry.computeVertexNormals();
-
-  // Create discrete "Digital Wax" overlay geometry
   let waxGeometry: BufferGeometry | null = null;
-  if (waxVertexIndices.length > 0) {
-    waxGeometry = createWaxOverlayGeometry(
-      baseGeometry,
-      mergedPositions,
-      waxVertexIndices,
-      vertexDisplacements,
-    );
+  let waxBounds: { min: [number, number, number]; max: [number, number, number] } | null = null;
+  let totalWaxVolumeMm3 = 0;
+
+  if (allPositions.length > 0) {
+    waxGeometry = new BufferGeometry();
+    waxGeometry.setAttribute("position", new BufferAttribute(new Float32Array(allPositions), 3));
+    waxGeometry.setAttribute("normal", new BufferAttribute(new Float32Array(allNormals), 3));
+    waxGeometry.setAttribute("color", new BufferAttribute(new Float32Array(allColors), 3));
+
+    let wMinX = Infinity, wMaxX = -Infinity;
+    let wMinY = Infinity, wMaxY = -Infinity;
+    let wMinZ = Infinity, wMaxZ = -Infinity;
+    for (let i = 0; i < allPositions.length; i += 3) {
+      const x = allPositions[i]!, y = allPositions[i + 1]!, z = allPositions[i + 2]!;
+      if (x < wMinX) wMinX = x; if (x > wMaxX) wMaxX = x;
+      if (y < wMinY) wMinY = y; if (y > wMaxY) wMaxY = y;
+      if (z < wMinZ) wMinZ = z; if (z > wMaxZ) wMaxZ = z;
+    }
+
+    waxBounds = {
+      min: [parseFloat(wMinX.toFixed(2)), parseFloat(wMinY.toFixed(2)), parseFloat(wMinZ.toFixed(2))],
+      max: [parseFloat(wMaxX.toFixed(2)), parseFloat(wMaxY.toFixed(2)), parseFloat(wMaxZ.toFixed(2))],
+    };
+
+    totalWaxVolumeMm3 = parseFloat(sumVolume.toFixed(1));
+  }
+
+  const fittingSummary: ModelFittingSummary = {
+    modelBounds: {
+      min: [parseFloat(minX.toFixed(2)), parseFloat(minY.toFixed(2)), parseFloat(minZ.toFixed(2))],
+      max: [parseFloat(maxX.toFixed(2)), parseFloat(maxY.toFixed(2)), parseFloat(maxZ.toFixed(2))],
+    },
+    waxBounds,
+    totalContacts: contacts.length,
+    sealedContacts: contacts.length,
+    totalWaxVolumeMm3,
+    contacts,
+  };
+
+  if (sculptDeltas && sculptDeltas.size > 0 && mergedPos) {
+    for (const [vIdx, delta] of sculptDeltas.entries()) {
+      if (vIdx < mergedPos.count) {
+        // Positive wax displacement along normals/offsets; clamp carve so it doesn't dig into tooth
+        const dx = Math.max(0, delta[0]);
+        const dy = Math.max(0, delta[1]);
+        const dz = Math.max(0, delta[2]);
+        mergedPos.setXYZ(
+          vIdx,
+          mergedPos.getX(vIdx) + dx,
+          mergedPos.getY(vIdx) + dy,
+          mergedPos.getZ(vIdx) + dz,
+        );
+      }
+    }
+    mergedPos.needsUpdate = true;
   }
 
   return {
@@ -639,83 +634,6 @@ export function generateBlockout(
     survey,
     sculptDeltas,
     lastUpdated: Date.now(),
+    fittingSummary,
   };
-}
-
-/**
- * Builds a visual mesh for the added digital wax volume.
- * Rendered in dental wax red to visually contrast against the resin tooth model.
- * Strictly checks baseGeometry.index and filters out degenerate or cross-palate triangles.
- */
-function createWaxOverlayGeometry(
-  baseGeom: BufferGeometry,
-  displacedPositions: Float32Array,
-  modifiedIndices: number[],
-  displacements: Float32Array,
-): BufferGeometry | null {
-  const basePos = baseGeom.getAttribute("position");
-  if (!basePos || modifiedIndices.length === 0) return null;
-  const count = basePos.count;
-
-  // Track modified vertices with non-trivial displacement
-  const isModified = new Uint8Array(count);
-  for (const idx of modifiedIndices) {
-    if (displacements[idx]! > 0.04) {
-      isModified[idx] = 1;
-    }
-  }
-
-  const waxTris: number[] = [];
-  const index = baseGeom.index;
-
-  const v0 = new Vector3();
-  const v1 = new Vector3();
-  const v2 = new Vector3();
-
-  const addTriangle = (i0: number, i1: number, i2: number) => {
-    // Include triangle if at least one vertex has actual wax displacement applied
-    const modifiedCount = isModified[i0]! + isModified[i1]! + isModified[i2]!;
-    if (modifiedCount === 0) return;
-
-    v0.set(displacedPositions[i0 * 3]!, displacedPositions[i0 * 3 + 1]!, displacedPositions[i0 * 3 + 2]!);
-    v1.set(displacedPositions[i1 * 3]!, displacedPositions[i1 * 3 + 1]!, displacedPositions[i1 * 3 + 2]!);
-    v2.set(displacedPositions[i2 * 3]!, displacedPositions[i2 * 3 + 1]!, displacedPositions[i2 * 3 + 2]!);
-
-    // Guard against degenerate or extreme cross-arch triangles (palate span is >28mm)
-    const d01 = v0.distanceTo(v1);
-    const d12 = v1.distanceTo(v2);
-    const d20 = v2.distanceTo(v0);
-    if (d01 > 16.0 || d12 > 16.0 || d20 > 16.0) return;
-
-    waxTris.push(
-      v0.x, v0.y, v0.z,
-      v1.x, v1.y, v1.z,
-      v2.x, v2.y, v2.z,
-    );
-  };
-
-  if (index) {
-    const triCount = index.count / 3;
-    for (let t = 0; t < triCount; t++) {
-      const i0 = index.getX(t * 3);
-      const i1 = index.getX(t * 3 + 1);
-      const i2 = index.getX(t * 3 + 2);
-      addTriangle(i0, i1, i2);
-    }
-  } else {
-    const triCount = Math.floor(count / 3);
-    for (let t = 0; t < triCount; t++) {
-      const i0 = t * 3;
-      const i1 = t * 3 + 1;
-      const i2 = t * 3 + 2;
-      addTriangle(i0, i1, i2);
-    }
-  }
-
-  if (waxTris.length === 0) return null;
-
-  const finalWaxGeom = new BufferGeometry();
-  finalWaxGeom.setAttribute("position", new BufferAttribute(new Float32Array(waxTris), 3));
-  finalWaxGeom.computeVertexNormals();
-  return finalWaxGeom;
 }

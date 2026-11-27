@@ -205,7 +205,7 @@ describe("Blockout Studio UI & Interaction", () => {
     studio.unmount();
   });
 
-  it("handles bottom dock quick overlay toggles and stage slider", () => {
+  it("handles bottom dock wax toggle, right-panel undercut heatmap toggle, and stage slider", () => {
     const container = document.createElement("div");
     const studio = new BlockoutStudio({
       viewport: mockViewport,
@@ -215,19 +215,23 @@ describe("Blockout Studio UI & Interaction", () => {
 
     const dock = container.querySelector(".bo-bottom-dock");
     const waxPill = dock?.querySelector<HTMLButtonElement>(".bo-dock-pill--wax");
-    const heatPill = dock?.querySelector<HTMLButtonElement>(".bo-dock-pill--heatmap");
+    const dockHeatPill = dock?.querySelector<HTMLButtonElement>(".bo-dock-pill--heatmap");
+    const ucSectionHeatChk = container.querySelector<HTMLInputElement>(".bo-section-undercut .bo-chk-heatmap");
     const slider = dock?.querySelector<HTMLInputElement>(".bo-dock-slider");
 
     expect(waxPill?.classList.contains("bo-dock-pill--active")).toBe(true);
-    expect(heatPill?.classList.contains("bo-dock-pill--active")).toBe(false);
+    expect(dockHeatPill).toBeNull();
+    expect(ucSectionHeatChk).not.toBeNull();
+    expect(ucSectionHeatChk?.checked).toBe(false);
 
     // Toggle wax
     waxPill?.click();
     expect(waxPill?.classList.contains("bo-dock-pill--active")).toBe(false);
 
-    // Toggle heatmap
-    heatPill?.click();
-    expect(heatPill?.classList.contains("bo-dock-pill--active")).toBe(true);
+    // Toggle heatmap inside Dentition Undercuts section
+    ucSectionHeatChk!.checked = true;
+    ucSectionHeatChk!.dispatchEvent(new Event("change"));
+    expect(ucSectionHeatChk?.checked).toBe(true);
 
     // Scrub slider
     studio.setStageIndex(1);

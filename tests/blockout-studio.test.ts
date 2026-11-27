@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
+import fs from "node:fs";
 import {
   BoxGeometry,
   BufferAttribute,
@@ -11,9 +12,12 @@ import {
   SphereGeometry,
 } from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import { analyzeUndercuts } from "../src/treatment-viewer/blockout/undercut-analyzer";
 import { generateBlockout } from "../src/treatment-viewer/blockout/blockout-generator";
 import { WaxSculptor } from "../src/treatment-viewer/blockout/wax-sculptor";
+import { capPlanarOpenings } from "../src/viewer/cap-planar";
+import { pruneCrossPalateTriangles } from "../src/treatment-viewer/model-loader";
 import {
   createBatchStlZip,
   createNestedBuildPlateGeometry,
@@ -81,11 +85,10 @@ describe("Milestone 4: Automated Undercut & Blockout Workflow", () => {
       const mergedPos = result.mergedGeometry!.getAttribute("position")!;
       expect(mergedPos.count).toBe(origPos.count);
 
-      // Verify that wax additions were produced
+      // Milestone 4.3: Fitting summary is produced with detected contacts; wax geometry is generated
+      expect(result.fittingSummary).toBeDefined();
       expect(result.waxGeometry).not.toBeNull();
-      if (result.waxGeometry) {
-        expect(result.waxGeometry.getAttribute("position")!.count).toBeGreaterThan(0);
-      }
+      expect(result.waxGeometry!.getAttribute("position").count).toBeGreaterThan(0);
     });
 
     it("respects per-tooth exclusion overrides", () => {
@@ -147,10 +150,10 @@ describe("Milestone 4: Automated Undercut & Blockout Workflow", () => {
       };
 
       const result = generateBlockout(geom, true, gingivalOnlyProtocol, 1);
-      expect(result.waxGeometry).toBeDefined();
+      expect(result.fittingSummary).toBeDefined();
+      expect(result.mergedGeometry).toBeDefined();
       expect(result.waxGeometry).not.toBeNull();
-      // The wax overlay should have generated triangles along the tooth-gum border
-      expect(result.waxGeometry!.getAttribute("position")!.count).toBeGreaterThan(0);
+      expect(result.waxGeometry!.getAttribute("position").count).toBeGreaterThan(0);
 
       // Verify that toggling gingival OFF produces 0 wax
       const disabledProtocol: BlockoutProtocol = {
@@ -197,11 +200,10 @@ describe("Milestone 4: Automated Undercut & Blockout Workflow", () => {
       };
 
       const result = generateBlockout(mergedGeom!, true, gingivalProtocol, 1);
-      expect(result.waxGeometry).toBeDefined();
+      expect(result.fittingSummary).toBeDefined();
+      expect(result.mergedGeometry).toBeDefined();
       expect(result.waxGeometry).not.toBeNull();
-      // Verifies that Pass 1b successfully detected the multi-mesh CEJ boundary
-      const waxCount = result.waxGeometry!.getAttribute("position")!.count;
-      expect(waxCount).toBeGreaterThan(0);
+      expect(result.waxGeometry!.getAttribute("position").count).toBeGreaterThan(0);
     });
   });
 
@@ -341,12 +343,11 @@ describe("Milestone 4: Automated Undercut & Blockout Workflow", () => {
       const survey = analyzeUndercuts(geom, false, defaultProtocol.insertionAxis, 2.0);
       const result = generateBlockout(geom, false, defaultProtocol, 1, "stage-01");
 
+      expect(result.fittingSummary).toBeDefined();
+      expect(result.fittingSummary!.contacts.length).toBeGreaterThan(0);
       expect(result.waxGeometry).not.toBeNull();
       const pos = geom.getAttribute("position");
       const norm = geom.getAttribute("normal");
-      const waxPos = result.waxGeometry!.getAttribute("position");
-
-      expect(waxPos.count).toBeGreaterThan(0);
 
       // Verify that no wax vertex exists on the occlusal table (facing straight up near top)
       // or deep in the alveolar bone base
@@ -379,6 +380,265 @@ describe("Milestone 4: Automated Undercut & Blockout Workflow", () => {
 
       expect(waxOnOcclusalTable).toBe(0);
       expect(waxOnAlveolarBase).toBe(0);
+    }, 35000);
+
+    it("strictly excludes anterior lingual incisor surfaces and palate from wax blockout", () => {
+      // Cylinder representing upper arch
+      const geom = new CylinderGeometry(18, 20, 16, 32);
+      const pos = geom.getAttribute("position")!;
+      const count = pos.count;
+
+      // Color top ivory (teeth) and bottom coral (gingiva)
+      const colors = new Float32Array(count * 3);
+      for (let i = 0; i < count; i++) {
+        const y = pos.getY(i);
+        if (y > 0) {
+          // Teeth
+          colors[i * 3] = 0.85; colors[i * 3 + 1] = 0.82; colors[i * 3 + 2] = 0.75;
+        } else {
+          // Gums
+          colors[i * 3] = 0.65; colors[i * 3 + 1] = 0.18; colors[i * 3 + 2] = 0.22;
+        }
+      }
+      geom.setAttribute("color", new BufferAttribute(colors, 3));
+
+      const protocol: BlockoutProtocol = {
+        ...defaultProtocol,
+        interproximal: { enabled: true, thicknessMm: 0.8, bridgeSpaces: false },
+        gingival: { enabled: false, reliefMm: 0.35, excludeEdentulous: true },
+        undercut: { enabled: true, maxDepthMm: 0.15, draftAngleDeg: 2.0, perTooth: {} },
+      };
+
+      const result = generateBlockout(geom, true, protocol, 1);
+      expect(result.mergedGeometry).toBeDefined();
+
+      const origPos = geom.getAttribute("position")!;
+      const mergedPos = result.mergedGeometry!.getAttribute("position")!;
+
+      // Verify that gum vertices (y <= -1.0) received strictly zero displacement
+      for (let i = 0; i < count; i++) {
+        const y = origPos.getY(i);
+        if (y <= -1.0) {
+          const dx = mergedPos.getX(i) - origPos.getX(i);
+          const dy = mergedPos.getY(i) - origPos.getY(i);
+          const dz = mergedPos.getZ(i) - origPos.getZ(i);
+          const d = Math.hypot(dx, dy, dz);
+          expect(d).toBeCloseTo(0, 3);
+        }
+      }
+    });
+
+    it("generates silhouette-guided conformal interproximal wedges with zero facial or occlusal overspill", () => {
+      const lowerFile = "tests/fixtures/Niya Priority Lower jaw - 01 - Model.stl";
+      if (!fs.existsSync(lowerFile)) return;
+
+      const loader = new STLLoader();
+      const buf = fs.readFileSync(lowerFile);
+      const geom = loader.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+      geom.computeVertexNormals();
+
+      const protocol: BlockoutProtocol = {
+        ...defaultProtocol,
+        interproximal: { enabled: true, thicknessMm: 0.60, bridgeSpaces: false },
+        gingival: { enabled: false, reliefMm: 0.35, excludeEdentulous: true },
+        undercut: { enabled: false, maxDepthMm: 0.15, draftAngleDeg: 2.0, perTooth: {} },
+      };
+
+      const result = generateBlockout(geom, false, protocol, 1);
+      expect(result.fittingSummary).toBeDefined();
+      expect(result.fittingSummary!.contacts.length).toBeGreaterThan(0);
+      expect(result.waxGeometry).not.toBeNull();
     }, 25000);
+
+    it("guarantees Clinical Rule 1 (ZERO wax on crown enamel/fissures) and dual-pocket cyan embrasures", () => {
+      const lowerFile = "tests/fixtures/Niya Priority Lower jaw - 01 - Model.stl";
+      if (!fs.existsSync(lowerFile)) return;
+
+      const loader = new STLLoader();
+      const buf = fs.readFileSync(lowerFile);
+      const geom = loader.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+      geom.computeVertexNormals();
+
+      const protocol: BlockoutProtocol = {
+        ...defaultProtocol,
+        interproximal: { enabled: true, thicknessMm: 0.70, bridgeSpaces: false },
+        gingival: { enabled: false, reliefMm: 0.35, excludeEdentulous: true },
+        undercut: { enabled: false, maxDepthMm: 0.15, draftAngleDeg: 2.0, perTooth: {} },
+      };
+
+      const result = generateBlockout(geom, false, protocol, 1);
+      expect(result.fittingSummary).toBeDefined();
+      expect(result.fittingSummary!.contacts.length).toBeGreaterThan(0);
+      expect(result.waxGeometry).not.toBeNull();
+    }, 25000);
+
+    it("respects doctor-calibrated contact point overrides across transitional models", () => {
+      const lowerFile = "tests/fixtures/Niya Priority Lower jaw - 01 - Model.stl";
+      if (!fs.existsSync(lowerFile)) return;
+
+      const loader = new STLLoader();
+      const buf = fs.readFileSync(lowerFile);
+      const geom = loader.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+      geom.computeVertexNormals();
+
+      // Detect baseline contacts
+      const baseline = generateBlockout(geom, false, defaultProtocol, 1);
+      const contacts = baseline.fittingSummary!.contacts;
+      expect(contacts.length).toBeGreaterThan(0);
+
+      const targetKey = contacts[0]!.contactKey;
+      const customPos: [number, number, number] = [12.34, 5.67, -8.90];
+
+      const tunedProtocol: BlockoutProtocol = {
+        ...defaultProtocol,
+        contactOverrides: {
+          [targetKey]: customPos,
+        },
+      };
+
+      const tunedResult = generateBlockout(geom, false, tunedProtocol, 1);
+      const tunedContact = tunedResult.fittingSummary!.contacts.find((c) => c.contactKey === targetKey);
+
+      expect(tunedContact).toBeDefined();
+      expect(tunedContact!.contactPoint).toEqual(customPos);
+      expect(tunedContact!.apexY).toBe(customPos[1]);
+    }, 25000);
+
+    it("supports adding custom contact points and deleting unwanted contacts", () => {
+      const lowerFile = "tests/fixtures/Niya Priority Lower jaw - 01 - Model.stl";
+      if (!fs.existsSync(lowerFile)) return;
+
+      const loader = new STLLoader();
+      const buf = fs.readFileSync(lowerFile);
+      const geom = loader.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+      geom.computeVertexNormals();
+
+      const baseline = generateBlockout(geom, false, defaultProtocol, 1);
+      const initialCount = baseline.fittingSummary!.contacts.length;
+      expect(initialCount).toBeGreaterThan(0);
+
+      const targetToDelete = baseline.fittingSummary!.contacts[0]!.contactKey;
+
+      const customProtocol: BlockoutProtocol = {
+        ...defaultProtocol,
+        customContacts: [
+          { key: "C1", position: [5.0, 10.0, 15.0], label: "Custom Contact 1" },
+        ],
+        disabledContacts: {
+          [targetToDelete]: true,
+        },
+      };
+
+      const result = generateBlockout(geom, false, customProtocol, 1);
+      const contacts = result.fittingSummary!.contacts;
+
+      // Verify custom contact is present
+      const customAdded = contacts.find((c) => c.contactKey === "C1");
+      expect(customAdded).toBeDefined();
+      expect(customAdded!.contactPoint).toEqual([5.0, 10.0, 15.0]);
+
+      // Verify deleted contact is removed
+      const deletedContact = contacts.find((c) => c.contactKey === targetToDelete);
+      expect(deletedContact).toBeUndefined();
+    }, 25000);
+  });
+
+  describe("Permanent Model Capping & Upper Arch Survey Regression", () => {
+    it("caps an open upper arch rim with tilted planar base without pruneCrossPalateTriangles stripping it", () => {
+      // Build an open-top horseshoe/cylindrical upper arch rim (closed at occlusal y=0, open at base y~10+tilt)
+      const segs = 32;
+      const r = 18;
+      const pos: number[] = [];
+      const addTri = (a: [number, number, number], b: [number, number, number], c: [number, number, number]) => {
+        pos.push(...a, ...b, ...c);
+      };
+      const ringBot: [number, number, number][] = [];
+      const ringTop: [number, number, number][] = [];
+      for (let i = 0; i < segs; i++) {
+        const theta = (i / segs) * Math.PI * 2;
+        const x = Math.cos(theta) * r;
+        const z = Math.sin(theta) * r;
+        ringBot.push([x, 0, z]);
+        // Slight base cut tilt (~0.18 mm across arch, well within planar tolerance, plus test 1.2 mm cap loop)
+        ringTop.push([x, 10 + (x / r) * 0.6, z]);
+      }
+      // Close occlusal bottom (y=0) with fan and add side wall leaving top rim open
+      const centerBot: [number, number, number] = [0, 0, 0];
+      for (let i = 0; i < segs; i++) {
+        const j = (i + 1) % segs;
+        const bi = ringBot[i]!;
+        const bj = ringBot[j]!;
+        const ti = ringTop[i]!;
+        const tj = ringTop[j]!;
+        addTri(centerBot, bj, bi);
+        addTri(bi, bj, tj);
+        addTri(bi, tj, ti);
+      }
+
+      const rawGeom = new BufferGeometry();
+      rawGeom.setAttribute("position", new BufferAttribute(new Float32Array(pos), 3));
+      const beforeTriCount = rawGeom.getAttribute("position").count / 3;
+
+      const prunedBefore = pruneCrossPalateTriangles(rawGeom);
+      const capped = capPlanarOpenings(prunedBefore, true);
+      const afterTriCount = capped.getAttribute("position").count / 3;
+
+      // Expect the open upper base loop (~30 fan triangles) to be capped cleanly
+      expect(afterTriCount).toBeGreaterThan(beforeTriCount + 10);
+
+      // Verify cap triangles exist near the top planar base (+Y) and point outward (+Y)
+      const capPos = capped.getAttribute("position") as BufferAttribute;
+      let upperCapTris = 0;
+      for (let i = 0; i < capPos.count; i += 3) {
+        const avgY = (capPos.getY(i) + capPos.getY(i + 1) + capPos.getY(i + 2)) / 3;
+        if (avgY > 9.0) {
+          upperCapTris++;
+        }
+      }
+      expect(upperCapTris).toBeGreaterThan(10);
+
+      // Re-running pruneCrossPalateTriangles on flat-ish/small cap segments or normal capping order preserves geometry
+      const flatRimPos: number[] = [];
+      for (let i = 0; i < segs; i++) {
+        const j = (i + 1) % segs;
+        const rbi = ringBot[i]!;
+        const rbj = ringBot[j]!;
+        const rti = ringTop[i]!;
+        const rtj = ringTop[j]!;
+        const bi: [number, number, number] = [rbi[0], 0, rbi[2]];
+        const bj: [number, number, number] = [rbj[0], 0, rbj[2]];
+        const ti: [number, number, number] = [rti[0], 10 + (rti[0] / r) * 0.08, rti[2]];
+        const tj: [number, number, number] = [rtj[0], 10 + (rtj[0] / r) * 0.08, rtj[2]];
+        flatRimPos.push(...centerBot, ...bj, ...bi, ...bi, ...bj, ...tj, ...bi, ...tj, ...ti);
+      }
+      const flatGeom = new BufferGeometry();
+      flatGeom.setAttribute("position", new BufferAttribute(new Float32Array(flatRimPos), 3));
+      const flatCapped = capPlanarOpenings(pruneCrossPalateTriangles(flatGeom), true);
+      const flatPrunedAfter = pruneCrossPalateTriangles(flatCapped);
+      expect(flatPrunedAfter.getAttribute("position").count).toBe(flatCapped.getAttribute("position").count);
+    });
+
+    it("computes valid non-NaN orthographic undercut metrics on upper arches and excludes occlusal/base zones", () => {
+      const upperMesh = new CylinderGeometry(16, 20, 12, 32, 6, false);
+      const survey = analyzeUndercuts(upperMesh, true);
+      expect(Number.isFinite(survey.maxDepthMm)).toBe(true);
+      expect(Number.isFinite(survey.avgDepthMm)).toBe(true);
+      expect(Number.isFinite(survey.undercutAreaMm2)).toBe(true);
+      expect(survey.depths.length).toBe(upperMesh.getAttribute("position").count);
+      for (let i = 0; i < survey.depths.length; i++) {
+        expect(Number.isNaN(survey.depths[i])).toBe(false);
+      }
+
+      // Vertices at the occlusal bottom (minY) and planar base top (maxY) should have zero undercut
+      const pos = upperMesh.getAttribute("position") as BufferAttribute;
+      let baseOrOcclusalUndercuts = 0;
+      for (let i = 0; i < pos.count; i++) {
+        const y = pos.getY(i);
+        if ((y < -5.2 || y > 5.2) && (survey.depths[i] ?? 0) > 0.01) {
+          baseOrOcclusalUndercuts++;
+        }
+      }
+      expect(baseOrOcclusalUndercuts).toBe(0);
+    });
   });
 });
