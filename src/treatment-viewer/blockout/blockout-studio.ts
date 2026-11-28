@@ -85,7 +85,7 @@ export class BlockoutStudio {
     gingival: { enabled: false, reliefMm: 0.3, excludeEdentulous: true },
     undercut: {
       enabled: false,
-      maxDepthMm: 0.5,
+      maxDepthMm: 0.25,
       draftAngleDeg: 2.0,
       perTooth: {},
     },
@@ -130,6 +130,9 @@ export class BlockoutStudio {
   private activeTab: "blockout" | "sculpt" | "prep" = "blockout";
   private showHeatmap = false;
   private showWaxOverlay = true;
+  private isPlaying = false;
+  private playIntervalId: ReturnType<typeof setInterval> | null = null;
+  private sliderDebounceId: ReturnType<typeof setTimeout> | null = null;
 
   private onExitCallback?: () => void;
   private onStageChangeCallback?: (stageIndex: number) => void;
@@ -153,17 +156,17 @@ export class BlockoutStudio {
       ? this.viewport.getThreeCamera()
       : null;
 
-    // Realistic melted dental laboratory blockout wax material (glossy warm rose-crimson sheen)
+    // Satin-gloss dental CAD blockout material (neutral sheen so crimson, green, and blue stay true)
     this.waxMaterial = new MeshPhysicalMaterial({
       color: new Color(0xffffff),
       vertexColors: true,
-      roughness: 0.24,
+      roughness: 0.30,
       metalness: 0.02,
-      clearcoat: 0.68,
-      clearcoatRoughness: 0.16,
-      sheen: 0.35,
-      sheenRoughness: 0.35,
-      sheenColor: new Color(0xff94a4),
+      clearcoat: 0.38,
+      clearcoatRoughness: 0.24,
+      sheen: 0.16,
+      sheenRoughness: 0.40,
+      sheenColor: new Color(0xffffff),
       transparent: false,
       opacity: 1.0,
       side: DoubleSide,
@@ -201,6 +204,11 @@ export class BlockoutStudio {
   }
 
   public unmount(): void {
+    this.stopPlayback();
+    if (this.sliderDebounceId !== null) {
+      clearTimeout(this.sliderDebounceId);
+      this.sliderDebounceId = null;
+    }
     const domEl = this.getCanvasDomElement();
     if (domEl) {
       if (this.onPointerMoveBound)
@@ -462,6 +470,7 @@ export class BlockoutStudio {
       this.selectedContactKey = null;
       this.protocol.selectedContactKey = null;
     }
+    this.stopPlayback();
     this.protocol.insertionAxis.y = this.isUpper ? -1 : 1;
     this.stageResults.clear();
     this.stageSculptDeltas.clear();
@@ -571,11 +580,29 @@ export class BlockoutStudio {
         stageNum,
         stageId,
         deltas,
+        { skipMergedGeometry: true },
       );
       this.stageResults.set(this.currentStageIndex, result);
     }
 
     this.applyResultTo3D(result);
+  }
+
+  private scheduleRecomputeDebounced(delayMs = 60): void {
+    if (this.sliderDebounceId !== null) {
+      clearTimeout(this.sliderDebounceId);
+    }
+    this.sliderDebounceId = setTimeout(() => {
+      this.sliderDebounceId = null;
+      this.recomputeCurrentBlockout();
+    }, delayMs);
+  }
+
+  private isWaxGeomCachedElsewhere(geom: BufferGeometry): boolean {
+    for (const res of this.stageResults.values()) {
+      if (res.waxGeometry === geom) return true;
+    }
+    return false;
   }
 
   private recomputeCurrentBlockout(): void {
@@ -593,6 +620,7 @@ export class BlockoutStudio {
       stageNum,
       stageId,
       deltas,
+      { skipMergedGeometry: true },
     );
     this.stageResults.set(this.currentStageIndex, result);
     this.applyResultTo3D(result);
@@ -618,7 +646,12 @@ export class BlockoutStudio {
         this.waxMesh.scale.set(1, 1, 1);
       }
       if (this.showWaxOverlay && result.waxGeometry) {
-        this.waxMesh.geometry.dispose();
+        if (
+          this.waxMesh.geometry !== result.waxGeometry &&
+          !this.isWaxGeomCachedElsewhere(this.waxMesh.geometry)
+        ) {
+          this.waxMesh.geometry.dispose();
+        }
         this.waxMesh.geometry = result.waxGeometry;
         this.waxMesh.visible = true;
       } else {
@@ -1181,8 +1214,31 @@ export class BlockoutStudio {
 
   // ─── Export Dialogs ─────────────────────────────────────────────────────────
 
+  private ensureMergedGeometry(
+    stageIdx: number,
+    res?: StageBlockoutResult,
+  ): StageBlockoutResult | undefined {
+    const baseGeom = this.getBaseGeometry();
+    if (!baseGeom) return res;
+    if (res && res.mergedGeometry) return res;
+    const full = generateBlockout(
+      baseGeom,
+      this.isUpper,
+      this.protocol,
+      stageIdx + 1,
+      `stage-${String(stageIdx + 1).padStart(2, "0")}`,
+      this.stageSculptDeltas.get(stageIdx),
+      { skipMergedGeometry: false },
+    );
+    this.stageResults.set(stageIdx, full);
+    return full;
+  }
+
   private async exportCurrentStageStl(): Promise<void> {
-    const result = this.stageResults.get(this.currentStageIndex);
+    const result = this.ensureMergedGeometry(
+      this.currentStageIndex,
+      this.stageResults.get(this.currentStageIndex),
+    );
     if (!result) return;
 
     const raw = result.mergedGeometry || result.baseGeometry;
@@ -1202,19 +1258,8 @@ export class BlockoutStudio {
     if (!baseGeom) return;
 
     for (let i = 0; i < total; i++) {
-      let res = this.stageResults.get(i);
-      if (!res) {
-        res = generateBlockout(
-          baseGeom,
-          this.isUpper,
-          this.protocol,
-          i + 1,
-          `stage-${String(i + 1).padStart(2, "0")}`,
-          this.stageSculptDeltas.get(i),
-        );
-        this.stageResults.set(i, res);
-      }
-      list.push(res);
+      const res = this.ensureMergedGeometry(i, this.stageResults.get(i));
+      if (res) list.push(res);
     }
 
     const patientName = this.manifest.patientName ?? this.manifest.caseId;
@@ -1237,19 +1282,8 @@ export class BlockoutStudio {
     if (!baseGeom) return;
 
     for (let i = 0; i < total; i++) {
-      let res = this.stageResults.get(i);
-      if (!res) {
-        res = generateBlockout(
-          baseGeom,
-          this.isUpper,
-          this.protocol,
-          i + 1,
-          `stage-${String(i + 1).padStart(2, "0")}`,
-          this.stageSculptDeltas.get(i),
-        );
-        this.stageResults.set(i, res);
-      }
-      list.push(res);
+      const res = this.ensureMergedGeometry(i, this.stageResults.get(i));
+      if (res) list.push(res);
     }
 
     const nested = createNestedBuildPlateGeometry(
@@ -1463,7 +1497,7 @@ export class BlockoutStudio {
                 <span>Max Allowable Depth</span>
                 <span class="bo-range-val bo-val-uc">${this.protocol.undercut.maxDepthMm.toFixed(2)} mm</span>
               </div>
-              <input type="range" class="bo-range-input bo-range-uc" min="0.1" max="1.2" step="0.05" value="${this.protocol.undercut.maxDepthMm}">
+              <input type="range" class="bo-range-input bo-range-uc" min="0.00" max="1.00" step="0.05" value="${this.protocol.undercut.maxDepthMm}">
             </div>
 
             <!-- Interactive FDI Tooth Chart -->
@@ -1563,11 +1597,10 @@ export class BlockoutStudio {
     this.dockEl = dock;
 
     dock.innerHTML = `
-      <!-- Overlays (Digital Wax) -->
-      <div class="bo-dock-group bo-dock-overlays">
-        <button type="button" class="bo-dock-pill bo-dock-pill--wax ${this.showWaxOverlay ? "bo-dock-pill--active" : ""}" title="Toggle Clinical Digital Wax 3D Layer">
-          <span class="bo-dock-pill-dot bo-dock-pill-dot--red"></span>
-          <span>Wax</span>
+      <!-- Playback Control (Play / Pause) -->
+      <div class="bo-dock-group bo-dock-playback">
+        <button type="button" class="bo-dock-btn-play ${this.isPlaying ? "bo-dock-btn-play--active" : ""}" title="${this.isPlaying ? "Pause treatment playback" : "Play treatment progression"}" aria-label="${this.isPlaying ? "Pause" : "Play"}">
+          ${this.getPlayPauseIconSvg(this.isPlaying)}
         </button>
       </div>
 
@@ -1589,18 +1622,6 @@ export class BlockoutStudio {
         <span class="bo-dock-stage-badge ${this.currentStageIndex === 0 ? "bo-dock-stage-badge--ref" : ""}">
           ${this.currentStageIndex === 0 ? "★ Ref" : `Stage ${this.currentStageIndex + 1}/${totalStages}`}
         </span>
-      </div>
-
-      <div class="bo-dock-divider"></div>
-
-      <!-- Camera Reset -->
-      <div class="bo-dock-group">
-        <button type="button" class="bo-dock-icon-btn bo-dock-btn-reset" title="Reset frontal camera view">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-            <path d="M3 3v5h5"></path>
-          </svg>
-        </button>
       </div>
     `;
 
@@ -1756,7 +1777,7 @@ export class BlockoutStudio {
       this.protocol.interproximal.thicknessMm = val;
       const lbl = this.panelEl?.querySelector(".bo-val-prox");
       if (lbl) lbl.textContent = `${val.toFixed(2)} mm`;
-      this.recomputeCurrentBlockout();
+      this.scheduleRecomputeDebounced();
     });
 
     // Component 2: Gingival
@@ -1774,7 +1795,7 @@ export class BlockoutStudio {
       this.protocol.gingival.reliefMm = val;
       const lbl = this.panelEl?.querySelector(".bo-val-ging");
       if (lbl) lbl.textContent = `${val.toFixed(2)} mm`;
-      this.recomputeCurrentBlockout();
+      this.scheduleRecomputeDebounced();
     });
 
     // Component 3: Undercut
@@ -1790,7 +1811,7 @@ export class BlockoutStudio {
       this.protocol.undercut.maxDepthMm = val;
       const lbl = this.panelEl?.querySelector(".bo-val-uc");
       if (lbl) lbl.textContent = `${val.toFixed(2)} mm`;
-      this.recomputeCurrentBlockout();
+      this.scheduleRecomputeDebounced();
     });
 
     // Component 4: Sculpt Tools
@@ -1909,14 +1930,64 @@ export class BlockoutStudio {
       ?.addEventListener("click", () => this.propagateToAllStages());
   }
 
+  private getPlayPauseIconSvg(playing: boolean): string {
+    return playing
+      ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>`
+      : `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6 4 20 12 6 20 6 4"/></svg>`;
+  }
+
+  public togglePlayback(play?: boolean): boolean {
+    const nextState = typeof play === "boolean" ? play : !this.isPlaying;
+    if (nextState) {
+      const totalStages = this.manifest.treatmentStages.length || 1;
+      if (this.currentStageIndex >= totalStages - 1) {
+        this.setStageIndex(0);
+      }
+      this.isPlaying = true;
+      if (this.playIntervalId !== null) clearInterval(this.playIntervalId);
+      this.playIntervalId = setInterval(() => {
+        const total = this.manifest.treatmentStages.length || 1;
+        if (this.currentStageIndex < total - 1) {
+          this.setStageIndex(this.currentStageIndex + 1);
+        } else {
+          this.stopPlayback();
+        }
+      }, 900);
+    } else {
+      this.stopPlayback();
+    }
+    this.syncPlaybackUI();
+    return this.isPlaying;
+  }
+
+  private stopPlayback(): void {
+    this.isPlaying = false;
+    if (this.playIntervalId !== null) {
+      clearInterval(this.playIntervalId);
+      this.playIntervalId = null;
+    }
+    this.syncPlaybackUI();
+  }
+
+  private syncPlaybackUI(): void {
+    const playBtn =
+      this.dockEl?.querySelector<HTMLButtonElement>(".bo-dock-btn-play");
+    if (!playBtn) return;
+    playBtn.classList.toggle("bo-dock-btn-play--active", this.isPlaying);
+    playBtn.title = this.isPlaying
+      ? "Pause treatment playback"
+      : "Play treatment progression";
+    playBtn.setAttribute("aria-label", this.isPlaying ? "Pause" : "Play");
+    playBtn.innerHTML = this.getPlayPauseIconSvg(this.isPlaying);
+  }
+
   private bindDockEvents(): void {
     if (!this.dockEl) return;
 
-    // Quick overlay toggle
     this.dockEl
-      .querySelector(".bo-dock-pill--wax")
+      .querySelector(".bo-dock-btn-play")
       ?.addEventListener("click", () => {
-        this.toggleWaxOverlay();
+        this.togglePlayback();
       });
 
     const prevBtn =
@@ -1927,12 +1998,14 @@ export class BlockoutStudio {
       this.dockEl.querySelector<HTMLInputElement>(".bo-dock-slider");
 
     prevBtn?.addEventListener("click", () => {
+      if (this.isPlaying) this.stopPlayback();
       if (this.currentStageIndex > 0) {
         this.setStageIndex(this.currentStageIndex - 1);
       }
     });
 
     nextBtn?.addEventListener("click", () => {
+      if (this.isPlaying) this.stopPlayback();
       const total = this.manifest.treatmentStages.length;
       if (this.currentStageIndex < total - 1) {
         this.setStageIndex(this.currentStageIndex + 1);
@@ -1940,24 +2013,12 @@ export class BlockoutStudio {
     });
 
     slider?.addEventListener("input", () => {
+      if (this.isPlaying) this.stopPlayback();
       const target = parseInt(slider.value, 10);
       if (!isNaN(target)) {
         this.setStageIndex(target);
       }
     });
-
-    this.dockEl
-      .querySelector(".bo-dock-btn-reset")
-      ?.addEventListener("click", () => {
-        this.viewport.setView("top");
-        this.viewport.fitAll();
-      });
-
-    this.dockEl
-      .querySelector(".bo-btn-propagate")
-      ?.addEventListener("click", () => {
-        this.propagateToAllStages();
-      });
   }
 
   private updateActiveTabPanes(): void {
@@ -2018,10 +2079,6 @@ export class BlockoutStudio {
     heatChks?.forEach((chk) => {
       chk.checked = this.showHeatmap;
     });
-
-    const dockWax =
-      this.dockEl?.querySelector<HTMLButtonElement>(".bo-dock-pill--wax");
-    dockWax?.classList.toggle("bo-dock-pill--active", this.showWaxOverlay);
   }
 
   private renderHolesList(): void {

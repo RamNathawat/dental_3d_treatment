@@ -640,5 +640,62 @@ describe("Milestone 4: Automated Undercut & Blockout Workflow", () => {
       }
       expect(baseOrOcclusalUndercuts).toBe(0);
     });
+
+    it("detects genuine anterior/buccal/lingual overhangs without hardcoded sector bans and colors excess red in heatmap", () => {
+      // Simulate a tilted tooth cylinder placed anteriorly (+Z) where upper occlusal sits over smaller cervical neck
+      const tiltedTooth = new CylinderGeometry(4.5, 3.0, 8, 24, 6, false);
+      tiltedTooth.translate(0, 4, 22);
+      const survey = analyzeUndercuts(tiltedTooth, false, { x: 0, y: 1, z: 0, tiltX: 0, tiltY: 0 }, 2.0, 0.25);
+      expect(survey.maxDepthMm).toBeGreaterThan(0.5);
+      expect(survey.undercutIndices.length).toBeGreaterThan(10);
+
+      // Verify clinical heatmap paints excess (> 0.25mm) red-orange rather than flat green
+      let hasRedExcess = false;
+      for (let i = 0; i < survey.depths.length; i++) {
+        if ((survey.depths[i] ?? 0) > 0.5) {
+          const r = survey.heatmapColors[i * 3]!;
+          const g = survey.heatmapColors[i * 3 + 1]!;
+          if (r > 0.85 && g < 0.50) {
+            hasRedExcess = true;
+            break;
+          }
+        }
+      }
+      expect(hasRedExcess).toBe(true);
+    });
+
+    it("keeps segmented gingival vertices completely excluded from blue undercut survey", () => {
+      // Tooth + Gum two-band cylinder: upper occlusal cylinder over narrower lower gum collar
+      const mesh = new CylinderGeometry(5.0, 3.6, 12, 24, 24, false);
+      const pos = mesh.getAttribute("position") as BufferAttribute;
+      const colors = new Float32Array(pos.count * 3);
+      for (let i = 0; i < pos.count; i++) {
+        const y = pos.getY(i);
+        if (y < 0) {
+          // Pink gingiva
+          colors[i * 3] = 0.78;
+          colors[i * 3 + 1] = 0.25;
+          colors[i * 3 + 2] = 0.32;
+        } else {
+          // Ivory tooth enamel
+          colors[i * 3] = 0.90;
+          colors[i * 3 + 1] = 0.89;
+          colors[i * 3 + 2] = 0.85;
+        }
+      }
+      mesh.setAttribute("color", new BufferAttribute(colors, 3));
+      const survey = analyzeUndercuts(mesh, false, { x: 0, y: 1, z: 0, tiltX: 0, tiltY: 0 }, 2.0, 0.25);
+
+      let gumDepthCount = 0;
+      let crownDepthCount = 0;
+      for (let i = 0; i < pos.count; i++) {
+        const y = pos.getY(i);
+        const d = survey.depths[i] ?? 0;
+        if (y < -0.1 && d > 0.01) gumDepthCount++;
+        if (y >= 0.0 && y <= 2.4 && d > 0.1) crownDepthCount++;
+      }
+      expect(gumDepthCount).toBe(0);
+      expect(crownDepthCount).toBeGreaterThan(5);
+    });
   });
 });

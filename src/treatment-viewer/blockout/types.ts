@@ -135,7 +135,7 @@ export const DEFAULT_BLOCKOUT_PROTOCOL: BlockoutProtocol = {
   gingival: { enabled: false, reliefMm: 0.3, excludeEdentulous: true },
   undercut: {
     enabled: false,
-    maxDepthMm: 0.5,
+    maxDepthMm: 0.25,
     draftAngleDeg: 2.0,
     perTooth: {},
   },

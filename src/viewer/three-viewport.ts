@@ -409,11 +409,11 @@ class ThreeViewport implements Viewport {
                 material.clearcoatRoughness = 0.15;
               #endif
             } else if (isGum) {
-              // Moist biological oral mucosa (controlled wet saliva clearcoat without bleaching)
-              material.roughness = 0.36;
+              // Moist biological oral mucosa (soft satin clearcoat to avoid white glare on scan micro-facets)
+              material.roughness = 0.44;
               #ifdef USE_CLEARCOAT
-                material.clearcoat = 0.65;
-                material.clearcoatRoughness = 0.12;
+                material.clearcoat = 0.20;
+                material.clearcoatRoughness = 0.34;
               #endif
             } else {
               // Glazed natural dental enamel

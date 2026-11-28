@@ -107,13 +107,15 @@ describe("Blockout Studio UI & Interaction", () => {
     // Check Action CTA pinned to Side Panel
     expect(panel?.querySelector(".bo-btn-propagate")).not.toBeNull();
 
-    // Check Compact Floating Center Dock with Relevant Controls
+    // Check Compact Floating Center Dock with Playback & Scrubbing Controls
     const dock = container.querySelector(".bo-bottom-dock");
     expect(dock).not.toBeNull();
-    expect(dock?.querySelector(".bo-dock-overlays")).not.toBeNull();
+    expect(dock?.querySelector(".bo-dock-playback")).not.toBeNull();
+    expect(dock?.querySelector(".bo-dock-btn-play")).not.toBeNull();
     expect(dock?.querySelector(".bo-dock-timeline")).not.toBeNull();
     expect(dock?.querySelector(".bo-dock-slider")).not.toBeNull();
-    expect(dock?.querySelector(".bo-dock-btn-reset")).not.toBeNull();
+    expect(dock?.querySelector(".bo-dock-btn-reset")).toBeNull();
+    expect(dock?.querySelector(".bo-dock-overlays")).toBeNull();
 
     // Check FDI Tooth Chart
     const toothBtns = panel?.querySelectorAll(".bo-tooth-btn");
@@ -205,7 +207,7 @@ describe("Blockout Studio UI & Interaction", () => {
     studio.unmount();
   });
 
-  it("handles bottom dock wax toggle, right-panel undercut heatmap toggle, and stage slider", () => {
+  it("renders playback and stage scrubbing controls in the bottom dock and handles right-panel heatmap toggle", () => {
     const container = document.createElement("div");
     const studio = new BlockoutStudio({
       viewport: mockViewport,
@@ -214,19 +216,25 @@ describe("Blockout Studio UI & Interaction", () => {
     studio.mount(container);
 
     const dock = container.querySelector(".bo-bottom-dock");
+    const playBtn = dock?.querySelector<HTMLButtonElement>(".bo-dock-btn-play");
     const waxPill = dock?.querySelector<HTMLButtonElement>(".bo-dock-pill--wax");
+    const resetBtn = dock?.querySelector<HTMLButtonElement>(".bo-dock-btn-reset");
     const dockHeatPill = dock?.querySelector<HTMLButtonElement>(".bo-dock-pill--heatmap");
     const ucSectionHeatChk = container.querySelector<HTMLInputElement>(".bo-section-undercut .bo-chk-heatmap");
     const slider = dock?.querySelector<HTMLInputElement>(".bo-dock-slider");
 
-    expect(waxPill?.classList.contains("bo-dock-pill--active")).toBe(true);
+    expect(playBtn).not.toBeNull();
+    expect(waxPill).toBeNull();
+    expect(resetBtn).toBeNull();
     expect(dockHeatPill).toBeNull();
     expect(ucSectionHeatChk).not.toBeNull();
     expect(ucSectionHeatChk?.checked).toBe(false);
 
-    // Toggle wax
-    waxPill?.click();
-    expect(waxPill?.classList.contains("bo-dock-pill--active")).toBe(false);
+    // Toggle playback Play -> Pause -> Pause again on scrub
+    playBtn?.click();
+    expect(playBtn?.classList.contains("bo-dock-btn-play--active")).toBe(true);
+    playBtn?.click();
+    expect(playBtn?.classList.contains("bo-dock-btn-play--active")).toBe(false);
 
     // Toggle heatmap inside Dentition Undercuts section
     ucSectionHeatChk!.checked = true;

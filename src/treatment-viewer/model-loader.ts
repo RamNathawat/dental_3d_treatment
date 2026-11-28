@@ -849,6 +849,14 @@ export function pruneCrossPalateTriangles(geom: BufferGeometry): BufferGeometry 
   const index = geom.getIndex();
   const count = index ? index.count / 3 : pos.count / 3;
 
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+
   const validIndices: number[] = [];
   let pruned = false;
 
@@ -861,8 +869,19 @@ export function pruneCrossPalateTriangles(geom: BufferGeometry): BufferGeometry 
     const x1 = pos.getX(i1), y1 = pos.getY(i1), z1 = pos.getZ(i1);
     const x2 = pos.getX(i2), y2 = pos.getY(i2), z2 = pos.getZ(i2);
 
-    // If all three vertices are near-coplanar on the base plane, preserve them as solid base cap
-    const isPlanarBase = Math.abs(y0 - y1) < 0.25 && Math.abs(y1 - y2) < 0.25 && Math.abs(y2 - y0) < 0.25;
+    // Preserve planar or gently sloped base-cap triangles near the arch cut plane
+    const avgY = (y0 + y1 + y2) / 3;
+    const nearBaseCut = avgY - minY < 3.5 || maxY - avgY < 3.5;
+    const ux = x1 - x0, uy = y1 - y0, uz = z1 - z0;
+    const vx = x2 - x0, vy = y2 - y0, vz = z2 - z0;
+    const nx = uy * vz - uz * vy;
+    const ny = uz * vx - ux * vz;
+    const nz = ux * vy - uy * vx;
+    const nLen = Math.hypot(nx, ny, nz);
+    const isHorizontalCapTri = nLen > 1e-8 && Math.abs(ny) / nLen > 0.72;
+    const isPlanarBase =
+      (nearBaseCut && isHorizontalCapTri) ||
+      (Math.abs(y0 - y1) < 0.8 && Math.abs(y1 - y2) < 0.8 && Math.abs(y2 - y0) < 0.8);
     if (isPlanarBase) {
       validIndices.push(i0, i1, i2);
       continue;
@@ -1297,7 +1316,7 @@ export async function loadStageGeometries(
           } else {
             const rawUpper = stlLoader.parse(outcome.models.upperStl);
             if (rawUpper) {
-              upperGeom = capPlanarOpenings(rawUpper, true);
+              upperGeom = rawUpper;
               upperGeom.computeVertexNormals();
               if (!upperGeom.getAttribute("color")) {
                 computeAnatomicalColors(
@@ -1350,7 +1369,7 @@ export async function loadStageGeometries(
           } else {
             const rawLower = stlLoader.parse(outcome.models.lowerStl);
             if (rawLower) {
-              lowerGeom = capPlanarOpenings(rawLower, false);
+              lowerGeom = rawLower;
               lowerGeom.computeVertexNormals();
               if (!lowerGeom.getAttribute("color")) {
                 computeAnatomicalColors(

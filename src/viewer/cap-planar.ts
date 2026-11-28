@@ -12,12 +12,76 @@ interface Point3D {
   z: number;
 }
 
-interface EdgeEntry {
-  count: number;
-  v1: Point3D;
-  v2: Point3D;
-  k1: string;
-  k2: string;
+interface CleanLoop2D {
+  pts2D: Vector2[];
+  pts3D: Point3D[];
+  absArea: number;
+  isBaseCut: boolean;
+}
+
+function signedAreaXZ(pts: Vector2[]): number {
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i]!;
+    const b = pts[(i + 1) % pts.length]!;
+    area += a.x * b.y - b.x * a.y;
+  }
+  return area * 0.5;
+}
+
+function pointInPolygonXZ(px: number, pz: number, poly: Vector2[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i]!.x;
+    const zi = poly[i]!.y;
+    const xj = poly[j]!.x;
+    const zj = poly[j]!.y;
+    const intersect =
+      zi > pz !== zj > pz &&
+      px < ((xj - xi) * (pz - zi)) / (zj - zi || 1e-12) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function distSqToPolyBoundaryXZ(px: number, pz: number, poly: Vector2[]): number {
+  let minD2 = Infinity;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const ax = poly[j]!.x;
+    const az = poly[j]!.y;
+    const bx = poly[i]!.x;
+    const bz = poly[i]!.y;
+    const abx = bx - ax;
+    const abz = bz - az;
+    const denom = abx * abx + abz * abz;
+    const t =
+      denom > 1e-12
+        ? Math.max(0, Math.min(1, ((px - ax) * abx + (pz - az) * abz) / denom))
+        : 0;
+    const dx = px - (ax + t * abx);
+    const dz = pz - (az + t * abz);
+    const d2 = dx * dx + dz * dz;
+    if (d2 < minD2) minD2 = d2;
+  }
+  return minD2;
+}
+
+function isPointInsideOrOnPolyXZ(
+  px: number,
+  pz: number,
+  poly: Vector2[],
+  tolSq = 0.04,
+): boolean {
+  if (pointInPolygonXZ(px, pz, poly)) return true;
+  return distSqToPolyBoundaryXZ(px, pz, poly) <= tolSq;
+}
+
+// 48-bit exact integer spatial key at 0.02 mm resolution (range +/-655 mm)
+function getPtKeyNum(x: number, y: number, z: number): number {
+  const ix = Math.round(x * 50) + 32768;
+  const iy = Math.round(y * 50) + 32768;
+  const iz = Math.round(z * 50) + 32768;
+  return (ix * 65536 + iy) * 65536 + iz;
 }
 
 /**
@@ -38,76 +102,63 @@ export function capPlanarOpenings(
   if (!posAttr) return geometry;
 
   const index = geometry.getIndex();
-  const numTriangles = index ? index.count / 3 : posAttr.count / 3;
+  const numTriangles = index ? Math.floor(index.count / 3) : Math.floor(posAttr.count / 3);
 
-  const edgeMap = new Map<string, EdgeEntry>();
-
-  function getPtKey(x: number, y: number, z: number): string {
-    return `${x.toFixed(3)},${y.toFixed(3)},${z.toFixed(3)}`;
+  interface NumEdgeEntry {
+    count: number;
+    k1: number;
+    k2: number;
   }
-  function getEdgeKey(k1: string, k2: string): string {
+
+  const edgeMap = new Map<string, NumEdgeEntry>();
+  const pts = new Map<number, Point3D>();
+
+  function getEdgeKey(k1: number, k2: number): string {
     return k1 < k2 ? `${k1}_${k2}` : `${k2}_${k1}`;
   }
 
   // Find extreme Y bounds to isolate the base planar cut plane
-  let minY = Infinity, maxY = -Infinity;
+  let minY = Infinity,
+    maxY = -Infinity;
   for (let i = 0; i < posAttr.count; i++) {
     const y = posAttr.getY(i);
-    if (y < minY) minY = y; if (y > maxY) maxY = y;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
   }
 
-  const modelHeight = maxY - minY;
   const cutY = isUpper ? maxY : minY;
-  const cutThreshold = Math.min(4.0, Math.max(2.2, modelHeight * 0.35));
 
-  const pts = new Map<string, Point3D>();
+  // Scan ALL triangles so no artificial Y-threshold ever bisects the mesh into fake boundary loops
   for (let i = 0; i < numTriangles; i++) {
     const i0 = index ? index.getX(i * 3) : i * 3;
     const i1 = index ? index.getX(i * 3 + 1) : i * 3 + 1;
     const i2 = index ? index.getX(i * 3 + 2) : i * 3 + 2;
 
-    const y0 = posAttr.getY(i0);
-    const y1 = posAttr.getY(i1);
-    const y2 = posAttr.getY(i2);
+    const x0 = posAttr.getX(i0), y0 = posAttr.getY(i0), z0 = posAttr.getZ(i0);
+    const x1 = posAttr.getX(i1), y1 = posAttr.getY(i1), z1 = posAttr.getZ(i1);
+    const x2 = posAttr.getX(i2), y2 = posAttr.getY(i2), z2 = posAttr.getZ(i2);
 
-    // Fast reject: triangles nowhere near the cut plane can never form the base cap
-    if (
-      Math.abs(y0 - cutY) > cutThreshold &&
-      Math.abs(y1 - cutY) > cutThreshold &&
-      Math.abs(y2 - cutY) > cutThreshold
-    ) {
-      continue;
-    }
+    const k0 = getPtKeyNum(x0, y0, z0);
+    const k1 = getPtKeyNum(x1, y1, z1);
+    const k2 = getPtKeyNum(x2, y2, z2);
 
-    const v: Point3D[] = [
-      {
-        x: posAttr.getX(i0),
-        y: y0,
-        z: posAttr.getZ(i0),
-      },
-      {
-        x: posAttr.getX(i1),
-        y: y1,
-        z: posAttr.getZ(i1),
-      },
-      {
-        x: posAttr.getX(i2),
-        y: y2,
-        z: posAttr.getZ(i2),
-      },
+    const ks = [k0, k1, k2];
+    const vs: Point3D[] = [
+      { x: x0, y: y0, z: z0 },
+      { x: x1, y: y1, z: z1 },
+      { x: x2, y: y2, z: z2 },
     ];
 
     for (let j = 0; j < 3; j++) {
-      const v1 = v[j]!;
-      const v2 = v[(j + 1) % 3]!;
-      const k1 = getPtKey(v1.x, v1.y, v1.z);
-      const k2 = getPtKey(v2.x, v2.y, v2.z);
-      pts.set(k1, v1);
-      pts.set(k2, v2);
-      const ek = getEdgeKey(k1, k2);
+      const a = ks[j]!;
+      const b = ks[(j + 1) % 3]!;
+      if (a === b) continue;
+      if (!pts.has(a)) pts.set(a, vs[j]!);
+      if (!pts.has(b)) pts.set(b, vs[(j + 1) % 3]!);
+      const ek = getEdgeKey(a, b);
       let entry = edgeMap.get(ek);
       if (!entry) {
-        entry = { count: 0, v1, v2, k1, k2 };
+        entry = { count: 0, k1: a, k2: b };
         edgeMap.set(ek, entry);
       }
       entry.count++;
@@ -115,7 +166,7 @@ export function capPlanarOpenings(
   }
 
   // Find single-use boundary edges
-  const adj = new Map<string, string[]>();
+  const adj = new Map<number, number[]>();
   for (const entry of edgeMap.values()) {
     if (entry.count === 1) {
       if (!adj.has(entry.k1)) adj.set(entry.k1, []);
@@ -127,107 +178,250 @@ export function capPlanarOpenings(
 
   if (adj.size === 0) return geometry;
 
-  // Extract closed boundary loops
-  const visited = new Set<string>();
-  const loops: string[][] = [];
-  for (const start of adj.keys()) {
-    if (visited.has(start)) continue;
-    const loop = [start];
-    visited.add(start);
-    let curr = start;
-    let prev: string | null = null;
+  // Extract boundary chains and automatically split figure-8 pinched loops into simple cycles
+  const usedEdges = new Set<string>();
+  const loops: number[][] = [];
+  const openChains: number[][] = [];
+
+  function walkComponent(start: number, preferSimpleCycle: boolean): void {
+    const stack: number[] = [start];
+    const indexInStack = new Map<number, number>([[start, 0]]);
     while (true) {
+      const curr = stack[stack.length - 1]!;
       const neighbors = adj.get(curr);
       if (!neighbors) break;
-      const next = neighbors.find((n) => n !== prev && !visited.has(n));
-      if (!next) break;
-      visited.add(next);
-      loop.push(next);
-      prev = curr;
-      curr = next;
+      let chosen: number | null = null;
+      for (const n of neighbors) {
+        const ek = getEdgeKey(curr, n);
+        if (!usedEdges.has(ek)) {
+          chosen = n;
+          break;
+        }
+      }
+      if (chosen === null) break;
+      usedEdges.add(getEdgeKey(curr, chosen));
+
+      const prevIdx = indexInStack.get(chosen);
+      if (prevIdx !== undefined) {
+        // Closed a simple sub-cycle [prevIdx .. stack.length - 1]
+        const cycle = stack.slice(prevIdx);
+        for (let i = prevIdx + 1; i < stack.length; i++) {
+          indexInStack.delete(stack[i]!);
+        }
+        stack.length = prevIdx + 1;
+        if (cycle.length >= 3) loops.push(cycle);
+        if (preferSimpleCycle && stack.length === 1) {
+          // Continue from `chosen` if it still has unused edges
+          const rem = adj
+            .get(chosen)
+            ?.some((n) => !usedEdges.has(getEdgeKey(chosen!, n)));
+          if (!rem) break;
+        }
+      } else {
+        indexInStack.set(chosen, stack.length);
+        stack.push(chosen);
+      }
     }
-    if (loop.length >= 3) loops.push(loop);
+    if (stack.length >= 3) {
+      const pStart = pts.get(stack[0]!)!;
+      const pEnd = pts.get(stack[stack.length - 1]!)!;
+      const gap = Math.hypot(
+        pStart.x - pEnd.x,
+        pStart.y - pEnd.y,
+        pStart.z - pEnd.z,
+      );
+      if (gap < 1.5) {
+        loops.push(stack);
+      } else {
+        openChains.push(stack);
+      }
+    } else if (stack.length >= 2) {
+      openChains.push(stack);
+    }
   }
 
-  const capTriangles: Point3D[] = [];
-  for (const loop of loops) {
-    const yVals = loop.map((k) => pts.get(k)!.y);
-    const minLoopY = Math.min(...yVals);
-    const maxLoopY = Math.max(...yVals);
-    const yDiff = maxLoopY - minLoopY;
+  for (const [k, neighbors] of adj.entries()) {
+    if (neighbors.length % 2 === 1) {
+      const hasUnused = neighbors.some((n) => !usedEdges.has(getEdgeKey(k, n)));
+      if (hasUnused) walkComponent(k, false);
+    }
+  }
+  for (const k of adj.keys()) {
+    const neighbors = adj.get(k)!;
+    const hasUnused = neighbors.some((n) => !usedEdges.has(getEdgeKey(k, n)));
+    if (hasUnused) walkComponent(k, true);
+  }
 
-    const xVals = loop.map((k) => pts.get(k)!.x);
-    const zVals = loop.map((k) => pts.get(k)!.z);
-    const spanX = Math.max(...xVals) - Math.min(...xVals);
-    const spanZ = Math.max(...zVals) - Math.min(...zVals);
+  // Stitch nearby open chain segments (< 2.5 mm gap)
+  while (openChains.length > 0) {
+    const curr = openChains.shift()!;
+    let merged = true;
+    while (merged) {
+      merged = false;
+      const cStart = pts.get(curr[0]!)!;
+      const cEnd = pts.get(curr[curr.length - 1]!)!;
+      if (
+        curr.length >= 3 &&
+        Math.hypot(cStart.x - cEnd.x, cStart.y - cEnd.y, cStart.z - cEnd.z) < 2.5
+      ) {
+        break;
+      }
+
+      let bestIdx = -1;
+      let bestDist = 2.5;
+      let bestReverse = false;
+      for (let i = 0; i < openChains.length; i++) {
+        const cand = openChains[i]!;
+        const s = pts.get(cand[0]!)!;
+        const e = pts.get(cand[cand.length - 1]!)!;
+        const dEndStart = Math.hypot(cEnd.x - s.x, cEnd.y - s.y, cEnd.z - s.z);
+        const dEndEnd = Math.hypot(cEnd.x - e.x, cEnd.y - e.y, cEnd.z - e.z);
+        if (dEndStart < bestDist) {
+          bestDist = dEndStart;
+          bestIdx = i;
+          bestReverse = false;
+        }
+        if (dEndEnd < bestDist) {
+          bestDist = dEndEnd;
+          bestIdx = i;
+          bestReverse = true;
+        }
+      }
+      if (bestIdx >= 0) {
+        const picked = openChains.splice(bestIdx, 1)[0]!;
+        if (bestReverse) picked.reverse();
+        curr.push(...picked);
+        merged = true;
+      }
+    }
+    if (curr.length >= 3) {
+      const s = pts.get(curr[0]!)!;
+      const e = pts.get(curr[curr.length - 1]!)!;
+      if (Math.hypot(s.x - e.x, s.y - e.y, s.z - e.z) < 2.5) {
+        loops.push(curr);
+      }
+    }
+  }
+
+  // Filter and build clean 2D/3D loops preserving exact 1-to-1 perimeter vertices
+  const candidateLoops: CleanLoop2D[] = [];
+  for (const loop of loops) {
+    let minLoopY = Infinity,
+      maxLoopY = -Infinity;
+    let minX = Infinity,
+      maxX = -Infinity;
+    let minZ = Infinity,
+      maxZ = -Infinity;
+    for (const k of loop) {
+      const p = pts.get(k)!;
+      if (p.y < minLoopY) minLoopY = p.y;
+      if (p.y > maxLoopY) maxLoopY = p.y;
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.z < minZ) minZ = p.z;
+      if (p.z > maxZ) maxZ = p.z;
+    }
+
+    const yDiff = maxLoopY - minLoopY;
+    const spanX = maxX - minX;
+    const spanZ = maxZ - minZ;
 
     // Dental horseshoe arch protection: distinguish true flat/slightly-tilted base cut from anatomical loops
     const loopNearCut = isUpper
-      ? Math.abs(maxLoopY - cutY) < 1.8
-      : Math.abs(minLoopY - cutY) < 1.8;
-    const isBaseCut = loopNearCut && yDiff <= 2.6;
+      ? Math.abs(maxLoopY - cutY) < 2.5
+      : Math.abs(minLoopY - cutY) < 2.5;
+    const isBaseCut = loopNearCut && yDiff <= 3.8;
     if (!isBaseCut && spanX > 15.0 && spanZ > 15.0) continue;
-    // Capping tolerance: allow base cuts with height variation up to 2.8mm
-    if (!isBaseCut && yDiff > 2.8) continue;
-    // Skip tiny micro-loops under 2mm
-    if (spanX < 2.0 && spanZ < 2.0) continue;
+    if (!isBaseCut && yDiff > 3.8) continue;
+    if (!isBaseCut && spanX < 1.2 && spanZ < 1.2) continue;
 
-    const points2D = loop.map((k) => {
+    const pts2D: Vector2[] = [];
+    const pts3D: Point3D[] = [];
+    for (const k of loop) {
       const p = pts.get(k)!;
-      return new Vector2(p.x, p.z);
-    });
+      pts2D.push(new Vector2(p.x, p.z));
+      pts3D.push(p);
+    }
+    if (pts2D.length < 3) continue;
 
-    const triIndices = ShapeUtils.triangulateShape(points2D, []);
-    let totalAreaY = 0;
+    const absArea = Math.abs(signedAreaXZ(pts2D));
+    if (absArea < 0.25) continue;
+
+    candidateLoops.push({ pts2D, pts3D, absArea, isBaseCut });
+  }
+
+  // Group concentric nested loops (outer rim + nested hollow inner rim -> Earcut hole)
+  candidateLoops.sort((a, b) => b.absArea - a.absArea);
+  const consumedAsHole = new Set<number>();
+  const capTriangles: Point3D[] = [];
+
+  for (let oi = 0; oi < candidateLoops.length; oi++) {
+    if (consumedAsHole.has(oi)) continue;
+    const outer = candidateLoops[oi]!;
+    const holes2D: Vector2[][] = [];
+    const combinedPts3D: Point3D[] = [...outer.pts3D];
+
+    for (let hi = oi + 1; hi < candidateLoops.length; hi++) {
+      if (consumedAsHole.has(hi)) continue;
+      const inner = candidateLoops[hi]!;
+      let insideCount = 0;
+      const sampleStep = Math.max(1, Math.floor(inner.pts2D.length / 5));
+      let sampleTotal = 0;
+      for (let s = 0; s < inner.pts2D.length; s += sampleStep) {
+        sampleTotal++;
+        const sp = inner.pts2D[s]!;
+        if (pointInPolygonXZ(sp.x, sp.y, outer.pts2D)) {
+          insideCount++;
+        }
+      }
+      if (outer.isBaseCut && inner.isBaseCut && insideCount === sampleTotal) {
+        consumedAsHole.add(hi);
+        holes2D.push(inner.pts2D);
+        combinedPts3D.push(...inner.pts3D);
+      }
+    }
+
+    const triIndices = ShapeUtils.triangulateShape(outer.pts2D, holes2D);
+    const targetPositiveY = isUpper;
+
     for (const tri of triIndices) {
       const i0 = tri[0];
       const i1 = tri[1];
       const i2 = tri[2];
       if (i0 === undefined || i1 === undefined || i2 === undefined) continue;
-      const p0 = points2D[i0];
-      const p1 = points2D[i1];
-      const p2 = points2D[i2];
+
+      let p0 = combinedPts3D[i0];
+      let p1 = combinedPts3D[i1];
+      let p2 = combinedPts3D[i2];
       if (!p0 || !p1 || !p2) continue;
-      totalAreaY +=
-        (p1.y - p0.y) * (p2.x - p0.x) - (p1.x - p0.x) * (p2.y - p0.y);
-    }
-    const targetPositiveY = isUpper;
-    const shouldFlip = targetPositiveY ? totalAreaY < 0 : totalAreaY > 0;
 
-    for (const tri of triIndices) {
-      let i0 = tri[0];
-      let i1 = tri[1];
-      let i2 = tri[2];
-      if (i0 === undefined || i1 === undefined || i2 === undefined) continue;
-
+      const areaY =
+        (p1.z - p0.z) * (p2.x - p0.x) - (p1.x - p0.x) * (p2.z - p0.z);
+      const shouldFlip = targetPositiveY ? areaY < 0 : areaY > 0;
       if (shouldFlip) {
-        const tmp = i1;
-        i1 = i2;
-        i2 = tmp;
+        const tmp = p1;
+        p1 = p2;
+        p2 = tmp;
       }
-      const k0 = loop[i0];
-      const k1 = loop[i1];
-      const k2 = loop[i2];
-      if (!k0 || !k1 || !k2) continue;
-      const p0 = pts.get(k0);
-      const p1 = pts.get(k1);
-      const p2 = pts.get(k2);
-      if (p0 && p1 && p2) {
-        // Exclude cross-palate / cross-tongue bridging chords across the hollow dental horseshoe arch
-        const cx = (p0.x + p1.x + p2.x) / 3;
-        const cz = (p0.z + p1.z + p2.z) / 3;
-        if (!isUpper && Math.abs(cx) < 9.0 && cz > -6.0 && cz < 16.0) {
-          continue;
-        }
-        const d01 = Math.hypot(p0.x - p1.x, p0.z - p1.z);
-        const d12 = Math.hypot(p1.x - p2.x, p1.z - p2.z);
-        const d20 = Math.hypot(p2.x - p0.x, p2.z - p0.z);
-        if (d01 > 35.0 || d12 > 35.0 || d20 > 35.0) {
-          continue;
-        }
 
-        capTriangles.push(p0, p1, p2);
+      // Topological interior guard (allows tiny boundary sliver tolerances of 0.04 mm^2 so perimeter edges never stay open)
+      const cx = (p0.x + p1.x + p2.x) / 3;
+      const cz = (p0.z + p1.z + p2.z) / 3;
+      if (!isPointInsideOrOnPolyXZ(cx, cz, outer.pts2D, 0.0025)) continue;
+
+      let inHole = false;
+      for (const h of holes2D) {
+        if (
+          pointInPolygonXZ(cx, cz, h) &&
+          distSqToPolyBoundaryXZ(cx, cz, h) > 0.0025
+        ) {
+          inHole = true;
+          break;
+        }
       }
+      if (inHole) continue;
+
+      capTriangles.push(p0, p1, p2);
     }
   }
 

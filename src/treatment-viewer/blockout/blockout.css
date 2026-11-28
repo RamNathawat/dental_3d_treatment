@@ -763,6 +763,40 @@
   }
 }
 
+/* Playback Play / Pause button in dock */
+.bo-dock-playback {
+  display: inline-flex;
+  align-items: center;
+}
+
+.bo-dock-btn-play {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--tv-border-gold-subtle);
+  background: var(--tv-gold-light);
+  color: var(--tv-gold);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.bo-dock-btn-play:hover {
+  border-color: var(--tv-gold);
+  background: rgba(240, 185, 11, 0.22);
+  transform: scale(1.04);
+}
+
+.bo-dock-btn-play--active {
+  border-color: var(--tv-gold);
+  background: var(--tv-gold);
+  color: #111827;
+  box-shadow: 0 0 12px rgba(240, 185, 11, 0.35);
+}
+
 /* Groups within dock */
 .bo-dock-group {
   display: inline-flex;
