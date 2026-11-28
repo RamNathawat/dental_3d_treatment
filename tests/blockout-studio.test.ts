@@ -19,6 +19,7 @@ import { WaxSculptor } from "../src/treatment-viewer/blockout/wax-sculptor";
 import { capPlanarOpenings } from "../src/viewer/cap-planar";
 import { pruneCrossPalateTriangles } from "../src/treatment-viewer/model-loader";
 import {
+  buildCombinedPrintableGeometry,
   createBatchStlZip,
   createNestedBuildPlateGeometry,
   exportBinaryStl,
@@ -240,10 +241,21 @@ describe("Milestone 4: Automated Undercut & Blockout Workflow", () => {
       expect(mergedPos.getY(0)).toBeCloseTo(origPos.getY(0), 3);
       expect(mergedPos.getZ(0)).toBeCloseTo(origPos.getZ(0), 3);
 
-      // Verify that adding wax increases wax thickness along surface normal
+      // Verify that adding wax increases wax thickness along surface normal AND renders in visible waxGeometry
       const deltasAdd = new Map<number, [number, number, number]>();
-      deltasAdd.set(0, [0.8, 0, 0]); // Add 0.8mm of wax to vertex 0
-      const addResult = generateBlockout(geom, true, defaultProtocol, 1, "stage-01", deltasAdd);
+      deltasAdd.set(0, [0.8, 0, 0]); // Add 0.8mm of wax along normal to vertex 0
+      const addResult = generateBlockout(
+        geom,
+        true,
+        {
+          ...defaultProtocol,
+          gingival: { ...defaultProtocol.gingival, enabled: false },
+          undercut: { ...defaultProtocol.undercut, enabled: false },
+        },
+        1,
+        "stage-01",
+        deltasAdd,
+      );
       const addMergedPos = addResult.mergedGeometry!.getAttribute("position")!;
       const dist = Math.hypot(
         addMergedPos.getX(0) - origPos.getX(0),
@@ -251,7 +263,37 @@ describe("Milestone 4: Automated Undercut & Blockout Workflow", () => {
         addMergedPos.getZ(0) - origPos.getZ(0),
       );
       expect(dist).toBeGreaterThan(0.5);
+      expect(addResult.waxGeometry).not.toBeNull();
+      expect(addResult.waxGeometry!.getAttribute("position").count).toBeGreaterThan(0);
 
+      // Verify Alt+Quick-Draw, Shift+Smooth, and [ / ] brush radius shortcuts when Sculpt tab is active
+      const orbitLocks: boolean[] = [];
+      const shortcutSculptor = new WaxSculptor(scene, camera, dom, {
+        onOrbitLockChange: (locked) => orbitLocks.push(locked),
+      });
+      shortcutSculptor.setTargetMesh(mesh, "stage-01");
+      shortcutSculptor.setSculptTabActive(true);
+      expect(shortcutSculptor.getEffectiveMode()).toBe("off");
+
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Alt" }));
+      expect(shortcutSculptor.isAltQuickDrawActive()).toBe(true);
+      expect(shortcutSculptor.getEffectiveMode()).toBe("add");
+      expect(orbitLocks[orbitLocks.length - 1]).toBe(true);
+
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift" }));
+      expect(shortcutSculptor.getEffectiveMode()).toBe("smooth");
+
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "]" }));
+      expect(shortcutSculptor.getConfig().radiusMm).toBe(4.0);
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "[" }));
+      expect(shortcutSculptor.getConfig().radiusMm).toBe(3.5);
+
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: "Shift" }));
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: "Alt" }));
+      expect(shortcutSculptor.isAltQuickDrawActive()).toBe(false);
+      expect(orbitLocks[orbitLocks.length - 1]).toBe(false);
+
+      shortcutSculptor.dispose();
       sculptor.dispose();
     });
   });
@@ -319,6 +361,18 @@ describe("Milestone 4: Automated Undercut & Blockout Workflow", () => {
       expect(zipBlob).toBeInstanceOf(Blob);
       expect(zipBlob.size).toBeGreaterThan(100);
       expect(progressCount).toBe(2);
+    });
+
+    it("bakes Component 1 interproximal wax wedges into printable STL geometry", () => {
+      const baseGeom = new BoxGeometry(10, 10, 10);
+      const wedge = new BoxGeometry(2, 2, 2).toNonIndexed();
+      const st = generateBlockout(baseGeom, true, defaultProtocol, 1, "stage-01");
+      st.interproximalGeometry = wedge;
+
+      const combined = buildCombinedPrintableGeometry(st);
+      const combinedTris = (combined.index ? combined.index.count : combined.getAttribute("position").count) / 3;
+      // 12 base triangles + 12 interproximal wedge triangles = 24 triangles
+      expect(combinedTris).toBe(24);
     });
   });
 

@@ -580,13 +580,14 @@ export function generateBlockout(
   const mergedGeometry = options?.skipMergedGeometry ? null : baseGeometry.clone();
   const mergedPos = mergedGeometry ? mergedGeometry.getAttribute("position") : null;
 
-  // Component 2 (Gingival Green #4ade80) & Component 3 (Blue Undercut #52b6f9)
+  // Component 2 (Gingival Green #4ade80), Component 3 (Blue Undercut #52b6f9) & Manual Wax Sculpt (#f59e0b)
   const needSurfaceRelief = protocol.gingival.enabled || protocol.undercut.enabled;
+  const hasSculpt = Boolean(sculptDeltas && sculptDeltas.size > 0);
   let reliefPos: Float32Array = new Float32Array(0);
   let reliefNorm: Float32Array = new Float32Array(0);
   let reliefCol: Float32Array = new Float32Array(0);
 
-  if (needSurfaceRelief && norm) {
+  if ((needSurfaceRelief || hasSculpt) && norm) {
     const cejInfo = protocol.gingival.enabled
       ? ensureCejBorderCache(baseGeometry, pre)
       : null;
@@ -595,7 +596,7 @@ export function generateBlockout(
     const dispY = new Float32Array(count);
     const dispZ = new Float32Array(count);
     const reliefMag = new Float32Array(count);
-    const reliefType = new Uint8Array(count); // 1 = Gingival Green, 2 = Undercut Blue
+    const reliefType = new Uint8Array(count); // 1 = Gingival Green, 2 = Undercut Blue, 3 = Manual Sculpt Amber
 
     // Component 3: Spatial-welded + 4-pass Laplacian smoothing using cached weld topology
     let smoothedUcDisp: Float32Array | null = null;
@@ -685,9 +686,10 @@ export function generateBlockout(
       const gingBorder = cejInfo
         ? (cejInfo.hasCervicalBorder ? cejInfo.isCervicalBorder[i]! : 1)
         : 0;
+      const sculptDelta = sculptDeltas ? (sculptDeltas.get(i)?.[0] ?? 0) : 0;
 
-      // Fast skip: neither component can fire on this vertex
-      if (ucDisp <= 0.025 && gingBorder === 0) continue;
+      // Fast skip: neither auto-component nor manual sculpt can fire on this vertex
+      if (ucDisp <= 0.025 && gingBorder === 0 && sculptDelta <= 0.025) continue;
 
       vPos.set(pos.getX(i), pos.getY(i), pos.getZ(i));
       vNorm.set(norm.getX(i), norm.getY(i), norm.getZ(i));
@@ -777,6 +779,31 @@ export function generateBlockout(
         dyOut = 0;
       }
 
+      // Component 4: Manual Sculpt Deltas (normal-directed Add / Carve / Smooth, clamped at >= 0 mm net wax)
+      if (sculptDelta < -0.002 && curMag > 0) {
+        const nextMag = Math.max(0, curMag + sculptDelta);
+        if (nextMag <= 0.025) {
+          curMag = 0;
+          curType = 0;
+          dxOut = 0;
+          dyOut = 0;
+          dzOut = 0;
+        } else {
+          const ratio = nextMag / curMag;
+          curMag = nextMag;
+          dxOut *= ratio;
+          dyOut *= ratio;
+          dzOut *= ratio;
+        }
+      } else if (sculptDelta > 0.025) {
+        const added = Math.min(2.5, sculptDelta);
+        dxOut += vNorm.x * added;
+        dyOut += vNorm.y * added;
+        dzOut += vNorm.z * added;
+        curMag = Math.min(2.5, Math.hypot(dxOut, dyOut, dzOut));
+        curType = 3;
+      }
+
       if (curMag > 0.025) {
         reliefMag[i] = curMag;
         dispX[i] = dxOut;
@@ -797,6 +824,7 @@ export function generateBlockout(
 
     const gingColor = new Color(0x4ade80);
     const ucColor = new Color(0x52b6f9);
+    const sculptColor = new Color(0xf59e0b);
     const index = baseGeometry.getIndex();
     const numTris = index ? Math.floor(index.count / 3) : Math.floor(count / 3);
 
@@ -829,8 +857,14 @@ export function generateBlockout(
         const i0 = index ? index.getX(t * 3) : t * 3;
         const i1 = index ? index.getX(t * 3 + 1) : t * 3 + 1;
         const i2 = index ? index.getX(t * 3 + 2) : t * 3 + 2;
-        const tDom = (reliefType[i0] === 2 || reliefType[i1] === 2 || reliefType[i2] === 2) ? 2 : 1;
-        const triColor = tDom === 2 ? ucColor : gingColor;
+        const tDom =
+          reliefType[i0] === 3 || reliefType[i1] === 3 || reliefType[i2] === 3
+            ? 3
+            : reliefType[i0] === 2 || reliefType[i1] === 2 || reliefType[i2] === 2
+              ? 2
+              : 1;
+        const triColor =
+          tDom === 3 ? sculptColor : tDom === 2 ? ucColor : gingColor;
 
         const verts = [i0, i1, i2];
         for (let k = 0; k < 3; k++) {
@@ -920,21 +954,12 @@ export function generateBlockout(
     contacts,
   };
 
-  if (mergedGeometry && sculptDeltas && sculptDeltas.size > 0 && mergedPos) {
-    for (const [vIdx, delta] of sculptDeltas.entries()) {
-      if (vIdx < mergedPos.count) {
-        const dx = Math.max(0, delta[0]);
-        const dy = Math.max(0, delta[1]);
-        const dz = Math.max(0, delta[2]);
-        mergedPos.setXYZ(
-          vIdx,
-          mergedPos.getX(vIdx) + dx,
-          mergedPos.getY(vIdx) + dy,
-          mergedPos.getZ(vIdx) + dz,
-        );
-      }
-    }
-    mergedPos.needsUpdate = true;
+  // Provide Component 1 interproximal wedges separately for print-prep STL merging while keeping mergedGeometry 1:1 with base vertices
+  let interproximalGeometry: BufferGeometry | null = null;
+  if (!options?.skipMergedGeometry && wedgePos.length > 0) {
+    interproximalGeometry = new BufferGeometry();
+    interproximalGeometry.setAttribute("position", new BufferAttribute(wedgePos, 3));
+    interproximalGeometry.setAttribute("normal", new BufferAttribute(wedgeNorm, 3));
   }
 
   return {
@@ -942,6 +967,7 @@ export function generateBlockout(
     stageNumber,
     baseGeometry,
     waxGeometry,
+    interproximalGeometry,
     mergedGeometry,
     survey,
     sculptDeltas,

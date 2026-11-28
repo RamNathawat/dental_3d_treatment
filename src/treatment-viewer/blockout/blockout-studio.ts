@@ -31,6 +31,7 @@ import {
 import type { Viewport } from "../../viewer/viewport";
 import { computeAnatomicalColors } from "../../viewer/three-viewport";
 import type { CaseManifest } from "../stage-manifest";
+import { loadStageGeometries } from "../model-loader";
 import type {
   BlockoutProtocol,
   SculptMode,
@@ -39,6 +40,7 @@ import type {
 import { generateBlockout } from "./blockout-generator";
 import { WaxSculptor, type SculptStrokeEvent } from "./wax-sculptor";
 import {
+  buildCombinedPrintableGeometry,
   createBatchStlZip,
   createNestedBuildPlateGeometry,
   downloadFile,
@@ -327,6 +329,7 @@ export class BlockoutStudio {
     if (this.isMinimized) {
       this.setMinimized(false);
     }
+    this.sculptor?.setSculptTabActive(tab === "sculpt");
     this.updateActiveTabPanes();
     if (this.onTabChangeCallback) {
       this.onTabChangeCallback(tab);
@@ -524,13 +527,65 @@ export class BlockoutStudio {
       this.threeScene,
       this.threeCamera,
       domEl as HTMLElement,
-      (evt: SculptStrokeEvent) => {
-        // Record deltas for current stage
-        this.stageSculptDeltas.set(this.currentStageIndex, evt.deltas);
-        this.recomputeCurrentBlockout();
-        this.updateUndoRedoButtons();
+      {
+        onStrokeFinished: (evt: SculptStrokeEvent) => {
+          this.stageSculptDeltas.set(this.currentStageIndex, evt.deltas);
+          this.recomputeCurrentBlockout();
+          this.updateUndoRedoButtons();
+        },
+        onOrbitLockChange: (locked: boolean) => {
+          const controls = this.viewport.getControls
+            ? this.viewport.getControls()
+            : null;
+          if (controls) controls.enabled = !locked;
+          const badge = this.panelEl?.querySelector<HTMLElement>(
+            ".bo-sculpt-status-pill",
+          );
+          if (badge && this.sculptor) {
+            const eff = this.sculptor.getEffectiveMode();
+            badge.textContent = this.sculptor.isAltQuickDrawActive()
+              ? `Alt Held: ${eff === "smooth" ? "Smoothing" : eff === "remove" ? "Carving" : "Quick Drawing"} (Camera Locked)`
+              : eff === "off"
+                ? "Mode: Orbit Camera (Hold Alt + Drag to Draw)"
+                : `Active Brush: ${eff === "add" ? "+ Add Wax" : eff === "remove" ? "- Carve Wax" : "~ Smooth"} (Drag on Teeth)`;
+          }
+        },
+        onConfigSync: (cfg) => {
+          if (!this.panelEl) return;
+          this.panelEl
+            .querySelectorAll<HTMLButtonElement>(".bo-mode-btn")
+            .forEach((b) => {
+              b.classList.toggle("bo-mode-btn--active", b.dataset["mode"] === cfg.mode);
+            });
+          const rngRad = this.panelEl.querySelector<HTMLInputElement>(".bo-range-radius");
+          const lblRad = this.panelEl.querySelector(".bo-val-radius");
+          if (rngRad) rngRad.value = String(cfg.radiusMm);
+          if (lblRad) lblRad.textContent = `${cfg.radiusMm.toFixed(1)} mm`;
+          const badge = this.panelEl.querySelector<HTMLElement>(".bo-sculpt-status-pill");
+          if (badge) {
+            badge.textContent =
+              cfg.mode === "off"
+                ? "Mode: Orbit Camera (Hold Alt + Drag to Draw)"
+                : `Active Brush: ${cfg.mode === "add" ? "+ Add Wax" : cfg.mode === "remove" ? "- Carve Wax" : "~ Smooth"} (Drag on Teeth)`;
+          }
+        },
+        onShortcutUndo: () => {
+          if (this.sculptor?.undo()) {
+            this.updateUndoRedoButtons();
+            return true;
+          }
+          return false;
+        },
+        onShortcutRedo: () => {
+          if (this.sculptor?.redo()) {
+            this.updateUndoRedoButtons();
+            return true;
+          }
+          return false;
+        },
       },
     );
+    this.sculptor.setSculptTabActive(this.activeTab === "sculpt");
   }
 
   private getLayerId(): string {
@@ -826,11 +881,11 @@ export class BlockoutStudio {
       }
     }
 
-    // 3. Connect target mesh to sculptor
+    // 3. Connect target mesh to sculptor (preserve undo/redo history on same-stage recompute)
     if (this.sculptor && layerMesh) {
       this.sculptor.setTargetMesh(layerMesh, result.stageId);
       this.sculptor.setSecondaryMesh(this.waxMesh);
-      this.sculptor.setStageDeltas(result.stageId, result.sculptDeltas);
+      this.sculptor.setStageDeltas(result.stageId, result.sculptDeltas, true);
     }
 
     this.updateMetricsDisplay(result);
@@ -1234,6 +1289,93 @@ export class BlockoutStudio {
     return full;
   }
 
+  private async collectAllStageBlockoutsForExport(
+    labelPrefix: string,
+  ): Promise<StageBlockoutResult[]> {
+    const list: StageBlockoutResult[] = [];
+    const total = this.manifest.treatmentStages.length;
+    const fallbackBaseGeom = this.getBaseGeometry();
+    if (!fallbackBaseGeom) return list;
+
+    const progressEls = this.container?.querySelectorAll<HTMLElement>(
+      ".bo-propagate-progress",
+    );
+    const progressBars = this.container?.querySelectorAll<HTMLElement>(
+      ".bo-progress-bar-fill",
+    );
+    const progressLabels =
+      this.container?.querySelectorAll<HTMLElement>(".bo-progress-label");
+    progressEls?.forEach((el) => {
+      el.hidden = false;
+    });
+
+    try {
+      for (let i = 0; i < total; i++) {
+        const pct = `${((i + 1) / total) * 100}%`;
+        progressBars?.forEach((b) => (b.style.width = pct));
+        progressLabels?.forEach((l) => {
+          l.textContent = `${labelPrefix} Stage ${i + 1} of ${total}...`;
+        });
+        await new Promise((r) => setTimeout(r, 0));
+
+        const cached = this.stageResults.get(i);
+        if (cached && cached.mergedGeometry) {
+          list.push(cached);
+          continue;
+        }
+
+        const stageNum = i + 1;
+        const stageId = `stage-${String(stageNum).padStart(2, "0")}`;
+        const deltas = this.stageSculptDeltas.get(i);
+        let stageGeom: BufferGeometry | null = null;
+
+        if (i === this.currentStageIndex) {
+          stageGeom = fallbackBaseGeom;
+        } else {
+          const stageDef = this.manifest.treatmentStages[i];
+          if (stageDef) {
+            const loaded = await loadStageGeometries(stageDef);
+            if (loaded.ok) {
+              const rawArch = this.isUpper
+                ? loaded.geometries.upper
+                : loaded.geometries.lower;
+              if (rawArch) {
+                stageGeom = rawArch.clone();
+              }
+            }
+          }
+        }
+
+        const resolvedGeom = stageGeom || fallbackBaseGeom;
+        const res = generateBlockout(
+          resolvedGeom,
+          this.isUpper,
+          this.protocol,
+          stageNum,
+          stageId,
+          deltas,
+          { skipMergedGeometry: false },
+        );
+        if (i === this.currentStageIndex) {
+          this.stageResults.set(i, res);
+        }
+        list.push(res);
+      }
+
+      progressLabels?.forEach((l) => {
+        l.textContent = `✓ Ready: ${total} stages packaged cleanly!`;
+      });
+      setTimeout(() => {
+        progressEls?.forEach((el) => {
+          el.hidden = true;
+        });
+      }, 2200);
+    } finally {
+      // Progress hide handled on success timer or next export
+    }
+    return list;
+  }
+
   private async exportCurrentStageStl(): Promise<void> {
     const result = this.ensureMergedGeometry(
       this.currentStageIndex,
@@ -1241,7 +1383,7 @@ export class BlockoutStudio {
     );
     if (!result) return;
 
-    const raw = result.mergedGeometry || result.baseGeometry;
+    const raw = buildCombinedPrintableGeometry(result);
     const prep = prepareGeometryForPrint(raw, this.protocol.printPrep);
     const pad = String(this.currentStageIndex + 1).padStart(2, "0");
     const patientName = this.manifest.patientName ?? this.manifest.caseId;
@@ -1252,50 +1394,48 @@ export class BlockoutStudio {
   }
 
   private async exportAllStagesZip(): Promise<void> {
-    const list: StageBlockoutResult[] = [];
-    const total = this.manifest.treatmentStages.length;
-    const baseGeom = this.getBaseGeometry();
-    if (!baseGeom) return;
+    if (this.isBatchProcessing) return;
+    this.isBatchProcessing = true;
+    try {
+      const list = await this.collectAllStageBlockoutsForExport("Generating STL");
+      if (list.length === 0) return;
 
-    for (let i = 0; i < total; i++) {
-      const res = this.ensureMergedGeometry(i, this.stageResults.get(i));
-      if (res) list.push(res);
+      const patientName = this.manifest.patientName ?? this.manifest.caseId;
+      const zipBlob = await createBatchStlZip(
+        patientName,
+        this.isUpper ? "Upper" : "Lower",
+        list,
+        this.protocol.printPrep,
+      );
+      downloadFile(
+        zipBlob,
+        `${patientName}_${this.isUpper ? "Upper" : "Lower"}_All_Stages_Blocked_STLs.zip`,
+      );
+    } finally {
+      this.isBatchProcessing = false;
     }
-
-    const patientName = this.manifest.patientName ?? this.manifest.caseId;
-    const zipBlob = await createBatchStlZip(
-      patientName,
-      this.isUpper ? "Upper" : "Lower",
-      list,
-      this.protocol.printPrep,
-    );
-    downloadFile(
-      zipBlob,
-      `${patientName}_${this.isUpper ? "Upper" : "Lower"}_All_Stages_Blocked_STLs.zip`,
-    );
   }
 
   private async exportNestedBuildPlateStl(): Promise<void> {
-    const list: StageBlockoutResult[] = [];
-    const total = this.manifest.treatmentStages.length;
-    const baseGeom = this.getBaseGeometry();
-    if (!baseGeom) return;
+    if (this.isBatchProcessing) return;
+    this.isBatchProcessing = true;
+    try {
+      const list = await this.collectAllStageBlockoutsForExport("Nesting");
+      if (list.length === 0) return;
 
-    for (let i = 0; i < total; i++) {
-      const res = this.ensureMergedGeometry(i, this.stageResults.get(i));
-      if (res) list.push(res);
+      const nested = createNestedBuildPlateGeometry(
+        list,
+        this.protocol.printPrep,
+      );
+      if (!nested) return;
+
+      const patientName = this.manifest.patientName ?? this.manifest.caseId;
+      const filename = `${patientName}_${this.isUpper ? "Upper" : "Lower"}_Nested_BuildPlate.stl`;
+      const bytes = exportBinaryStl(nested, filename);
+      downloadFile(bytes, filename);
+    } finally {
+      this.isBatchProcessing = false;
     }
-
-    const nested = createNestedBuildPlateGeometry(
-      list,
-      this.protocol.printPrep,
-    );
-    if (!nested) return;
-
-    const patientName = this.manifest.patientName ?? this.manifest.caseId;
-    const filename = `${patientName}_${this.isUpper ? "Upper" : "Lower"}_Nested_BuildPlate.stl`;
-    const bytes = exportBinaryStl(nested, filename);
-    downloadFile(bytes, filename);
   }
 
   // ─── UI Rendering (Responsive Drawer / Bottom Sheet) ──────────────────────
@@ -1513,7 +1653,7 @@ export class BlockoutStudio {
         <div class="bo-pane bo-pane-sculpt ${this.activeTab === "sculpt" ? "" : "bo-pane--hidden"}">
           <div class="bo-section">
             <h4 class="bo-section-title">Digital Wax Carver (Hot Spatula)</h4>
-            <p class="bo-desc">Directly sculpt and smooth custom wax on crowded teeth or missing tooth spaces.</p>
+            <p class="bo-desc">Sculpt custom relief along tooth walls or hold <kbd>Alt</kbd> to draw without rotating the camera.</p>
             <div class="bo-brush-modes">
               <button type="button" class="bo-mode-btn bo-mode-btn--active" data-mode="off">Off (Rotate)</button>
               <button type="button" class="bo-mode-btn" data-mode="add">+ Add Wax</button>
@@ -1521,7 +1661,16 @@ export class BlockoutStudio {
               <button type="button" class="bo-mode-btn" data-mode="smooth">~ Smooth</button>
             </div>
 
-            <div class="bo-range-group" style="margin-top: 14px;">
+            <div class="bo-sculpt-status-pill">Mode: Orbit Camera (Hold Alt + Drag to Draw)</div>
+
+            <div class="bo-sculpt-shortcuts">
+              <span><kbd>Alt</kbd>+Drag Quick Draw</span>
+              <span><kbd>Shift</kbd>+Drag Smooth</span>
+              <span><kbd>[</kbd> / <kbd>]</kbd> Size</span>
+              <span><kbd>⌘Z</kbd> Undo</span>
+            </div>
+
+            <div class="bo-range-group" style="margin-top: 12px;">
               <div class="bo-range-meta">
                 <span>Brush Radius</span>
                 <span class="bo-range-val bo-val-radius">3.5 mm</span>
@@ -1540,6 +1689,7 @@ export class BlockoutStudio {
             <div class="bo-undo-row">
               <button type="button" class="bo-btn-undo" disabled>↶ Undo</button>
               <button type="button" class="bo-btn-redo" disabled>↷ Redo</button>
+              <button type="button" class="bo-btn-clear-sculpt" disabled>Clear</button>
             </div>
           </div>
         </div>
@@ -1851,13 +2001,19 @@ export class BlockoutStudio {
     const btnUndo =
       this.panelEl.querySelector<HTMLButtonElement>(".bo-btn-undo");
     btnUndo?.addEventListener("click", () => {
-      if (this.sculptor) this.sculptor.undo();
+      if (this.sculptor?.undo()) this.updateUndoRedoButtons();
     });
 
     const btnRedo =
       this.panelEl.querySelector<HTMLButtonElement>(".bo-btn-redo");
     btnRedo?.addEventListener("click", () => {
-      if (this.sculptor) this.sculptor.redo();
+      if (this.sculptor?.redo()) this.updateUndoRedoButtons();
+    });
+
+    const btnClearSculpt =
+      this.panelEl.querySelector<HTMLButtonElement>(".bo-btn-clear-sculpt");
+    btnClearSculpt?.addEventListener("click", () => {
+      if (this.sculptor?.clearAllDeltas()) this.updateUndoRedoButtons();
     });
 
     // Component 5: Print Prep & Scale
@@ -1873,18 +2029,36 @@ export class BlockoutStudio {
     const btnAddHole =
       this.panelEl.querySelector<HTMLButtonElement>(".bo-btn-add-hole");
     btnAddHole?.addEventListener("click", () => {
-      // Add standard bilateral suction holes at the posterior palate / base
+      // Snap bilateral suction/drain holes onto the actual arch base cut plane & posterior heels
+      const baseGeom = this.getBaseGeometry();
+      let holeXOffset = 18;
+      let holeY = this.isUpper ? 10 : -8;
+      let holeZ = -10;
+      let centerX = 0;
+      if (baseGeom) {
+        baseGeom.computeBoundingBox();
+        const box = baseGeom.boundingBox;
+        if (box) {
+          centerX = (box.min.x + box.max.x) * 0.5;
+          const spanX = box.max.x - box.min.x;
+          const spanZ = box.max.z - box.min.z;
+          holeXOffset = Math.max(10, Number((spanX * 0.25).toFixed(1)));
+          holeY = Number((this.isUpper ? box.max.y : box.min.y).toFixed(2));
+          holeZ = Number((box.min.z + spanZ * 0.28).toFixed(1));
+        }
+      }
+      const nDir: [number, number, number] = [0, this.isUpper ? -1 : 1, 0];
       this.protocol.printPrep.drainHoles = [
         {
           id: "hole-left",
-          position: [-18, 0, -10],
-          normal: [0, 1, 0],
+          position: [Number((centerX - holeXOffset).toFixed(1)), holeY, holeZ],
+          normal: nDir,
           diameterMm: 3.0,
         },
         {
           id: "hole-right",
-          position: [18, 0, -10],
-          normal: [0, 1, 0],
+          position: [Number((centerX + holeXOffset).toFixed(1)), holeY, holeZ],
+          normal: nDir,
           diameterMm: 3.0,
         },
       ];
@@ -2227,8 +2401,11 @@ export class BlockoutStudio {
       this.panelEl.querySelector<HTMLButtonElement>(".bo-btn-undo");
     const btnRedo =
       this.panelEl.querySelector<HTMLButtonElement>(".bo-btn-redo");
+    const btnClear =
+      this.panelEl.querySelector<HTMLButtonElement>(".bo-btn-clear-sculpt");
     if (btnUndo) btnUndo.disabled = !this.sculptor.canUndo();
     if (btnRedo) btnRedo.disabled = !this.sculptor.canRedo();
+    if (btnClear) btnClear.disabled = this.sculptor.getStageDeltas().size === 0;
   }
 
   private updateUI(): void {

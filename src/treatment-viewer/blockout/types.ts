@@ -180,7 +180,9 @@ export interface StageBlockoutResult {
   readonly baseGeometry: BufferGeometry;
   /** Discrete digital wax overlay geometry (rendered in wax red). */
   waxGeometry: BufferGeometry | null;
-  /** Final merged, watertight geometry ready for STL slicing. */
+  /** Conformal interproximal wax wedges (Component 1) baked into STL export. */
+  interproximalGeometry?: BufferGeometry | null;
+  /** Final merged, watertight base + surface-relief geometry ready for STL slicing. */
   mergedGeometry: BufferGeometry | null;
   /** Survey analysis metrics. */
   survey?: SurveyAnalysis;

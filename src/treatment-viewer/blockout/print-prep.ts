@@ -10,6 +10,7 @@
 
 import {
   Box3,
+  BufferAttribute,
   BufferGeometry,
   Mesh,
   MeshBasicMaterial,
@@ -46,30 +47,48 @@ export function prepareGeometryForPrint(
 }
 
 /**
- * Indents and punches cylindrical suction/drain holes through the base geometry.
+ * Indents cylindrical suction/drain wells anchored onto the arch base cut plane.
  */
 function punchDrainHoles(geometry: BufferGeometry, holes: DrainHole[]): void {
   const pos = geometry.getAttribute("position");
   if (!pos) return;
 
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox;
   const count = pos.count;
   const vP = new Vector3();
 
   for (const hole of holes) {
     const center = new Vector3(...hole.position);
-    const radius = hole.diameterMm / 2;
-    const radiusSq = radius * radius;
-    const normal = new Vector3(...hole.normal).normalize();
+    const radius = Math.max(0.5, hole.diameterMm / 2);
+    const normal = new Vector3(...hole.normal);
+    if (normal.lengthSq() < 1e-6) normal.set(0, 1, 0);
+    normal.normalize();
 
+    // Align hole Y reference onto actual arch base plane when default Y=0 was outside bounds
+    let baseY = center.y;
+    if (box) {
+      if (normal.y < 0 && box.max.y - center.y > 4.0) baseY = box.max.y;
+      else if (normal.y > 0 && center.y - box.min.y > 4.0) baseY = box.min.y;
+    }
+
+    const slabTol = 5.5;
     for (let i = 0; i < count; i++) {
       vP.set(pos.getX(i), pos.getY(i), pos.getZ(i));
-      const distSq = vP.distanceToSquared(center);
+      const dyBase = Math.abs(vP.y - baseY);
+      if (dyBase > slabTol) continue;
 
-      if (distSq <= radiusSq * 1.4) {
-        // Displace vertices inward along hole normal to create a hollow cylinder lumen
-        const depth = Math.max(0, (radius - Math.sqrt(distSq)) * 1.5);
-        const disp = normal.clone().multiplyScalar(-depth);
-        pos.setXYZ(i, vP.x + disp.x, vP.y + disp.y, vP.z + disp.z);
+      const radDist = Math.hypot(vP.x - center.x, vP.z - center.z);
+      if (radDist <= radius * 1.18) {
+        const taper = Math.max(0, 1.0 - radDist / (radius * 1.18));
+        const slabFade = 1.0 - dyBase / slabTol;
+        const depth = Math.min(3.5, taper * 2.8 * slabFade + (radDist <= radius ? 0.6 : 0));
+        pos.setXYZ(
+          i,
+          vP.x - normal.x * depth,
+          vP.y - normal.y * depth,
+          vP.z - normal.z * depth,
+        );
       }
     }
   }
@@ -96,6 +115,46 @@ export function exportBinaryStl(
 }
 
 /**
+ * Combines base+relief mergedGeometry with Component 1 interproximal wax wedges for STL slicing.
+ */
+export function buildCombinedPrintableGeometry(st: StageBlockoutResult): BufferGeometry {
+  const baseRaw = st.mergedGeometry || st.baseGeometry;
+  const wedges = st.interproximalGeometry;
+  if (!wedges) return baseRaw;
+
+  const wPos = wedges.getAttribute("position");
+  const wNorm = wedges.getAttribute("normal");
+  if (!wPos || wPos.count === 0) return baseRaw;
+
+  const nonIdxBase = baseRaw.getIndex() ? baseRaw.toNonIndexed() : baseRaw;
+  const bPos = nonIdxBase.getAttribute("position");
+  if (!bPos) return baseRaw;
+  const bNorm = nonIdxBase.getAttribute("normal");
+
+  const bFloats = bPos.count * 3;
+  const wFloats = wPos.count * 3;
+  const outPos = new Float32Array(bFloats + wFloats);
+  outPos.set(bPos.array as Float32Array, 0);
+  outPos.set(wPos.array as Float32Array, bFloats);
+
+  const outNorm = new Float32Array(bFloats + wFloats);
+  if (bNorm && bNorm.count === bPos.count) {
+    outNorm.set(bNorm.array as Float32Array, 0);
+  }
+  if (wNorm && wNorm.count === wPos.count) {
+    outNorm.set(wNorm.array as Float32Array, bFloats);
+  }
+
+  const combined = new BufferGeometry();
+  combined.setAttribute("position", new BufferAttribute(outPos, 3));
+  combined.setAttribute("normal", new BufferAttribute(outNorm, 3));
+  if (!bNorm || bNorm.count !== bPos.count || !wNorm) {
+    combined.computeVertexNormals();
+  }
+  return combined;
+}
+
+/**
  * Creates a single nested build-plate geometry containing multiple stage models
  * neatly arranged in a grid with 5mm spacing.
  */
@@ -115,7 +174,7 @@ export function createNestedBuildPlateGeometry(
   let colIndex = 0;
 
   for (const st of stageResults) {
-    const raw = st.mergedGeometry || st.baseGeometry;
+    const raw = buildCombinedPrintableGeometry(st);
     const geom = prepareGeometryForPrint(raw, printPrep);
 
     geom.computeBoundingBox();
@@ -167,7 +226,7 @@ export async function createBatchStlZip(
     const pad = String(st.stageNumber).padStart(2, "0");
     const filename = `${cleanName}_${archName}_Stage_${pad}_Blocked.stl`;
 
-    const raw = st.mergedGeometry || st.baseGeometry;
+    const raw = buildCombinedPrintableGeometry(st);
     const printGeom = prepareGeometryForPrint(raw, printPrep);
     const stlBytes = exportBinaryStl(printGeom, filename);
 
