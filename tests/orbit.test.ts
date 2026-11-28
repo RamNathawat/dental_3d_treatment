@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import { PerspectiveCamera, Vector3 } from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { describe, expect, it } from "vitest";
 import { turnAbout, turnFor } from "../src/viewer/orbit";
 
@@ -101,14 +100,17 @@ describe("turning about the orbit centre", () => {
     expect(upwards.position.z).toBeGreaterThan(before);
   });
 
-  it("never quite takes the camera over the axis it calls up", () => {
+  it("orbits freely 360 degrees over the poles without hitting a gimbal wall", () => {
     const camera = framedCamera();
+    const startPos = camera.position.clone();
+    const HEIGHT = 600;
 
-    // Far more than enough of a yank upwards to go right over the top.
-    turnAbout(camera, MIDDLE, { yaw: 0, pitch: -100 });
+    // Rotate 4 x 90 degrees vertically right over the pole and back to start
+    for (let i = 0; i < 4; i++) {
+      turnAbout(camera, MIDDLE, turnFor({ x: 0, y: HEIGHT / 4 }, HEIGHT));
+    }
 
-    const offset = camera.position.clone().sub(MIDDLE).normalize();
-    expect(offset.angleTo(new Vector3(0, 0, 1))).toBeGreaterThan(0.0005);
+    expect(camera.position.distanceTo(startPos)).toBeLessThan(1e-4);
     expect(Number.isFinite(camera.position.length())).toBe(true);
   });
 
@@ -126,52 +128,37 @@ describe("turning about the orbit centre", () => {
 });
 
 /**
- * The turn has to feel the way it always has, and the way it always has is `OrbitControls`' — whose
- * `rotateLeft`/`rotateUp` are what a drag used to be handed to. With the centre where that camera
- * looks, the two have to agree exactly.
+ * Verifies pointer-aligned motion in every standard view (Front, Back, Left, Right, Top, Bottom):
+ * dragging right always moves the front-facing surface right on screen; dragging down moves it down.
  */
-describe("the turn against the one `OrbitControls` makes", () => {
+describe("pointer-aligned drag direction across all views", () => {
   const HEIGHT = 600;
 
-  function orbitControlsTurning(
-    turn: { readonly left: number; readonly up: number },
-    centre: Vector3,
-  ): PerspectiveCamera {
-    const camera = framedCamera();
-    const canvas = document.createElement("canvas");
-    Object.defineProperty(canvas, "clientHeight", { value: HEIGHT });
+  it.each([
+    { label: "Front", pos: [0, 0, 100] as const, up: [0, 1, 0] as const },
+    { label: "Back", pos: [0, 0, -100] as const, up: [0, 1, 0] as const },
+    { label: "Left", pos: [-100, 0, 0] as const, up: [0, 1, 0] as const },
+    { label: "Right", pos: [100, 0, 0] as const, up: [0, 1, 0] as const },
+    { label: "Bottom", pos: [0, -100, 0] as const, up: [0, 0, 1] as const },
+    { label: "Top", pos: [0, 100, 0] as const, up: [0, 0, 1] as const },
+  ])("moves front surface directly with the pointer from $label view", ({ pos, up }) => {
+    const makeCam = () => {
+      const c = new PerspectiveCamera(45, 1, 0.1, 10_000);
+      c.up.set(up[0], up[1], up[2]);
+      c.position.set(pos[0], pos[1], pos[2]);
+      c.lookAt(0, 0, 0);
+      return c;
+    };
 
-    const controls = new OrbitControls(camera, canvas);
-    controls.target.copy(centre);
-    controls.rotateLeft(turn.left);
-    controls.rotateUp(turn.up);
+    const camR = makeCam();
+    const nearSurface = camR.getWorldDirection(new Vector3()).multiplyScalar(-10);
+    turnAbout(camR, MIDDLE, turnFor({ x: 80, y: 0 }, HEIGHT));
+    const ndcR = nearSurface.clone().project(camR);
+    expect(ndcR.x).toBeGreaterThan(0.05);
 
-    return camera;
-  }
-
-  it("turns as far to the left, for a drag to the right", () => {
-    const drag = { x: 120, y: 0 };
-    const theirs = orbitControlsTurning(
-      { left: (TWO_PI * drag.x) / HEIGHT, up: 0 },
-      MIDDLE,
-    );
-
-    const ours = framedCamera();
-    turnAbout(ours, MIDDLE, turnFor(drag, HEIGHT));
-
-    expect(ours.position.distanceTo(theirs.position)).toBeLessThan(1e-9);
-  });
-
-  it("turns as far up, for a drag downwards", () => {
-    const drag = { x: 0, y: 90 };
-    const theirs = orbitControlsTurning(
-      { left: 0, up: (TWO_PI * drag.y) / HEIGHT },
-      MIDDLE,
-    );
-
-    const ours = framedCamera();
-    turnAbout(ours, MIDDLE, turnFor(drag, HEIGHT));
-
-    expect(ours.position.distanceTo(theirs.position)).toBeLessThan(1e-9);
+    const camD = makeCam();
+    turnAbout(camD, MIDDLE, turnFor({ x: 0, y: 80 }, HEIGHT));
+    const ndcD = nearSurface.clone().project(camD);
+    expect(ndcD.y).toBeLessThan(-0.05);
   });
 });

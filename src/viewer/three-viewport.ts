@@ -14,6 +14,7 @@ import {
   MeshPhysicalMaterial,
   PerspectiveCamera,
   PMREMGenerator,
+  type Quaternion,
   Scene,
   type Texture,
   Timer,
@@ -729,6 +730,7 @@ class ThreeViewport implements Viewport {
   setView(view: StandardView): void {
     const pose = poseFor(view);
     this.camera.up.copy(pose.up);
+    this.syncControlsUpAxis();
 
     const box = this.contentBounds();
     if (box !== null) this.frame(box, pose.direction);
@@ -857,6 +859,7 @@ class ThreeViewport implements Viewport {
 
     const box = this.contentBounds();
     if (box !== null) this.limitZoom(box);
+    this.syncControlsUpAxis();
     this.controls.update();
   }
 
@@ -1059,6 +1062,18 @@ class ThreeViewport implements Viewport {
     if (bounds !== null) this.orbitMarker.flash(centre, extentOf(bounds));
   }
 
+  /** Keeps OrbitControls' internal up-vector quaternion synchronized with free-tumble `camera.up`. */
+  private syncControlsUpAxis(): void {
+    const ctrl = this.controls as unknown as {
+      _quat?: Quaternion;
+      _quatInverse?: Quaternion;
+    };
+    if (ctrl._quat && ctrl._quatInverse) {
+      ctrl._quat.setFromUnitVectors(this.camera.up, new Vector3(0, 1, 0));
+      ctrl._quatInverse.copy(ctrl._quat).invert();
+    }
+  }
+
   /** Turns the camera about the orbit centre, as the pointer drags. */
   private turnCamera(drag: { readonly x: number; readonly y: number }): void {
     // How far in front of the camera the point it looks at sits, which is `OrbitControls`' business
@@ -1070,6 +1085,7 @@ class ThreeViewport implements Viewport {
       this.orbitCentre,
       turnFor(drag, this.renderer.domElement.clientHeight),
     );
+    this.syncControlsUpAxis();
     this.controls.target
       .copy(this.camera.position)
       .addScaledVector(this.viewDirection(), reach);
