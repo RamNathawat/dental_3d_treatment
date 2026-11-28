@@ -1,14 +1,17 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BufferAttribute,
   BufferGeometry,
+  Group,
   Mesh,
   MeshStandardMaterial,
   PerspectiveCamera,
   Scene,
+  SphereGeometry,
 } from "three";
 import { BlockoutStudio } from "../src/treatment-viewer/blockout/blockout-studio";
+import { installOrbitDrag } from "../src/viewer/orbit-drag";
 import type { Viewport } from "../src/viewer/viewport";
 import type { CaseManifest } from "../src/treatment-viewer/stage-manifest";
 
@@ -287,6 +290,85 @@ describe("Blockout Studio UI & Interaction", () => {
     studio.setArch("lower");
     expect(changedArch).toBe("lower");
     expect(studio.getArch()).toBe("lower");
+
+    studio.unmount();
+  });
+
+  it("locks camera orbit when dragging a contact marker and unlocks on window pointerup", () => {
+    const canvas = document.createElement("canvas");
+    Object.defineProperty(canvas, "getBoundingClientRect", {
+      value: () => ({ left: 0, top: 0, width: 200, height: 200, right: 200, bottom: 200 }),
+    });
+    mockCamera.position.set(0, 0, 100);
+    mockCamera.lookAt(0, 0, 0);
+    mockCamera.updateMatrixWorld();
+
+    let cameraLocked = false;
+    const lockHistory: boolean[] = [];
+    const onTurn = vi.fn();
+    installOrbitDrag(canvas, {
+      onTurn,
+      onEnd: () => {},
+      isLocked: () => cameraLocked,
+    });
+
+    const lockableViewport: Viewport = {
+      ...mockViewport,
+      getThreeRenderer: () => ({ domElement: canvas } as any),
+      setCameraLocked: (locked: boolean) => {
+        cameraLocked = locked;
+        lockHistory.push(locked);
+      },
+      getCameraLocked: () => cameraLocked,
+    };
+
+    const container = document.createElement("div");
+    const studio = new BlockoutStudio({
+      viewport: lockableViewport,
+      manifest,
+      initialArch: "upper",
+    });
+    studio.mount(container);
+
+    // Ensure a live marker sits directly along the center ray (0, 2, 0)
+    const markersGroup =
+      (mockScene.getObjectByName("contact-markers-group") as Group | undefined) ??
+      new Group();
+    markersGroup.name = "contact-markers-group";
+    markersGroup.visible = true;
+    const markerMesh = new Mesh(new SphereGeometry(2.5, 8, 8), new MeshStandardMaterial());
+    markerMesh.position.set(0, 2, 0);
+    markerMesh.userData = { contactKey: "11-21" };
+    markersGroup.add(markerMesh);
+    if (!markersGroup.parent) mockScene.add(markersGroup);
+    markersGroup.updateMatrixWorld(true);
+    (studio as any).contactMarkersGroup = markersGroup;
+    (studio as any).showContactMarkers = true;
+
+    const ptr = (type: string, x: number, y: number) => {
+      const ev = new Event(type, { cancelable: true, bubbles: true });
+      Object.defineProperty(ev, "clientX", { value: x });
+      Object.defineProperty(ev, "clientY", { value: y });
+      Object.defineProperty(ev, "pointerId", { value: 1 });
+      Object.defineProperty(ev, "isPrimary", { value: true });
+      Object.defineProperty(ev, "button", { value: 0 });
+      Object.defineProperty(ev, "pointerType", { value: "mouse" });
+      return ev;
+    };
+
+    // Clicking marker at screen center (100, 100) should lock camera & block orbit drag
+    canvas.dispatchEvent(ptr("pointerdown", 100, 100));
+    expect(cameraLocked).toBe(true);
+
+    // Dragging marker to (120, 90) should move marker without turning camera
+    canvas.dispatchEvent(ptr("pointermove", 120, 90));
+    expect(onTurn).not.toHaveBeenCalled();
+    expect(markerMesh.position.x).toBeGreaterThan(0);
+
+    // Releasing even over window must unlock the camera
+    window.dispatchEvent(ptr("pointerup", 120, 90));
+    expect(cameraLocked).toBe(false);
+    expect(lockHistory).toEqual([true, false]);
 
     studio.unmount();
   });

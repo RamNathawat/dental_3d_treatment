@@ -23,10 +23,12 @@ import {
   MeshPhysicalMaterial,
   MeshStandardMaterial,
   PerspectiveCamera,
+  Plane,
   Raycaster,
   Scene,
   SphereGeometry,
   Vector2,
+  Vector3,
 } from "three";
 import type { Viewport } from "../../viewer/viewport";
 import { computeAnatomicalColors } from "../../viewer/three-viewport";
@@ -123,6 +125,10 @@ export class BlockoutStudio {
   private hoveredMarker: Mesh | null = null;
   private markerRaycaster = new Raycaster();
   private markerPointerPos = new Vector2();
+  private dragFallbackPlane = new Plane();
+  private dragPlaneNormal = new Vector3();
+  private dragPlaneHit = new Vector3();
+  private markerBoundTarget: HTMLElement | null = null;
   private onPointerMoveBound: ((e: PointerEvent) => void) | null = null;
   private onPointerDownBound: ((e: PointerEvent) => void) | null = null;
   private onPointerUpBound: ((e: PointerEvent) => void) | null = null;
@@ -211,20 +217,24 @@ export class BlockoutStudio {
       clearTimeout(this.sliderDebounceId);
       this.sliderDebounceId = null;
     }
-    const domEl = this.getCanvasDomElement();
+    const domEl = this.markerBoundTarget ?? this.getCanvasDomElement();
     if (domEl) {
       if (this.onPointerMoveBound)
-        domEl.removeEventListener("pointermove", this.onPointerMoveBound);
+        domEl.removeEventListener("pointermove", this.onPointerMoveBound, { capture: true });
       if (this.onPointerDownBound)
-        domEl.removeEventListener("pointerdown", this.onPointerDownBound);
-      if (this.onPointerUpBound) {
-        domEl.removeEventListener("pointerup", this.onPointerUpBound);
-        domEl.removeEventListener("pointercancel", this.onPointerUpBound);
-      }
+        domEl.removeEventListener("pointerdown", this.onPointerDownBound, { capture: true });
       if (this.onDblClickBound)
         domEl.removeEventListener("dblclick", this.onDblClickBound);
       domEl.style.cursor = "default";
     }
+    if (this.onPointerUpBound && typeof window !== "undefined") {
+      window.removeEventListener("pointerup", this.onPointerUpBound, { capture: true });
+      window.removeEventListener("pointercancel", this.onPointerUpBound, { capture: true });
+    }
+    this.markerBoundTarget = null;
+    this.activeDraggedMarker = null;
+    this.hoveredMarker = null;
+    this.viewport.setCameraLocked?.(false);
     const controls = this.viewport.getControls
       ? this.viewport.getControls()
       : null;
@@ -952,7 +962,19 @@ export class BlockoutStudio {
 
   private initMarkerInteraction(): void {
     const domEl = this.getCanvasDomElement();
-    if (!domEl) return;
+    if (!domEl || typeof domEl.addEventListener !== "function") return;
+
+    if (this.markerBoundTarget && this.onPointerMoveBound && this.onPointerDownBound) {
+      this.markerBoundTarget.removeEventListener("pointermove", this.onPointerMoveBound, { capture: true });
+      this.markerBoundTarget.removeEventListener("pointerdown", this.onPointerDownBound, { capture: true });
+      if (this.onDblClickBound) {
+        this.markerBoundTarget.removeEventListener("dblclick", this.onDblClickBound);
+      }
+    }
+    if (this.onPointerUpBound && typeof window !== "undefined") {
+      window.removeEventListener("pointerup", this.onPointerUpBound, { capture: true });
+      window.removeEventListener("pointercancel", this.onPointerUpBound, { capture: true });
+    }
 
     this.onPointerMoveBound = (e: PointerEvent) =>
       this.handleMarkerPointerMove(e);
@@ -961,11 +983,16 @@ export class BlockoutStudio {
     this.onPointerUpBound = (e: PointerEvent) => this.handleMarkerPointerUp(e);
     this.onDblClickBound = (e: MouseEvent) => this.handleMarkerDblClick(e);
 
-    domEl.addEventListener("pointermove", this.onPointerMoveBound);
-    domEl.addEventListener("pointerdown", this.onPointerDownBound);
-    domEl.addEventListener("pointerup", this.onPointerUpBound);
-    domEl.addEventListener("pointercancel", this.onPointerUpBound);
+    // Capture phase runs before `installOrbitDrag` and `installLongPress` so dragging a marker
+    // freezes camera rotation & holds immediately instead of tumbling the model.
+    domEl.addEventListener("pointermove", this.onPointerMoveBound, { capture: true, passive: false });
+    domEl.addEventListener("pointerdown", this.onPointerDownBound, { capture: true, passive: false });
+    if (typeof window !== "undefined") {
+      window.addEventListener("pointerup", this.onPointerUpBound, { capture: true });
+      window.addEventListener("pointercancel", this.onPointerUpBound, { capture: true });
+    }
     domEl.addEventListener("dblclick", this.onDblClickBound);
+    this.markerBoundTarget = domEl;
   }
 
   private updatePointerPos(
@@ -983,7 +1010,7 @@ export class BlockoutStudio {
 
   private handleMarkerPointerMove(e: PointerEvent): void {
     if (this.activeTab !== "blockout" || !this.showWaxOverlay) return;
-    const domEl = this.getCanvasDomElement();
+    const domEl = this.markerBoundTarget ?? this.getCanvasDomElement();
     if (!domEl) return;
 
     this.updatePointerPos(e, domEl);
@@ -995,24 +1022,39 @@ export class BlockoutStudio {
     this.markerRaycaster.setFromCamera(this.markerPointerPos, camera);
 
     if (this.activeDraggedMarker) {
-      // While dragging: raycast against tooth enamel mesh and conform sphere to the surface
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+
+      // While dragging: snap sphere onto enamel surface, or glide across open diastema gaps via camera plane
       const layerMesh = this.viewport.getLayerMesh
         ? this.viewport.getLayerMesh(this.getLayerId())
         : null;
-      if (!layerMesh) return;
-
-      const hits = this.markerRaycaster.intersectObject(layerMesh, false);
-      if (hits.length > 0 && hits[0]) {
-        const hitPoint = hits[0].point.clone();
-        if (this.activeDraggedMarker.parent) {
-          this.activeDraggedMarker.parent.worldToLocal(hitPoint);
+      let worldPoint: Vector3 | null = null;
+      if (layerMesh) {
+        const hits = this.markerRaycaster.intersectObject(layerMesh, false);
+        if (hits.length > 0 && hits[0]) {
+          worldPoint = hits[0].point.clone();
         }
-        this.activeDraggedMarker.position.copy(hitPoint);
+      }
+      if (!worldPoint) {
+        const worldMarkerPos = this.activeDraggedMarker.getWorldPosition(new Vector3());
+        camera.getWorldDirection(this.dragPlaneNormal).negate();
+        this.dragFallbackPlane.setFromNormalAndCoplanarPoint(this.dragPlaneNormal, worldMarkerPos);
+        if (this.markerRaycaster.ray.intersectPlane(this.dragFallbackPlane, this.dragPlaneHit)) {
+          worldPoint = this.dragPlaneHit.clone();
+        }
+      }
+      if (worldPoint) {
+        if (this.activeDraggedMarker.parent) {
+          this.activeDraggedMarker.parent.worldToLocal(worldPoint);
+        }
+        this.activeDraggedMarker.position.copy(worldPoint);
         domEl.style.cursor = "grabbing";
 
         const key = this.activeDraggedMarker.userData?.contactKey;
         if (key) {
-          this.previewMarkerDragInTable(key, hitPoint.y);
+          this.previewMarkerDragInTable(key, worldPoint.y);
         }
       }
     } else {
@@ -1065,7 +1107,8 @@ export class BlockoutStudio {
 
   private handleMarkerPointerDown(e: PointerEvent): void {
     if (this.activeTab !== "blockout" || !this.showWaxOverlay) return;
-    const domEl = this.getCanvasDomElement();
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    const domEl = this.markerBoundTarget ?? this.getCanvasDomElement();
     if (!domEl) return;
 
     this.updatePointerPos(e, domEl);
@@ -1086,17 +1129,11 @@ export class BlockoutStudio {
     );
 
     if (hits.length > 0 && hits[0]) {
-      const marker = hits[0].object as Mesh;
-      this.activeDraggedMarker = marker;
-      const key = marker.userData?.contactKey;
-      if (key) {
-        this.selectContact(key);
-      }
-      (marker.material as MeshStandardMaterial).color.set(0xff9900);
-      (marker.material as MeshStandardMaterial).emissive.set(0xff5500);
-      domEl.style.cursor = "grabbing";
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
 
-      // Disable orbit camera controls during dragging
+      this.viewport.setCameraLocked?.(true);
       const controls = this.viewport.getControls
         ? this.viewport.getControls()
         : null;
@@ -1104,18 +1141,31 @@ export class BlockoutStudio {
         controls.enabled = false;
       }
 
+      const hitMarker = hits[0].object as Mesh;
+      const key = hitMarker.userData?.contactKey as string | undefined;
+      if (key) {
+        this.selectContact(key);
+      }
+      // `selectContact` rebuilds `contactMarkersGroup`, so re-bind to the live marker mesh
+      const liveMarker = key
+        ? ((this.contactMarkersGroup?.children.find(
+            (c) => c.userData?.contactKey === key,
+          ) as Mesh | undefined) ?? hitMarker)
+        : hitMarker;
+      this.activeDraggedMarker = liveMarker;
+      (liveMarker.material as MeshStandardMaterial).color.set(0xff9900);
+      (liveMarker.material as MeshStandardMaterial).emissive.set(0xff5500);
+      domEl.style.cursor = "grabbing";
+
       try {
         domEl.setPointerCapture(e.pointerId);
       } catch {}
-
-      e.preventDefault();
-      e.stopPropagation();
     }
   }
 
   private handleMarkerPointerUp(e: PointerEvent): void {
     if (!this.activeDraggedMarker) return;
-    const domEl = this.getCanvasDomElement();
+    const domEl = this.markerBoundTarget ?? this.getCanvasDomElement();
 
     try {
       if (domEl) {
@@ -1123,7 +1173,7 @@ export class BlockoutStudio {
       }
     } catch {}
 
-    // Re-enable orbit camera controls
+    this.viewport.setCameraLocked?.(false);
     const controls = this.viewport.getControls
       ? this.viewport.getControls()
       : null;

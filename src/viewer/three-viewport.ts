@@ -154,6 +154,8 @@ class ThreeViewport implements Viewport {
    * to do that is to leave the camera — and so what it looks at — exactly where it was.
    */
   private readonly orbitCentre = new Vector3();
+  private readonly lastControlsTarget = new Vector3();
+  private readonly lastControlsCamPos = new Vector3();
   private readonly canvas: HTMLCanvasElement;
   private isDisposed = false;
 
@@ -296,7 +298,13 @@ class ThreeViewport implements Viewport {
       onLongPress: (point) => {
         this.setOrbitCentreAt(point);
       },
+      isLocked: () => this.isCameraLocked,
     });
+    canvas.addEventListener("wheel", this.handleWheelZoom, {
+      capture: true,
+      passive: true,
+    });
+    this.syncTrackedControlsState();
 
     // The timer is deliberately not connected to the Page Visibility API: nothing here is
     // animated against wall-clock time, and that API reports a zero delta whenever the tab
@@ -861,12 +869,16 @@ class ThreeViewport implements Viewport {
     if (box !== null) this.limitZoom(box);
     this.syncControlsUpAxis();
     this.controls.update();
+    this.syncTrackedControlsState();
   }
 
   dispose(): void {
     if (this.isDisposed) return;
     this.isDisposed = true;
 
+    this.canvas.removeEventListener("wheel", this.handleWheelZoom, {
+      capture: true,
+    });
     this.canvas.removeEventListener("webglcontextlost", this.handleContextLost);
     this.canvas.removeEventListener("webglcontextrestored", this.handleContextRestored);
 
@@ -1062,6 +1074,50 @@ class ThreeViewport implements Viewport {
     if (bounds !== null) this.orbitMarker.flash(centre, extentOf(bounds));
   }
 
+  /** Snapshots camera & controls target so pure pan translations can shift `orbitCentre`. */
+  private syncTrackedControlsState(): void {
+    this.lastControlsTarget.copy(this.controls.target);
+    this.lastControlsCamPos.copy(this.camera.position);
+  }
+
+  /** Anchors `orbitCentre` onto the zoomed tooth surface under the pointer when zooming in. */
+  private readonly handleWheelZoom = (event: WheelEvent): void => {
+    if (this.isCameraLocked) return;
+    if (event.deltaY < 0) {
+      const { left, top, width, height } =
+        this.renderer.domElement.getBoundingClientRect();
+      const picked = pickedPoint({
+        camera: this.camera,
+        surfaces: [...this.layers.values()].map((layer) => layer.mesh),
+        point: { x: event.clientX - left, y: event.clientY - top },
+        size: { width, height },
+      });
+      if (picked !== null) {
+        this.orbitCentre.copy(picked);
+        const viewDir = this.viewDirection();
+        const depth = Math.max(
+          this.controls.minDistance,
+          picked.clone().sub(this.camera.position).dot(viewDir),
+        );
+        this.controls.target
+          .copy(this.camera.position)
+          .addScaledVector(viewDir, depth);
+        this.syncTrackedControlsState();
+      }
+    } else if (event.deltaY > 0) {
+      const box = this.contentBounds();
+      if (box !== null) {
+        const fitDist = extentOf(box) * 1.4;
+        if (
+          this.camera.position.distanceTo(this.controls.target) >
+          fitDist * 0.75
+        ) {
+          this.orbitCentre.lerp(box.getCenter(new Vector3()), 0.35);
+        }
+      }
+    }
+  };
+
   /** Keeps OrbitControls' internal up-vector quaternion synchronized with free-tumble `camera.up`. */
   private syncControlsUpAxis(): void {
     const ctrl = this.controls as unknown as {
@@ -1090,6 +1146,7 @@ class ThreeViewport implements Viewport {
       .copy(this.camera.position)
       .addScaledVector(this.viewDirection(), reach);
     this.controls.update();
+    this.syncTrackedControlsState();
   }
 
   /** The way the camera looks, which is the line the point it looks at has to sit on. */
@@ -1136,6 +1193,7 @@ class ThreeViewport implements Viewport {
     // session remembers like any other.
     this.orbitCentre.copy(framing.target);
     this.controls.update();
+    this.syncTrackedControlsState();
     this.handleCameraSettled();
   }
 
@@ -1207,6 +1265,17 @@ class ThreeViewport implements Viewport {
     this.timer.update(timestamp);
     const elapsed = this.timer.getDelta();
     this.controls.update();
+    const camDelta = this.camera.position.clone().sub(this.lastControlsCamPos);
+    const targetDelta = this.controls.target
+      .clone()
+      .sub(this.lastControlsTarget);
+    if (
+      targetDelta.lengthSq() > 1e-10 &&
+      camDelta.distanceToSquared(targetDelta) < 1e-4
+    ) {
+      this.orbitCentre.add(targetDelta);
+    }
+    this.syncTrackedControlsState();
     this.renderer.render(this.scene, this.camera);
     this.reportStats(elapsed);
   };

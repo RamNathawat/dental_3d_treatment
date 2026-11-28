@@ -144,4 +144,20 @@ describe("a pointer held on the model", () => {
 
     expect(onLongPress).not.toHaveBeenCalled();
   });
+
+  it("ignores holds while camera interaction is locked", () => {
+    const canvas = document.createElement("canvas");
+    const onLongPress = vi.fn();
+    let locked = true;
+    installLongPress(canvas, { onLongPress, isLocked: () => locked });
+
+    canvas.dispatchEvent(pressed("pointerdown", ON_THE_MODEL));
+    vi.advanceTimersByTime(HOLD_MS);
+    expect(onLongPress).not.toHaveBeenCalled();
+
+    locked = false;
+    canvas.dispatchEvent(pressed("pointerdown", ON_THE_MODEL));
+    vi.advanceTimersByTime(HOLD_MS);
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+  });
 });

@@ -14,6 +14,8 @@ const WANDER_TOLERANCE_PX = 12;
 export interface LongPressHandlers {
   /** A pointer held on the canvas, at the place it was put down. */
   onLongPress(point: ScreenPoint): void;
+  /** When true, holds are ignored (e.g. while dragging a marker or sculpting wax). */
+  isLocked?(): boolean;
 }
 
 /**
@@ -44,7 +46,13 @@ export function installLongPress(
   canvas.addEventListener("pointerdown", (event) => {
     // One pointer and the primary button: a second finger means the page is being scrolled, and the
     // other buttons are how a mouse pans and how its menu is opened.
-    if (holding !== null || !event.isPrimary || event.button !== 0) {
+    if (
+      event.defaultPrevented ||
+      handlers.isLocked?.() ||
+      holding !== null ||
+      !event.isPrimary ||
+      event.button !== 0
+    ) {
       forget();
       return;
     }
@@ -53,6 +61,10 @@ export function installLongPress(
     holding = { pointerId: event.pointerId, point };
     timer = setTimeout(() => {
       timer = null;
+      if (handlers.isLocked?.()) {
+        holding = null;
+        return;
+      }
       handlers.onLongPress(point);
     }, HOLD_MS);
   });
